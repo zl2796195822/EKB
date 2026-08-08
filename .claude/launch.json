@@ -5,7 +5,9 @@
       "name": "EKB API (FastAPI)",
       "runtimeExecutable": "/Users/alin/EKB/.venv/bin/uvicorn",
       "runtimeArgs": ["ekb_api.main:app", "--host", "127.0.0.1", "--port", "8000", "--reload"],
-      "port": 8000
+      "port": 8000,
+      "autoPort": false,
+      "cwd": "/Users/alin/EKB/apps/api"
     },
     {
       "name": "EKB Web (Vite)",
