@@ -16,11 +16,25 @@ Base = declarative_base()
 
 
 def _build_engine():
+    """构建数据库引擎。
+
+    SQLite：单文件模式，check_same_thread=False 允许跨线程复用连接。
+    PostgreSQL：连接池配置（pool_size=10, max_overflow=20），启用 pool_pre_ping 保活。
+    """
     connect_args: dict = {}
+    kwargs: dict = {"future": True, "pool_pre_ping": True}
+
     if DATABASE_URL.startswith("sqlite"):
-        # SQLite 单文件模式下允许跨线程复用连接（store 方法在请求线程内打开短会话）。
         connect_args = {"check_same_thread": False}
-    return create_engine(DATABASE_URL, connect_args=connect_args, future=True, pool_pre_ping=True)
+    else:
+        # PostgreSQL 连接池：10 个常驻连接 + 20 个溢出，适合单副本中等负载。
+        # 生产多副本时通过 PgBouncer 或外部连接池控制总连接数。
+        kwargs["pool_size"] = int(os.getenv("EKB_DB_POOL_SIZE", "10"))
+        kwargs["max_overflow"] = int(os.getenv("EKB_DB_MAX_OVERFLOW", "20"))
+        kwargs["pool_timeout"] = int(os.getenv("EKB_DB_POOL_TIMEOUT", "30"))
+        kwargs["pool_recycle"] = int(os.getenv("EKB_DB_POOL_RECYCLE", "1800"))
+
+    return create_engine(DATABASE_URL, connect_args=connect_args, **kwargs)
 
 
 def get_engine():
@@ -43,11 +57,35 @@ def init_db() -> None:
     from ekb_api import models  # noqa: F401
 
     engine = get_engine()
+
+    # PostgreSQL：初始化 pgvector 扩展（幂等；SQLite 跳过）。
+    # pgvector 为 Chunk.embedding 列提供原生 HNSW/IVFFlat 索引支持，
+    # 当前实现仍在 Python 层做余弦相似度，pgvector 为后续优化预留。
+    if not DATABASE_URL.startswith("sqlite"):
+        _init_pgvector(engine)
+
     Base.metadata.create_all(engine)
     _migrate_user_columns(engine)
     _migrate_tenant_columns(engine)
     _migrate_feedback_columns(engine)
     _seed_if_empty()
+
+
+def _init_pgvector(engine) -> None:
+    """在 PostgreSQL 中创建 pgvector 扩展（幂等，需要 superuser 或 rds_superuser）。
+
+    pgvector 扩展允许使用 VECTOR 类型和 ivfflat/hnsw 索引。
+    当前 Chunk.embedding 使用 JSON/JSONB 列，pgvector 为将来切换原生向量列预留。
+    若数据库账号无权限创建扩展，此步骤会静默跳过（不阻断启动）。
+    """
+    from sqlalchemy import text  # noqa: PLC0415
+
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+    except Exception:  # noqa: BLE001
+        # 无权限或扩展未安装时静默跳过；不影响当前 JSON 向量实现。
+        pass
 
 
 def _migrate_user_columns(engine) -> None:

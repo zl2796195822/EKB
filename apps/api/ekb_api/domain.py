@@ -100,6 +100,33 @@ class IngestStatus(str, Enum):
     CANCELLED = "CANCELLED"
 
 
+class TurnStatus(str, Enum):
+    """SSE v2 Turn 运行状态。"""
+
+    RUNNING = "running"
+    COMPLETED = "completed"
+    CANCELLED = "cancelled"
+    TIMEOUT = "timeout"
+    ERROR = "error"
+
+
+class FinishReason(str, Enum):
+    """SSE v2 回合完成原因。"""
+
+    STOP = "stop"          # 正常生成完成
+    REFUSAL = "refusal"    # 拒答（无证据/安全策略）
+    CANCELLED = "cancelled"  # 客户端主动取消
+    TIMEOUT = "timeout"    # 超时中止
+    ERROR = "error"        # 内部错误
+
+
+class MessageVisibility(str, Enum):
+    """消息可见性：被取消/超时/错误替代的占位消息置 hidden，前端不渲染。"""
+
+    VISIBLE = "visible"
+    HIDDEN = "hidden"
+
+
 @dataclass(frozen=True)
 class AuthContext:
     actor_id: str
@@ -201,6 +228,28 @@ class Message:
     role: str
     content: str
     created_at: str
+    turn_id: str | None = None
+    visibility_state: str = "visible"
+
+
+@dataclass
+class QaTurn:
+    """SSE v2 Turn Registry 领域模型。"""
+
+    turn_id: str
+    request_id: str
+    tenant_id: str
+    actor_id: str
+    conversation_id: str | None
+    assistant_message_id: str | None
+    status: str
+    stream_version: int = 2
+    last_seq: int = 0
+    first_visible_at: str | None = None
+    cancel_requested_at: str | None = None
+    finish_reason: str | None = None
+    created_at: str = field(default_factory=utc_now)
+    completed_at: str | None = None
 
 
 @dataclass

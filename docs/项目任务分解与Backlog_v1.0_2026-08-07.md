@@ -48,6 +48,14 @@
 | M1-07 | 实现审计和基础日志脱敏 | 后端 + 安全 | M1-02~06 | `security-best-practices` | 审计抽样通过 |
 | M1-08 | 完成问答页、知识库页和文档页 | 前端 | M1-06 | `react-best-practices`, `composition-patterns`, `web-design-guidelines`, `playwright` | UI 状态和引用渲染通过 |
 | M1-09 | 建立 M1 评估报告和缺陷基线 | QA | M1-06~08 | `playwright`, `writing-guidelines` | 质量门禁报告完成 ✅（2026-08-07：100+30 题，准确率 95.0%，拒答率 100%） |
+| QA-STREAM-01 | 冻结 Conversation Stream v2 envelope、事件枚举、状态机和兼容 header | 技术负责人 + 后端/前端/QA | M0-05 | `coding-standards`, `karpathy-guidelines` | API 契约评审记录、事件样例和 OQ 关闭 |
+| QA-STREAM-02 | 增加 `qa_turns`、消息 turn 关联、可见性状态和原子序号 | 后端 + DBA | QA-STREAM-01 | `backend-patterns`, `security-review`, `postgres-mcp` | migration、schema、回滚脚本和集成测试 |
+| QA-STREAM-03 | 实现 v2 阶段事件、心跳、事件 envelope、分段空闲超时 | 后端 | QA-STREAM-02 | `backend-patterns` | v1/v2 契约测试、指标和故障注入 |
+| QA-STREAM-04 | 实现前端 SSE parser、turn/seq 隔离和批量增量渲染 | 前端 | QA-STREAM-01、QA-STREAM-03 | `frontend-patterns`, `react-expert`, `playwright` | LF/CRLF、多 data、长回答性能和 E2E |
+| QA-STREAM-05 | 将引用改为直接消费 SSE payload，移除主链路预搜索依赖 | 前端 + 后端 | QA-STREAM-03、QA-STREAM-04 | `frontend-patterns`, `security-review` | 引用一致性和权限专项测试 |
+| QA-STREAM-06 | 首 token 前撤回/恢复草稿，输出后保留部分回答，旧流不污染新轮次 | 前端 | QA-STREAM-04 | `react-expert`, `playwright` | 取消/重发/切换会话 E2E |
+| QA-STREAM-07 | 实现显式 `POST /qa/turns/{turn_id}/cancel`、幂等和审计 | 后端 + 安全 | QA-STREAM-02、QA-STREAM-03 | `backend-patterns`, `security-review` | 越权、竞态、断连和审计测试 |
+| QA-STREAM-08 | Stream v2 按租户灰度、看板、告警、feature flag 和回滚 | 运维 + QA + 前后端 | QA-STREAM-03~06、QA-STREAM-07 | `playwright`, `security-review` | 5%/25%/100% 灰度报告和 runbook |
 
 ## 4. M2 任务
 
@@ -68,6 +76,7 @@
 | M3-03 | LLM 超时/降级/熔断 | 后端 | M2-04 | `security-best-practices`, `security-threat-model` | 降级事件可审计 |
 | M3-04 | 只读增量同步 | 后端 + AI/RAG | OQ-008 | `security-best-practices`, `security-threat-model` | 游标、幂等、重试可用 |
 | M3-05 | 版本对比和知识治理 | 后端 | M3-04 | `security-best-practices`, `writing-guidelines` | 历史版本可查 |
+| QA-STREAM-09 | Stream v2 断线恢复、Last-Event-ID、事件 TTL 和跨实例回放 | 后端 + 运维 | QA-STREAM-08、事件存储决策 | `backend-patterns`, `security-review`, `postgres-mcp` | 重连恢复、跨租户隔离、容量和 TTL 演练 |
 
 ## 6. M4/M5 任务
 

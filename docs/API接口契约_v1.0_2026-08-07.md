@@ -16,6 +16,7 @@
 | 认证 | `Authorization: Bearer <access_token>` |
 | 租户 | 服务端从 Token 与成员关系解析；客户端可传 `X-EKB-Tenant-Id` 表示当前工作租户，但不能作为唯一信任来源 |
 | Trace | 所有响应包含 `X-Request-Id`; 请求可传 `X-Request-Id`，服务端可覆盖不合法值 |
+| 问答流版本 | `X-EKB-Stream-Version: 2` 协商 Conversation Stream v2；未声明时返回 v1 事件，兼容窗口至少一个发布周期 |
 | 幂等 | 写操作可传 `Idempotency-Key`; 同一主体、租户、路径和 key 在有效窗口内只执行一次 |
 | 时间 | ISO 8601 UTC，例如 `2026-08-07T08:00:00Z` |
 | 分页 | `page_size` 默认 20，最大 100；列表返回 `next_cursor` |
@@ -286,6 +287,51 @@ data: {"finish_reason":"cancelled"}
 | `error` | `code,message,request_id` | 可恢复错误 |
 | `done` | `finish_reason` | `stop|refusal|timeout|cancelled|error` |
 
+### 7.3 Conversation Stream v2（灰度能力）
+
+当请求包含 `X-EKB-Stream-Version: 2` 时，每个事件的 `data` 都使用统一 envelope：
+
+```json
+{
+  "turn_id": "turn_01J...",
+  "request_id": "req_01HX...",
+  "seq": 4,
+  "timestamp": "2026-08-08T08:00:00.120Z",
+  "payload": {}
+}
+```
+
+`turn_id` 由服务端生成并绑定租户、主体、会话和 assistant message；客户端不得自定义。`seq` 从 1 开始，在同一 `turn_id` 内严格递增；客户端只接受当前轮次且序号大于 `last_seq` 的事件，重复或倒序事件必须丢弃并记录协议指标。v2 事件为：
+
+| 事件 | `payload` 关键字段 | 说明 |
+|---|---|---|
+| `request` | `message_id,conversation_id` | 建立本轮身份 |
+| `queued` | `position?` | 无队列时可省略 |
+| `retrieval_started` | `authorized_kb_count` | 开始授权检索 |
+| `retrieval_completed` | `chunk_count,duration_ms` | 检索完成，不泄露越权信息 |
+| `generation_started` | `model_alias,prompt_version` | 开始生成，不返回 secret |
+| `delta` | `kind:"text",text` | 文本增量，不返回 thinking/reasoning |
+| `citation` | `citation_id,doc_id,chunk_id,title,section_path,version,updated_at` | 系统侧授权引用，客户端直接使用 |
+| `heartbeat` | `stage` | 最长 10 秒一次，仅保活，不代表上游有 token |
+| `error` | `code,message,retryable` | 安全的用户可见错误 |
+| `done` | `message_id,finish_reason,confidence` | 终态，只出现一次 |
+
+v2 的完整状态、超时、批处理、取消和回滚要求见[知识库 AI 对话流式交互升级设计](./知识库AI对话流式交互升级设计_v1.0_2026-08-08.md)。M1 不承诺 `Last-Event-ID` 回放；`id: <turn_id>:<seq>` 仅为未来回放预留。
+
+### 7.4 显式取消
+
+`POST /api/v1/qa/turns/{turn_id}/cancel`
+
+Headers: `Authorization: Bearer <access_token>`
+
+成功响应：
+
+```json
+{"turn_id":"turn_01J...","status":"cancelling"}
+```
+
+该接口按 `tenant_id + actor_id + turn_id` 鉴权，重复调用幂等；目标不存在或不在授权范围内统一返回 `404 NOT_FOUND`。服务端在检索、生成和落库检查点读取取消标记，连接仍存活时发送一次 `done` 且 `finish_reason=cancelled`；取消不删除审计记录。浏览器断开仍是兜底取消方式。
+
 ## 8. 会话与反馈
 
 | 方法 | 路径 | 说明 |
@@ -325,6 +371,8 @@ data: {"finish_reason":"cancelled"}
 - [ ] 每个写接口都有权限、幂等、审计和错误码。
 - [ ] 每个列表接口都使用授权范围和游标分页。
 - [ ] 问答 SSE 覆盖成功、拒答、取消、超时和上游错误。
+- [ ] Stream v2 的 envelope、`turn_id`、`seq`、心跳、空闲超时和取消 API 有契约测试；每轮最多一个终态 `done`。
+- [ ] v1/v2 版本协商、灰度开关和回滚路径已验证；M3 回放未在未批准前实现。
 - [ ] 错误响应不泄露跨租户资源是否存在。
 - [ ] OpenAPI 生成物与本文契约一致；M1 后变更必须走版本化。
 

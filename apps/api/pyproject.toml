@@ -13,6 +13,10 @@ dependencies = [
   "openpyxl>=3.1,<4",
   "python-pptx>=0.6,<2",
   "tiktoken>=0.7,<1",
+  "structlog>=24.0,<25",
+  "psycopg2-binary>=2.9,<3",
+  "opentelemetry-sdk>=1.25,<2",
+  "opentelemetry-instrumentation-fastapi>=0.46b0,<1",
 ]
 
 [project.optional-dependencies]
@@ -22,6 +26,9 @@ dev = [
   "ruff>=0.8,<1",
   "pyyaml>=6.0,<7",
 ]
+
+[tool.setuptools.packages.find]
+include = ["ekb_api*"]
 
 [build-system]
 requires = ["setuptools>=68"]

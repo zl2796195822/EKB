@@ -144,7 +144,39 @@ class Message(Base):
     conversation_id = Column(String(36), nullable=False, index=True)
     role = Column(String(32), nullable=False)
     content = Column(Text, nullable=False)
+    # SSE v2: 关联的 turn_id，用于追踪流式回合与显式取消
+    turn_id = Column(String(64), nullable=True, index=True)
+    # SSE v2: 消息可见性状态 visible / hidden（被取消/超时/错误替代的占位消息置 hidden）
+    visibility_state = Column(String(32), nullable=False, default="visible", index=True)
     created_at = Column(String(32), nullable=False)
+
+
+class QaTurn(Base):
+    """SSE v2 Turn Registry：QA 回合生命周期记录，支持显式取消与审计。
+
+    Turn 是一次流式问答的最小可取消单元；同一 Conversation 内有多个 Turn。
+    """
+
+    __tablename__ = "qa_turns"
+
+    turn_id = Column(String(64), primary_key=True)
+    request_id = Column(String(64), nullable=False, index=True)
+    tenant_id = Column(String(36), nullable=False, index=True)
+    actor_id = Column(String(36), nullable=False, index=True)
+    conversation_id = Column(String(36), index=True)
+    assistant_message_id = Column(String(36), index=True)
+    stream_version = Column(Integer, nullable=False, default=2)
+    # running / completed / cancelled / timeout / error
+    status = Column(String(32), nullable=False, default="running", index=True)
+    last_seq = Column(Integer, nullable=False, default=0)
+    # 首次可见 token 发出时间，用于 TTFB 指标
+    first_visible_at = Column(String(32), nullable=True)
+    # 用户/客户端请求取消时间
+    cancel_requested_at = Column(String(32), nullable=True)
+    # stop / refusal / cancelled / timeout / error
+    finish_reason = Column(String(32), nullable=True)
+    created_at = Column(String(32), nullable=False)
+    completed_at = Column(String(32), nullable=True)
 
 
 class Feedback(Base):

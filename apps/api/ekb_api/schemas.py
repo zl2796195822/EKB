@@ -191,6 +191,8 @@ class SearchResponse(BaseModel):
 class AskOptions(BaseModel):
     stream: bool = True
     max_citations: int = Field(default=5, ge=1, le=10)
+    # SSE v2: 1=legacy SSE, 2=Conversation Stream v2（envelope+seq+turn_id）
+    stream_version: int = Field(default=2, ge=1, le=2)
 
 
 class AskRequest(BaseModel):
@@ -342,6 +344,16 @@ class SyncRunResponse(BaseModel):
 class TenantQuotaUpdate(BaseModel):
     quota_daily_qa: Optional[int] = None
     quota_storage_docs: Optional[int] = None
+
+
+# ---- SSE v2 Turn 显式取消 ----
+
+
+class TurnCancelResponse(BaseModel):
+    turn_id: str
+    status: str               # cancelled / already_completed / not_found
+    accepted: bool
+    message: str | None = None
 
 
 JsonDict = dict[str, Any]

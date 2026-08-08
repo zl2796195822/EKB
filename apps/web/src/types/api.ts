@@ -101,3 +101,29 @@ export interface FeedbackPayload {
   reason: string
   comment?: string
 }
+
+export interface DocumentVersionRecord {
+  id: string
+  doc_id: string
+  version: number
+  checksum: string
+  chunk_count: number
+  content_snapshot: string
+  created_at: string
+}
+
+export interface DiffChunk {
+  content?: string
+  before?: string
+  after?: string
+  section_path: string[]
+}
+
+export interface DocumentDiff {
+  doc_id: string
+  from_version: number
+  to_version: number
+  added: DiffChunk[]
+  removed: DiffChunk[]
+  changed: DiffChunk[]
+}

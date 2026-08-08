@@ -206,6 +206,54 @@ QA_DEGRADATIONS = registry.counter(
     "QA degradation events by reason (llm_unavailable, llm_failed, timeout)",
     ("reason",),
 )
+# --- SSE v2 Conversation Stream 可观测性指标 ---
+# 协议层错误：seq 乱序/turn_id 不匹配/JSON 解码失败/envelope 缺失字段
+QA_PROTOCOL_ERRORS = registry.counter(
+    "qa_protocol_errors_total",
+    "QA SSE protocol errors by type (seq_mismatch, stale_turn, bad_envelope, json_decode)",
+    ("type",),
+)
+# 显式取消计数：区分成功命中 running / 已完成 / 不存在
+QA_CANCEL_REQUESTS = registry.counter(
+    "qa_cancel_requests_total",
+    "QA explicit cancel requests by result (cancelled, already_completed, not_found)",
+    ("result",),
+)
+# QA TTFB（首 token 延迟）：区分 v1/v2 协议
+QA_TTFB_DURATION = registry.histogram(
+    "qa_ttfb_duration_seconds",
+    "QA time-to-first-token (retrieval_started -> first content delta)",
+    ("stream_version",),
+)
+# QA 全回合延迟（request -> done 事件）
+QA_TURN_DURATION = registry.histogram(
+    "qa_turn_duration_seconds",
+    "QA full turn duration (request event -> done event)",
+    ("stream_version", "finish_reason"),
+)
+# QA 端到端 seq/事件丢失告警：done.last_seq vs 实际收到的最大 seq
+QA_SEQ_GAPS = registry.counter(
+    "qa_seq_gaps_total",
+    "QA SSE v2 sequence number gaps detected at turn completion",
+)
+# QA 心跳发送计数（检测代理/中间层断连频率）
+QA_HEARTBEATS_SENT = registry.counter(
+    "qa_heartbeats_sent_total",
+    "QA SSE v2 heartbeat events sent per turn",
+    ("stream_version",),
+)
+# QA delta 合并 flush 原因统计（tokens/bytes/time）
+QA_DELTA_FLUSHES = registry.counter(
+    "qa_delta_flushes_total",
+    "QA SSE v2 delta merge flushes by trigger (tokens, bytes, time)",
+    ("trigger",),
+)
+# QA 分段空闲超时命中计数
+QA_IDLE_TIMEOUTS = registry.counter(
+    "qa_idle_timeouts_total",
+    "QA SSE v2 segmented idle timeouts hit by phase (retrieval, generation)",
+    ("phase",),
+)
 LLM_CALLS = registry.counter(
     "llm_calls_total",
     "Total LLM calls by provider and status",

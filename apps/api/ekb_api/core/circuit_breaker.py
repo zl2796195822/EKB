@@ -72,8 +72,22 @@ class CircuitBreaker:
 
 
 # 全局单例
-_breaker = CircuitBreaker()
+_breaker: CircuitBreaker | None = None
 
 
 def get_circuit_breaker() -> CircuitBreaker:
+    """获取熔断器单例。
+
+    M4-7 配置化：首次调用时从 Settings 读取 failure_threshold / recovery_timeout。
+    已初始化的单例不会被重新配置（避免运行中变更阈值导致状态混乱）。
+    """
+    global _breaker
+    if _breaker is None:
+        from ekb_api.core.config import get_settings
+
+        settings = get_settings()
+        _breaker = CircuitBreaker(
+            failure_threshold=settings.circuit_breaker_failure_threshold,
+            recovery_timeout=settings.circuit_breaker_recovery_timeout,
+        )
     return _breaker

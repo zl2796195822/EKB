@@ -1,0 +1,84 @@
+# EKB 企业级知识库 · 生产 Compose 配置
+# 用途：私有化部署或内部生产环境的单机/小规模部署。
+# 横向扩展、K8s 或多副本部署见运维手册 §3。
+#
+# 启动前必须：
+#   1. 复制 .env.example → .env，填写所有 REQUIRED 项
+#   2. 确认 EKB_TOKEN_SECRET 已设置（生产禁止使用随机值）
+#   3. docker compose -f docker-compose.prod.yml up -d
+
+version: "3.9"
+
+services:
+  api:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    image: ekb-api:latest
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      EKB_ENV: production
+      EKB_DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      EKB_API_HOST: "0.0.0.0"
+      EKB_ALLOWED_ORIGINS: "http://103.236.93.60:8080,http://localhost:8080"
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    volumes:
+      - ekb-backups:/app/backups
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  web:
+    build:
+      context: ./apps/web
+      dockerfile: Dockerfile
+    image: ekb-web:latest
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    depends_on:
+      - api
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-ekb}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-ekb_prod}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ekb} -d ${POSTGRES_DB:-ekb_prod}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+
+volumes:
+  pgdata:
+    driver: local
+  ekb-backups:
+    driver: local

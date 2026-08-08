@@ -80,6 +80,31 @@ class Settings:
     # 本地降级向量维度 / 批大小（仅 embed 失败降级时使用）。
     embedding_dim: int
     embedding_batch_size: int
+    # M4-7 容量压测/故障演练：超时与熔断参数可配置（原为硬编码常量）。
+    qa_timeout_seconds: float
+    search_timeout_seconds: float
+    circuit_breaker_failure_threshold: int
+    circuit_breaker_recovery_timeout: float
+    # M4-4 告警阈值：当 P95 延迟/错误率超出阈值时记录 ERROR 日志（供告警系统抓取）。
+    alert_qa_p95_threshold_seconds: float   # QA P95 延迟告警阈值（默认 3.0s）
+    alert_search_p95_threshold_seconds: float  # 搜索 P95 延迟告警阈值（默认 0.5s）
+    alert_error_rate_threshold: float       # HTTP 5xx 错误率告警阈值（默认 0.05 = 5%）
+    alert_llm_failure_rate_threshold: float  # LLM 调用失败率告警阈值（默认 0.1 = 10%）
+    # --- SSE v2 Conversation Stream 配置 ---
+    # 检索阶段空闲超时：检索侧长时间无输出视为超时（比生成更敏感）
+    sse_v2_retrieval_idle_timeout: float
+    # 生成阶段空闲超时：LLM token 间隔超过此值视为上游卡壳
+    sse_v2_generation_idle_timeout: float
+    # 心跳间隔秒数：无事件时每若干秒发 heartbeat，防止代理断连
+    sse_v2_heartbeat_interval: float
+    # Feature flag：是否启用 Conversation Stream v2（可灰度关闭）
+    sse_v2_enabled: bool
+    # Delta 合并：单包 token 数阈值（同时满足 3 条件任意一个则 flush）
+    sse_v2_delta_max_tokens: int
+    # Delta 合并：单包字节数阈值（UTF-8）
+    sse_v2_delta_max_bytes: int
+    # Delta 合并：时间窗口阈值（毫秒），保证延迟不膨胀
+    sse_v2_delta_flush_ms: int
 
     @property
     def is_production(self) -> bool:
@@ -232,4 +257,24 @@ def get_settings() -> Settings:
         llm_max_tokens=int(os.getenv("EKB_LLM_MAX_TOKENS", "1024")),
         embedding_dim=int(os.getenv("EKB_EMBEDDING_DIM", "256")),
         embedding_batch_size=int(os.getenv("EKB_EMBEDDING_BATCH_SIZE", "32")),
+        qa_timeout_seconds=float(os.getenv("EKB_QA_TIMEOUT_SECONDS", "60")),
+        search_timeout_seconds=float(os.getenv("EKB_SEARCH_TIMEOUT_SECONDS", "10")),
+        circuit_breaker_failure_threshold=int(os.getenv("EKB_CB_FAILURE_THRESHOLD", "5")),
+        circuit_breaker_recovery_timeout=float(os.getenv("EKB_CB_RECOVERY_TIMEOUT", "60")),
+        alert_qa_p95_threshold_seconds=float(os.getenv("EKB_ALERT_QA_P95_SECONDS", "3.0")),
+        alert_search_p95_threshold_seconds=float(os.getenv("EKB_ALERT_SEARCH_P95_SECONDS", "0.5")),
+        alert_error_rate_threshold=float(os.getenv("EKB_ALERT_ERROR_RATE", "0.05")),
+        alert_llm_failure_rate_threshold=float(os.getenv("EKB_ALERT_LLM_FAILURE_RATE", "0.1")),
+        # SSE v2 Conversation Stream 配置默认值
+        sse_v2_retrieval_idle_timeout=float(
+            os.getenv("EKB_SSE_V2_RETRIEVAL_IDLE_TIMEOUT", "15")
+        ),
+        sse_v2_generation_idle_timeout=float(
+            os.getenv("EKB_SSE_V2_GENERATION_IDLE_TIMEOUT", "10")
+        ),
+        sse_v2_heartbeat_interval=float(os.getenv("EKB_SSE_V2_HEARTBEAT", "15")),
+        sse_v2_enabled=os.getenv("EKB_SSE_V2_ENABLED", "true").lower() == "true",
+        sse_v2_delta_max_tokens=int(os.getenv("EKB_SSE_V2_DELTA_TOKENS", "4")),
+        sse_v2_delta_max_bytes=int(os.getenv("EKB_SSE_V2_DELTA_BYTES", "256")),
+        sse_v2_delta_flush_ms=int(os.getenv("EKB_SSE_V2_DELTA_FLUSH_MS", "80")),
     )

@@ -1,0 +1,107 @@
+- generic [ref=f1e1]:
+  - generic [ref=f1e2]:
+    - banner [ref=f1e3]:
+      - navigation "主导航" [ref=f1e5]:
+        - button "问答助手" [ref=f1e332] [cursor=pointer]
+        - button "知识库" [ref=f1e333] [cursor=pointer]
+        - button "检索中心" [ref=f1e334] [cursor=pointer]
+        - button "运营看板" [active] [ref=f1e335] [cursor=pointer]
+    - main [ref=f1e19]:
+      - generic [ref=f1e20]:
+        - generic [ref=f1e22]:
+          - generic [ref=f1e23]: Enterprise Knowledge Base · Galaxy Motion v6
+          - strong [ref=f1e24]: 运营治理
+        - searchbox "全局搜索" [ref=f1e28]: 远程办公审批
+        - generic "当前用户" [ref=f1e30]: A
+      - region [ref=f1e536]:
+        - generic [ref=f1e537]:
+          - generic [ref=f1e538]:
+            - heading "运营治理" [level=1] [ref=f1e539]
+            - paragraph [ref=f1e540]: 以质量、成本、安全和用户反馈为中心监控 RAG 系统。
+          - button "导出日报" [ref=f1e542] [cursor=pointer]
+        - generic [ref=f1e545]:
+          - generic [ref=f1e546]:
+            - generic [ref=f1e547]: 总问答数
+            - strong [ref=f1e548]: 12,486
+            - generic [ref=f1e549]: +8.4% 近 7 天
+          - generic [ref=f1e550]:
+            - generic [ref=f1e551]: 引用正确率
+            - strong [ref=f1e552]: 92%
+            - generic [ref=f1e553]: 达到门禁
+          - generic [ref=f1e554]:
+            - generic [ref=f1e555]: P95 响应
+            - strong [ref=f1e556]: 2.1s
+            - generic [ref=f1e557]: 略高
+          - generic [ref=f1e558]:
+            - generic [ref=f1e559]: 越权拦截
+            - strong [ref=f1e560]: "38"
+            - generic [ref=f1e561]: 全部拒绝
+        - generic [ref=f1e562]:
+          - generic [ref=f1e563]:
+            - generic [ref=f1e564]:
+              - heading "质量趋势" [level=2] [ref=f1e565]
+              - generic [ref=f1e569]: 7 日
+            - generic [ref=f1e571]:
+              - generic [ref=f1e572]:
+                - generic [ref=f1e573]: 答案被采纳
+                - strong [ref=f1e576]: 78%
+              - generic [ref=f1e577]:
+                - generic [ref=f1e578]: 引用覆盖
+                - strong [ref=f1e581]: 92%
+              - generic [ref=f1e582]:
+                - generic [ref=f1e583]: 拒答准确
+                - strong [ref=f1e586]: 88%
+              - generic [ref=f1e587]:
+                - generic [ref=f1e588]: 人工复核
+                - strong [ref=f1e591]: 14%
+          - complementary [ref=f1e592]:
+            - heading "审计日志" [level=2] [ref=f1e594]
+            - generic [ref=f1e598]:
+              - generic [ref=f1e599]:
+                - generic [ref=f1e600]: 14:28
+                - generic [ref=f1e601]:
+                  - strong [ref=f1e602]: qa.ask · HR 政策与员工手册
+                  - generic [ref=f1e603]: user alin · trace 8f23
+              - generic [ref=f1e604]:
+                - generic [ref=f1e605]: 14:21
+                - generic [ref=f1e606]:
+                  - strong [ref=f1e607]: kb.upload · 客户数据导出审批
+                  - generic [ref=f1e608]: parse_failed · table span
+              - generic [ref=f1e609]:
+                - generic [ref=f1e610]: 13:57
+                - generic [ref=f1e611]:
+                  - strong [ref=f1e612]: auth.deny · 薪酬附件
+                  - generic [ref=f1e613]: role mismatch · masked
+              - generic [ref=f1e614]:
+                - generic [ref=f1e615]: 13:42
+                - generic [ref=f1e616]:
+                  - strong [ref=f1e617]: feedback.down · 引用不支持结论
+                  - generic [ref=f1e618]: queued for reviewer
+    - region [ref=f1e275]:
+      - heading "GitHub 对标转译" [level=2] [ref=f1e276]
+      - paragraph [ref=f1e277]: 这份 v5 设计稿吸收开源知识库/RAG 产品的可用模式，但落点保持在 EKB 现有的四页架构：问答、知识库、检索、运营。重点不是增加炫技入口，而是把“可信答案”拆成可检索、可审计、可治理的界面对象。
+      - generic [ref=f1e278]:
+        - article [ref=f1e279]:
+          - strong [ref=f1e280]: Dify
+          - generic [ref=f1e281]: 知识管道、数据源接入、测试与监控启发了检索设置、数据源连接和质量门禁。
+        - article [ref=f1e282]:
+          - strong [ref=f1e283]: RAGFlow
+          - generic [ref=f1e284]: 分块可视化、引用追踪和混合检索启发了右侧证据检查器与检索链路。
+        - article [ref=f1e285]:
+          - strong [ref=f1e286]: MaxKB
+          - generic [ref=f1e287]: 开箱即用的问答与嵌入场景启发了左侧 KB 选择、会话和快速问答。
+        - article [ref=f1e288]:
+          - strong [ref=f1e289]: AnythingLLM
+          - generic [ref=f1e290]: Workspace + 文档拖拽 + 来源引用启发了低摩擦提问区和文档清单。
+        - article [ref=f1e291]:
+          - strong [ref=f1e292]: Open WebUI
+          - generic [ref=f1e293]: 知识集合、检索模式、目录同步和 API/导出启发了检索过滤与资产同步状态。
+        - article [ref=f1e294]:
+          - strong [ref=f1e295]: WeKnora
+          - generic [ref=f1e296]: 企业文档理解、Wiki/图谱、向量库绑定和审计启发了治理队列与运营审计。
+    - paragraph [ref=f1e297]: EKB UI design draft v6 · Galaxy Motion benchmark prototype · no backend connection
+  - navigation "Dock 快捷导航" [ref=f1e298]:
+    - button "问答助手" [ref=f1e299] [cursor=pointer]
+    - button "知识库" [ref=f1e302] [cursor=pointer]
+    - button "检索中心" [ref=f1e305] [cursor=pointer]
+    - button "运营看板" [ref=f1e308] [cursor=pointer]

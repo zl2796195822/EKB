@@ -1,7 +1,9 @@
 import type {
   ConversationMessage,
   ConversationSummary,
+  DocumentDiff,
   DocumentRecord,
+  DocumentVersionRecord,
   FeedbackPayload,
   KnowledgeBase,
   LoginResponse,
@@ -105,6 +107,23 @@ export class ApiClient {
     await this.request(`/kb/${encodeURIComponent(kbId)}/docs/${encodeURIComponent(docId)}`, {
       method: 'DELETE',
     })
+  }
+
+  async listDocumentVersions(kbId: string, docId: string): Promise<DocumentVersionRecord[]> {
+    return this.request<DocumentVersionRecord[]>(
+      `/admin/kb/${encodeURIComponent(kbId)}/docs/${encodeURIComponent(docId)}/versions`,
+    )
+  }
+
+  async getDocumentDiff(
+    kbId: string,
+    docId: string,
+    fromVersion: number,
+    toVersion: number,
+  ): Promise<DocumentDiff> {
+    return this.request<DocumentDiff>(
+      `/admin/kb/${encodeURIComponent(kbId)}/docs/${encodeURIComponent(docId)}/diff?from_version=${fromVersion}&to_version=${toVersion}`,
+    )
   }
 
   async search(query: string, kbId: string): Promise<SearchResult[]> {

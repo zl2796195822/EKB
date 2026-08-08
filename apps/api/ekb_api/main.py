@@ -12,11 +12,17 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from ekb_api.core.config import get_settings
 from ekb_api.core.db import init_db
 from ekb_api.core.errors import install_error_handlers
+from ekb_api.core.logging import configure_logging, get_logger
 from ekb_api.core.metrics import HTTP_DURATION, HTTP_REQUESTS, registry
+from ekb_api.core.tracing import configure_tracing, instrument_fastapi
 from ekb_api.routers import admin, auth, conversations, feedback, kb, me, qa, search
 
 settings = get_settings()
+configure_logging(settings.environment)
+_log = get_logger("ekb.main")
 init_db()
+_log.info("ekb.startup", environment=settings.environment, api_port=settings.api_port)
+configure_tracing(service_name="ekb-api", environment=settings.environment)
 allowed_hosts = ["127.0.0.1", "localhost", settings.api_host]
 if settings.environment == "test":
     allowed_hosts.append("testserver")
@@ -47,11 +53,21 @@ async def request_context(request: Request, call_next):
     start = time.perf_counter()
     response = await call_next(request)
     elapsed = time.perf_counter() - start
+    if response.status_code >= 500:
+        _log.error(
+            "http.error",
+            method=request.method,
+            path=request.url.path,
+            status=response.status_code,
+            request_id=request.state.request_id,
+        )
     response.headers["X-Request-Id"] = request.state.request_id
     # 指标采集：路径归一化（hex id → :id）避免高基数 label。
     path = _normalize_path(request.url.path)
     HTTP_REQUESTS.inc(method=request.method, path=path, status=str(response.status_code))
     HTTP_DURATION.observe(elapsed, method=request.method, path=path)
+    from ekb_api.core.alerting import maybe_check_alerts  # noqa: PLC0415
+    maybe_check_alerts()
     return response
 
 
@@ -87,3 +103,4 @@ app.include_router(feedback.router, prefix="/api/v1")
 app.include_router(admin.router, prefix="/api/v1")
 
 install_error_handlers(app)
+instrument_fastapi(app)

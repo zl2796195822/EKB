@@ -196,6 +196,145 @@ def generate_answer(question: str, evidence_texts: list[str], *, route=None) -> 
     )
 
 
+# ---- M4-3 LLM 流式生成 ----
+
+
+def _call_provider_stream(
+    provider: ModelProvider, messages: list[dict], *, temperature: float, model: str | None = None
+):
+    """调用单个 provider 的 streaming chat completions，yield content delta。
+
+    使用 OpenAI 兼容的 SSE 流式协议（stream=true）。
+    """
+    settings = get_settings()
+    payload: dict = {
+        "model": model or provider.model,
+        "messages": messages,
+        "max_tokens": settings.llm_max_tokens,
+        "temperature": temperature,
+        "stream": True,
+    }
+    body = json.dumps(payload).encode("utf-8")
+    headers = {"Content-Type": "application/json", "Accept": "text/event-stream"}
+    if provider.api_key:
+        headers["Authorization"] = f"Bearer {provider.api_key}"
+
+    request = urllib.request.Request(provider.base_url, data=body, headers=headers, method="POST")
+    try:
+        resp = urllib.request.urlopen(request, timeout=provider.timeout_seconds)
+    except (urllib.error.URLError, TimeoutError) as exc:
+        raise LlmError(f"[{provider.name}] 流式连接失败: {exc}") from exc
+
+    try:
+        for raw_line in resp:
+            line = raw_line.decode("utf-8").strip()
+            if not line or line.startswith(":"):
+                continue
+            if not line.startswith("data: "):
+                continue
+            data = line[6:]
+            if data == "[DONE]":
+                break
+            chunk = json.loads(data)
+            delta = chunk.get("choices", [{}])[0].get("delta", {}).get("content", "")
+            if delta:
+                yield delta
+    except (json.JSONDecodeError, KeyError, IndexError) as exc:
+        raise LlmError(f"[{provider.name}] 流式解析失败: {exc}") from exc
+    finally:
+        resp.close()
+
+
+def chat_stream(
+    messages: list[dict],
+    *,
+    temperature: Optional[float] = None,
+    provider_name: Optional[str] = None,
+    model: Optional[str] = None,
+):
+    """流式 chat completions：yield content delta 字符串。
+
+    与 chat() 相同的熔断器保护和多 provider fallback 逻辑。
+    成功 = 至少 yield 了一个 token（provider 响应正常）。
+    """
+    breaker = get_circuit_breaker()
+    if not breaker.allow_request():
+        LLM_CALLS.inc(provider="circuit_open", status="short_circuited")
+        raise CircuitOpenError("LLM 熔断器开闸，请求被短路")
+
+    settings = get_settings()
+    providers = settings.chat_providers
+    if provider_name:
+        providers = [p for p in providers if p.name == provider_name] or providers
+    if not providers:
+        raise LlmError("未配置任何 chat provider")
+
+    effective_temperature = settings.llm_temperature if temperature is None else temperature
+    last_exc: Optional[Exception] = None
+    for provider in providers:
+        t0 = time.perf_counter()
+        try:
+            gen = _call_provider_stream(
+                provider, messages, temperature=effective_temperature, model=model
+            )
+            # peek 第一个 token 确认 provider 可用
+            try:
+                first = next(gen)
+            except StopIteration:
+                # 空响应但 provider 正常响应
+                breaker.track_success()
+                LLM_CALLS.inc(provider=provider.name, status="success")
+                LLM_DURATION.observe(time.perf_counter() - t0, provider=provider.name)
+                return
+
+            breaker.track_success()
+            LLM_CALLS.inc(provider=provider.name, status="success")
+            LLM_DURATION.observe(time.perf_counter() - t0, provider=provider.name)
+
+            yield first
+            yield from gen
+            return
+        except LlmError as exc:
+            LLM_CALLS.inc(provider=provider.name, status="failed")
+            last_exc = exc
+            logger.warning("chat_stream provider %s 不可用: %s", provider.name, exc)
+            continue
+
+    breaker.track_failure()
+    raise LlmError(f"所有 chat provider 均失败: {last_exc}")
+
+
+def generate_answer_stream(
+    question: str, evidence_texts: list[str], *, route=None
+):
+    """流式生成答案：yield content delta。
+
+    与 generate_answer 相同的 prompt 构建逻辑，但使用 chat_stream 流式输出。
+    route 为 M2-7 租户级模型路由。
+    """
+    settings = get_settings()
+    if not settings.chat_providers:
+        raise LlmError("未配置 chat provider")
+
+    context = "\n\n".join(f"[证据{i + 1}]\n{text}" for i, text in enumerate(evidence_texts))
+    prompt = (
+        "你是企业知识库问答助手。基于以下授权知识库证据回答问题。\n\n"
+        "要求：\n"
+        "- 只使用上述证据中的信息，不要编造\n"
+        "- 答案必须包含证据中与问题相关的关键术语和具体步骤\n"
+        "- 简洁直接，先给结论再补充细节\n"
+        "- 如果证据不足以回答，回复「证据不足，无法确认」\n\n"
+        f"{context}\n\n"
+        f"问题：{question}\n\n"
+        "回答："
+    )
+    yield from chat_stream(
+        [{"role": "user", "content": prompt}],
+        provider_name=route.provider_name if route else None,
+        model=route.model if route else None,
+    )
+
+
 def _parse_json_array(text: str) -> list[str]:
     """宽松解析 LLM 输出的 JSON 数组（容忍前后多余文字和代码块标记）。"""
     cleaned = text.strip()

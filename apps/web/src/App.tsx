@@ -1,4 +1,6 @@
 import {
+  Suspense,
+  lazy,
   useCallback,
   useEffect,
   useMemo,
@@ -8,23 +10,50 @@ import {
   type FormEvent,
   type ReactElement,
 } from 'react'
-import { ChatPanel, type ChatMessage } from './components/ChatPanel'
-import { ConversationHistory } from './components/ConversationHistory'
+import { BlurReveal } from './components/ui/animated/BlurReveal'
+import { DockBar } from './components/ui/DockBar'
+import { PillNavTabs } from './components/ui/PillNavTabs'
 import { ErrorBoundary } from './components/ErrorBoundary'
-import { KnowledgeSidebar } from './components/KnowledgeSidebar'
+import { useHashPage, type GalaxyPageId } from './hooks/useHashPage'
 import { ApiClient } from './lib/api'
 import type {
   ConversationMessage,
   ConversationSummary,
+  DocumentDiff,
   DocumentRecord,
+  DocumentVersionRecord,
   FeedbackRating,
   KnowledgeBase,
   LoginResponse,
   SearchResult,
 } from './types/api'
+import type { QAPageProps } from './pages/QAPage'
+import type { SearchPageProps } from './pages/SearchPage'
+import type { KbPageProps } from './pages/KbPage'
+import type { OpsPageProps } from './pages/OpsPage'
 import './styles.css'
 
-const defaultApiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8023/api/v1'
+const QAPage = lazy(() => import('./pages/QAPage'))
+const KbPage = lazy(() => import('./pages/KbPage'))
+const SearchPage = lazy(() => import('./pages/SearchPage'))
+const OpsPage = lazy(() => import('./pages/OpsPage'))
+
+type ChatMessage = {
+  id: string
+  role: 'user' | 'assistant'
+  content: string
+  citations: SearchResult[]
+  messageId?: string
+  isStreaming?: boolean
+  error?: string
+  finishReason?: string
+  feedback?: FeedbackRating
+}
+
+// 生产环境通过 nginx 反代 /api/v1（相对路径）；开发环境通过 VITE_API_BASE_URL 覆盖。
+const defaultApiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? '/api/v1'
+
+const PAGE_IDS: GalaxyPageId[] = ['qa', 'kb', 'search', 'ops']
 
 export function App(): ReactElement {
   const client = useMemo(() => new ApiClient(defaultApiBaseUrl), [])
@@ -37,6 +66,9 @@ export function App(): ReactElement {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [question, setQuestion] = useState('')
   const [searchResults, setSearchResults] = useState<SearchResult[]>([])
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchPageNum, setSearchPageNum] = useState(1)
+  const [searchPageSize] = useState(10)
   const [conversations, setConversations] = useState<ConversationSummary[]>([])
   const [activeConversationId, setActiveConversationId] = useState<string | undefined>(undefined)
   const [error, setError] = useState('')
@@ -44,9 +76,8 @@ export function App(): ReactElement {
   const [isUploading, setIsUploading] = useState(false)
   const [isAsking, setIsAsking] = useState(false)
   const abortController = useRef<AbortController | null>(null)
-  // 当前会话 ID：同一会话内续接问答，切换知识库或新建对话时重置。
-  // 同步到 ref 以便 ask 闭包读取最新值，state 用于驱动历史面板高亮。
   const conversationIdRef = useRef<string | undefined>(undefined)
+  const [activePage, goToPage] = useHashPage()
 
   const syncConversation = useCallback((id: string | undefined) => {
     conversationIdRef.current = id
@@ -72,7 +103,6 @@ export function App(): ReactElement {
   useEffect(() => {
     if (!selectedKbId) return
     void loadDocuments(selectedKbId)
-    // 切换知识库时开始新会话，避免跨库追问造成上下文错位。
     syncConversation(undefined)
     setMessages([])
     setSearchResults([])
@@ -104,7 +134,6 @@ export function App(): ReactElement {
     try {
       setConversations(await client.listConversations())
     } catch (loadError) {
-      // 历史会话加载失败不阻塞主流程，仅在控制台留痕。
       console.warn('会话历史加载失败', loadError)
     }
   }, [client])
@@ -156,12 +185,25 @@ export function App(): ReactElement {
     }
   }
 
+  const handleLoadDocVersions = useCallback(
+    async (kbId: string, docId: string): Promise<DocumentVersionRecord[]> => {
+      return client.listDocumentVersions(kbId, docId)
+    },
+    [client],
+  )
+
+  const handleLoadDocDiff = useCallback(
+    async (kbId: string, docId: string, from: number, to: number): Promise<DocumentDiff> => {
+      return client.getDocumentDiff(kbId, docId, from, to)
+    },
+    [client],
+  )
+
   const handleLogout = async () => {
     if (session) {
       try {
         await client.logout(session.refresh_token)
       } catch {
-        // 登出失败不阻塞前端清理，本地凭据仍需清除。
       }
     }
     client.setToken(null)
@@ -228,7 +270,6 @@ export function App(): ReactElement {
         selectedKbId,
         (eventData) => {
           if (eventData.event === 'request') {
-            // 捕获服务端分配的 conversation_id 和 message_id，用于续接和反馈。
             const nextConversationId = String(eventData.data.conversation_id ?? '')
             if (nextConversationId) syncConversation(nextConversationId)
             const serverMessageId = String(eventData.data.message_id ?? '')
@@ -257,7 +298,6 @@ export function App(): ReactElement {
           if (eventData.event === 'citation') {
             const citation = preview.find((item) => item.chunk_id === eventData.data.chunk_id)
             if (!citation) return
-            // 合并 citation 事件补充的 version 和 updated_at（搜索结果中无 version）。
             const enrichedCitation = {
               ...citation,
               doc_version: Number(eventData.data.version ?? 1),
@@ -318,7 +358,6 @@ export function App(): ReactElement {
       )
     } finally {
       setIsAsking(false)
-      // 刷新历史会话列表，使新建/续接的会话立即出现在历史面板顶部。
       void loadConversations()
     }
   }
@@ -331,7 +370,6 @@ export function App(): ReactElement {
     setError('')
     try {
       const history = await client.getConversationMessages(conversationId)
-      // 历史消息还原为 ChatMessage；assistant 消息保留 id 作为 messageId 以支持反馈。
       setMessages(
         history.map((message) => toChatMessage(message)),
       )
@@ -374,10 +412,54 @@ export function App(): ReactElement {
     }
   }
 
+  const handleSearchSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const trimmed = searchQuery.trim()
+    if (!trimmed || !selectedKbId) return
+    setIsLoading(true)
+    setError('')
+    try {
+      const results = await client.search(trimmed, selectedKbId)
+      setSearchResults(results)
+      setSearchPageNum(1)
+    } catch (searchError) {
+      setError(searchError instanceof Error ? searchError.message : '检索失败')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (!selectedKbId || !searchQuery.trim()) return
+    let cancelled = false
+    setIsLoading(true)
+    setError('')
+    void (async () => {
+      try {
+        const results = await client.search(searchQuery.trim(), selectedKbId)
+        if (!cancelled) {
+          setSearchResults(results)
+          setSearchPageNum(1)
+        }
+      } catch (searchError) {
+        if (!cancelled) {
+          setError(searchError instanceof Error ? searchError.message : '检索失败')
+        }
+      } finally {
+        if (!cancelled) setIsLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [client, selectedKbId, searchQuery])
+
   if (!session) {
     return (
       <ErrorBoundary>
-        <main className="auth-screen">
+        <main className="auth-screen bg-galaxy">
+          {/* 极光第三层（CSS 动画 Layer 3） */}
+          <div className="aurora-layer3" aria-hidden="true" />
           <div className="auth-panel">
             <div className="brand-lockup">
               <span className="brand-mark">E</span>
@@ -386,8 +468,16 @@ export function App(): ReactElement {
                 <span>企业知识库</span>
               </div>
             </div>
-            <p className="eyebrow">M1 tracer bullet</p>
-            <h1>让每个答案都能回到证据</h1>
+            <p className="eyebrow">Galaxy Motion v4</p>
+            <BlurReveal
+              text="让每个答案都能回到证据"
+              as="h1"
+              animateBy="words"
+              staggerMs={70}
+              duration={0.6}
+              delay={0.15}
+              style={{ margin: '16px 0 10px', color: 'var(--c-ink-1)', fontSize: 'var(--fs-36)', lineHeight: 1.1, letterSpacing: '-0.03em' }}
+            />
             <p className="auth-copy">
               登录后访问授权知识库。当前版本用于验证租户上下文、检索过滤、SSE 问答和引用链路。
             </p>
@@ -425,56 +515,96 @@ export function App(): ReactElement {
     )
   }
 
+  const qaProps: Omit<QAPageProps, 'userEmail' | 'goToPage'> = {
+    knowledgeBases,
+    selectedKbId,
+    documents,
+    messages,
+    question,
+    searchResults,
+    conversations,
+    activeConversationId,
+    isAsking,
+    isLoading,
+    isUploading,
+    onChangeQuestion: setQuestion,
+    onSubmitAsk: handleAsk,
+    onCancelAsk: handleCancelAsk,
+    onSelectConversation: handleSelectConversation,
+    onDeleteConversation: handleDeleteConversation,
+    onFeedback: handleFeedback,
+    onCreateKb: handleCreateKb,
+    onDeleteKb: handleDeleteKb,
+    onDeleteDoc: handleDeleteDoc,
+    onUpload: handleUpload,
+    onSelectKb: (kbId: string) => setSelectedKbId(kbId),
+    onClearMessages: () => {
+      syncConversation(undefined)
+      setMessages([])
+      setSearchResults([])
+    },
+  }
+
+  const searchProps: SearchPageProps = {
+    searchResults,
+    knowledgeBases,
+    selectedKbId,
+    searchQuery,
+    searchPageNum,
+    searchPageSize,
+    isLoading,
+    onChangeQuery: setSearchQuery,
+    onSubmitSearch: handleSearchSubmit,
+    onChangeKb: (kbId: string) => setSelectedKbId(kbId),
+    onChangePage: (n: number) => setSearchPageNum(n),
+  }
+
+  const kbProps: Omit<KbPageProps, 'userEmail' | 'goToPage'> = {
+    knowledgeBases,
+    selectedKbId,
+    documents,
+    conversationsCount: conversations.length,
+    isLoading,
+    isUploading,
+    onSelectKb: (kbId: string) => setSelectedKbId(kbId),
+    onCreateKb: handleCreateKb,
+    onDeleteKb: handleDeleteKb,
+    onDeleteDoc: handleDeleteDoc,
+    onUpload: handleUpload,
+    onLoadDocVersions: handleLoadDocVersions,
+    onLoadDocDiff: handleLoadDocDiff,
+  }
+
+  const opsProps: Omit<OpsPageProps, 'goToPage'> = {}
+
   return (
     <ErrorBoundary>
-      <div className="app-shell">
-        <KnowledgeSidebar
-          knowledgeBases={knowledgeBases}
-          selectedKbId={selectedKbId}
-          documents={documents}
-          isUploading={isUploading}
-          onSelect={setSelectedKbId}
-          onUpload={handleUpload}
-          onCreateKb={handleCreateKb}
-          onDeleteKb={handleDeleteKb}
-          onDeleteDoc={handleDeleteDoc}
-        />
-        <main className="main-content">
-          <div className="topbar">
-            <div>
-              <span className="topbar-label">当前租户</span>
-              <strong>{session.tenants[0]?.name ?? '未命名租户'}</strong>
-            </div>
-            <ConversationHistory
-              conversations={conversations}
-              activeConversationId={activeConversationId}
-              onSelect={handleSelectConversation}
-              onDelete={handleDeleteConversation}
-            />
-            <div className="topbar-user">
-              <span>{session.user.name}</span>
-              <span className="avatar" aria-hidden="true">{session.user.name.slice(0, 1)}</span>
-              <button className="logout-button" type="button" onClick={handleLogout}>
-                退出
-              </button>
-            </div>
-          </div>
+      <div className="galaxy-shell">
+        <div className="bg-galaxy" aria-hidden="true" />
+        <div className="shell-content">
+          <PillNavTabs activePage={activePage} onChange={goToPage} />
           {error && <div className="global-error" role="alert">{error}</div>}
-          {isLoading && knowledgeBases.length === 0 ? (
-            <div className="loading-state">正在加载授权知识库…</div>
-          ) : (
-            <ChatPanel
-              messages={messages}
-              question={question}
-              isAsking={isAsking}
-              searchResults={searchResults}
-              onQuestionChange={setQuestion}
-              onSubmit={handleAsk}
-              onCancel={handleCancelAsk}
-              onFeedback={handleFeedback}
-            />
-          )}
-        </main>
+          <Suspense fallback={null}>
+            {PAGE_IDS.map((pageId) => {
+              const isActive = activePage === pageId
+              return (
+                <div
+                  key={pageId}
+                  id={`page-${pageId}`}
+                  className={`page${isActive ? ' active' : ''}`}
+                  role="tabpanel"
+                  aria-hidden={!isActive}
+                >
+                  {pageId === 'qa' && isActive && <QAPage userEmail={session.user.email} {...qaProps} goToPage={goToPage} />}
+                  {pageId === 'kb' && isActive && <KbPage userEmail={session.user.email} {...kbProps} goToPage={goToPage} />}
+                  {pageId === 'search' && isActive && <SearchPage {...searchProps} />}
+                  {pageId === 'ops' && isActive && <OpsPage goToPage={goToPage} />}
+                </div>
+              )
+            })}
+          </Suspense>
+          <DockBar activePage={activePage} onChange={goToPage} />
+        </div>
       </div>
     </ErrorBoundary>
   )
@@ -487,7 +617,6 @@ function toChatMessage(message: ConversationMessage): ChatMessage {
     role: isAssistant ? 'assistant' : 'user',
     content: message.content,
     citations: [],
-    // assistant 消息的数据库 id 即 messageId，可用于提交反馈。
     messageId: isAssistant ? message.id : undefined,
   }
 }

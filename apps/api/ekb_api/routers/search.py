@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Annotated
 
 from fastapi import APIRouter, Depends
 
 from ekb_api.core.auth import get_auth_context, get_store
+from ekb_api.core.config import get_settings
 from ekb_api.core.errors import ApiError
 from ekb_api.domain import AuthContext
 from ekb_api.schemas import SearchRequest, SearchResponse, SearchResult
@@ -14,7 +16,7 @@ router = APIRouter(prefix="/search", tags=["search"])
 
 
 @router.post("", response_model=SearchResponse)
-def search(
+async def search(
     payload: SearchRequest,
     auth: Annotated[AuthContext, Depends(get_auth_context)],
     store: Annotated[SqlStore, Depends(get_store)],
@@ -25,7 +27,17 @@ def search(
         if not set(requested_kb_ids).issubset(visible_ids):
             raise ApiError(404, "NOT_FOUND", "当前授权范围内不存在")
 
-    chunks = store.search(auth, payload.query, requested_kb_ids, payload.top_k)
+    # M4-7：检索超时保护，避免大候选池或慢查询阻塞事件循环。
+    # store.search 是同步阻塞调用，用 to_thread 包装 + wait_for 超时。
+    try:
+        chunks = await asyncio.wait_for(
+            asyncio.to_thread(
+                store.search, auth, payload.query, requested_kb_ids, payload.top_k
+            ),
+            timeout=get_settings().search_timeout_seconds,
+        )
+    except asyncio.TimeoutError as exc:
+        raise ApiError(504, "SEARCH_TIMEOUT", "检索超时，请缩小范围或稍后重试") from exc
     return SearchResponse(
         results=[
             SearchResult(

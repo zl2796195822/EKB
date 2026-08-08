@@ -27,16 +27,35 @@ from ekb_api.core.metrics import (
     QA_RETRIEVAL_DURATION,
 )
 from ekb_api.domain import AuthContext
-from ekb_api.llm import LlmError, generate_answer
+from ekb_api.llm import LlmError, generate_answer, generate_answer_stream
 from ekb_api.retrieval import retrieve
 from ekb_api.schemas import AskRequest
 from ekb_api.store import SqlStore
 
 router = APIRouter(prefix="/qa", tags=["qa"])
 
-# 流式生成单轮最大耗时；超过后发送 timeout 事件并停止。
-# M1-05 含 query 改写 + LLM 生成（2 次外部调用），调到 60 秒避免误超时。
-QA_TIMEOUT_SECONDS = 60.0
+
+def _qa_timeout() -> float:
+    """流式生成单轮最大耗时；超过后发送 timeout 事件并停止。
+
+    M1-05 含 query 改写 + LLM 生成（2 次外部调用），默认 60 秒。
+    M4-7 配置化：通过 EKB_QA_TIMEOUT_SECONDS 环境变量调整。
+    """
+    return get_settings().qa_timeout_seconds
+
+
+# M4-3 流式生成哨兵：StopIteration 不能跨越 asyncio.to_thread 边界
+# （asyncio Future 禁止 StopIteration 作为异常，会触发 TypeError）。
+# 用哨兵值替代，_next_token 同步取下一个 token。
+_STREAM_END = object()
+
+
+def _next_token(gen):
+    """同步取生成器下一个 token；耗尽时返回哨兵 _STREAM_END 而非抛 StopIteration。"""
+    try:
+        return next(gen)
+    except StopIteration:
+        return _STREAM_END
 
 
 @router.post("/ask")
@@ -100,25 +119,46 @@ async def ask(
                 yield _sse("done", {"finish_reason": "cancelled"})
                 return
 
-            # 检索编排（含 query 改写）+ LLM 生成，全部纳入 timeout 控制。
-            # retrieve 是同步阻塞的（含 LLM 调用），用 to_thread 避免阻塞事件循环。
-            chunks, answer, refusal = await asyncio.wait_for(
-                _retrieve_and_generate(
-                    store,
-                    auth,
-                    payload.question,
-                    payload.kb_ids,
-                    payload.options.max_citations,
-                    route,
-                ),
-                timeout=QA_TIMEOUT_SECONDS,
-            )
-            store.update_message_content(auth, assistant_message.id, answer)
+            # M4-3：检索阶段（含 query 改写），纳入 timeout 控制。
+            # retrieve 是同步阻塞的（含 LLM 调用 + 并行多路召回），用 to_thread 避免阻塞事件循环。
+            t0 = time.perf_counter()
+            try:
+                chunks = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        retrieve,
+                        store,
+                        auth,
+                        payload.question,
+                        payload.kb_ids,
+                        payload.options.max_citations,
+                        route=route,
+                    ),
+                    timeout=_qa_timeout(),
+                )
+            except asyncio.TimeoutError:
+                finish_reason = "timeout"
+                yield _sse(
+                    "error",
+                    {
+                        "code": "UPSTREAM_TIMEOUT",
+                        "message": "模型响应超时，已停止生成",
+                        "request_id": auth.trace_id,
+                    },
+                )
+                yield _sse("done", {"finish_reason": "timeout"})
+                return
+            finally:
+                QA_RETRIEVAL_DURATION.observe(time.perf_counter() - t0)
 
-            if refusal:
-                # 无证据拒答：只发拒答文本，不发 token 流和 citation，finish_reason=refusal。
+            # 无证据拒答：不发 token 流和 citation，finish_reason=refusal。
+            if not chunks:
+                refusal_text = (
+                    "当前授权知识库中没有足够证据，我无法确认这个问题。"
+                    "请补充文档范围或换一种问法。"
+                )
+                store.update_message_content(auth, assistant_message.id, refusal_text)
                 finish_reason = "refusal"
-                yield _sse("token", {"text": answer})
+                yield _sse("token", {"text": refusal_text})
                 yield _sse(
                     "done",
                     {
@@ -129,13 +169,118 @@ async def ask(
                 )
                 return
 
-            for piece in _split_for_stream(answer):
-                if await request.is_disconnected():
-                    finish_reason = "cancelled"
-                    yield _sse("done", {"finish_reason": "cancelled"})
+            # M4-3 真流式生成：LLM 可用时直接流式输出 token，降低 TTFB。
+            settings = get_settings()
+            if not settings.llm_enabled:
+                # 降级：demo 拼接（保持 M1 评估基线可跑通）。
+                QA_DEGRADATIONS.inc(reason="llm_unavailable")
+                answer = " ".join(chunk.content for chunk in chunks)
+                full_answer = f"根据授权知识库中的证据：{answer}"
+                store.update_message_content(auth, assistant_message.id, full_answer)
+                for piece in _split_for_stream(full_answer):
+                    if await request.is_disconnected():
+                        finish_reason = "cancelled"
+                        yield _sse("done", {"finish_reason": "cancelled"})
+                        return
+                    yield _sse("token", {"text": piece})
+                    await asyncio.sleep(0.01)
+            else:
+                # M4-3 真流式：generate_answer_stream 是同步生成器，
+                # 用 to_thread(next, gen) 逐 token 消费，实现真流式 SSE。
+                from ekb_api.ranking import build_context
+
+                evidence_texts = build_context(chunks)
+                t0 = time.perf_counter()
+                full_answer = ""
+                try:
+                    gen = generate_answer_stream(
+                        payload.question, evidence_texts, route=route
+                    )
+                    while True:
+                        token = await asyncio.to_thread(_next_token, gen)
+                        if token is _STREAM_END:
+                            break
+                        full_answer += token
+                        if await request.is_disconnected():
+                            finish_reason = "cancelled"
+                            store.update_message_content(
+                                auth, assistant_message.id, full_answer
+                            )
+                            yield _sse("done", {"finish_reason": "cancelled"})
+                            return
+                        yield _sse("token", {"text": token})
+                except LlmError:
+                    # 流式失败降级：已有部分 token 则保留，无则 demo 拼接。
+                    QA_DEGRADATIONS.inc(reason="llm_failed")
+                    if not full_answer:
+                        answer = " ".join(chunk.content for chunk in chunks)
+                        full_answer = f"根据授权知识库中的证据：{answer}"
+                        for piece in _split_for_stream(full_answer):
+                            yield _sse("token", {"text": piece})
+                finally:
+                    QA_GENERATION_DURATION.observe(time.perf_counter() - t0)
+
+                # M4-5 P1：流式拒答二次确认兜底。
+                # G042/G077 案例：检索返回了正确 chunks（本地直调 generate_answer /
+                # generate_answer_stream 都能正确回答），但 HTTP SSE 场景下流式 LLM
+                # 偶发输出"证据不足"。
+                # 触发条件：答案含"证据不足" + 检索有 ≥3 chunks（实际上有证据可答）。
+                # 修复：用 generate_answer（非流式，温度一致）重做一次；若二次确认
+                # 给出正确回答（不再含"证据不足"），则以正确回答覆盖。
+                if "证据不足" in full_answer and len(chunks) >= 3:
+                    try:
+                        rechecked = await asyncio.to_thread(
+                            generate_answer, payload.question, evidence_texts, route=route
+                        )
+                    except LlmError:
+                        rechecked = ""
+                    if rechecked and "证据不足" not in rechecked:
+                        QA_DEGRADATIONS.inc(reason="stream_refusal_fallback_ok")
+                        # "证据不足"已流式发出不可撤回，追加修正结论给客户端。
+                        # 最终写库存正确答案，finish_reason=stop，发 citations。
+                        prefix = "（补充确认：授权知识库中存在相关证据，以下为修正后的结论——）"
+                        delta_text = prefix + rechecked
+                        full_answer = rechecked
+                        for piece in _split_for_stream(delta_text):
+                            if await request.is_disconnected():
+                                finish_reason = "cancelled"
+                                store.update_message_content(
+                                    auth, assistant_message.id, full_answer
+                                )
+                                yield _sse("done", {"finish_reason": "cancelled"})
+                                return
+                            yield _sse("token", {"text": piece})
+                        store.update_message_content(auth, assistant_message.id, full_answer)
+                    else:
+                        # 二次确认仍证据不足：真实无证据，走 refusal
+                        QA_DEGRADATIONS.inc(reason="stream_refusal_confirmed")
+                        store.update_message_content(auth, assistant_message.id, full_answer)
+                        finish_reason = "refusal"
+                        yield _sse(
+                            "done",
+                            {
+                                "message_id": assistant_message.id,
+                                "finish_reason": "refusal",
+                                "confidence": "low",
+                            },
+                        )
+                        return
+                elif "证据不足" in full_answer:
+                    # chunks < 3 且"证据不足"：真实无证据，直接拒答
+                    store.update_message_content(auth, assistant_message.id, full_answer)
+                    finish_reason = "refusal"
+                    yield _sse(
+                        "done",
+                        {
+                            "message_id": assistant_message.id,
+                            "finish_reason": "refusal",
+                            "confidence": "low",
+                        },
+                    )
                     return
-                yield _sse("token", {"text": piece})
-                await asyncio.sleep(0.01)
+                else:
+                    # 正常回答：落库
+                    store.update_message_content(auth, assistant_message.id, full_answer)
 
             for chunk in chunks:
                 yield _sse(

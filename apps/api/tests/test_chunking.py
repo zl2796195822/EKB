@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import tiktoken
 
-from ekb_api.chunking import CHUNK_SIZE_TOKENS, OVERLAP_TOKENS, ChunkResult, split_sections
+from ekb_api.chunking import CHUNK_SIZE_TOKENS, OVERLAP_TOKENS, split_sections
 from ekb_api.parsing import ParsedSection
 
 

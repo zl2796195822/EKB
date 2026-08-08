@@ -13,7 +13,9 @@
       "name": "EKB Web (Vite)",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev"],
-      "port": 5173
+      "port": 5173,
+      "autoPort": true,
+      "cwd": "/Users/alin/EKB/apps/web"
     }
   ]
 }

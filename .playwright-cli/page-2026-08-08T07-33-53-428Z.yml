@@ -1,0 +1,239 @@
+- generic [active] [ref=f2e1]:
+  - generic [ref=f2e2]:
+    - banner [ref=f2e3]:
+      - navigation "主导航" [ref=f2e5]:
+        - button "问答助手" [ref=f2e6] [cursor=pointer]
+        - button "知识库" [ref=f2e9] [cursor=pointer]
+        - button "检索中心" [ref=f2e12] [cursor=pointer]
+        - button "运营看板" [ref=f2e15] [cursor=pointer]
+    - main [ref=f2e19]:
+      - generic [ref=f2e20]:
+        - generic [ref=f2e22]:
+          - generic [ref=f2e23]: Enterprise Knowledge Base · Galaxy Motion v6
+          - strong [ref=f2e24]: 问答工作台
+        - searchbox "全局搜索" [ref=f2e28]: 远程办公审批
+        - generic "当前用户" [ref=f2e30]: A
+      - region [ref=f2e31]:
+        - region [ref=f2e32]:
+          - generic [ref=f2e33]:
+            - paragraph [ref=f2e34]: 已鉴权 · 当前账户 alin@ekb.local
+            - heading "让每个答案 回到证据" [level=1] [ref=f2e37]: 让每个答案回到证据
+            - paragraph [ref=f2e38]: 企业级 RAG 问答助手，把检索、版本、权限和引用链放在同一条叙事里。先理解答案，再沿着证据回到原文。
+            - generic [ref=f2e39]:
+              - button "新建会话" [ref=f2e40] [cursor=pointer]
+              - button "跳转检索中心" [ref=f2e43] [cursor=pointer]
+          - generic:
+            - generic: EKB CORE
+            - generic: 5 条可信引用
+            - generic: 索引延迟 18m
+        - generic "当前会话上下文" [ref=f2e46]:
+          - generic [ref=f2e47]:
+            - generic [ref=f2e48]: Knowledge space
+            - strong [ref=f2e49]: HR 政策与员工手册
+          - generic [ref=f2e50]:
+            - generic [ref=f2e51]: Retrieval
+            - strong [ref=f2e52]: Hybrid · BM25 + Vector
+          - generic [ref=f2e53]:
+            - generic [ref=f2e54]: Evidence
+            - strong [ref=f2e55]: 5 条引用 · 覆盖率 92%
+          - generic [ref=f2e56]:
+            - generic [ref=f2e57]: Access
+            - strong [ref=f2e58]: 员工可见 · 薪酬脱敏
+        - generic [ref=f2e59]:
+          - region "提问与检索设置" [ref=f2e60]:
+            - generic [ref=f2e61]:
+              - heading "提问" [level=2] [ref=f2e62]
+              - generic [ref=f2e66]: top-k 8
+            - generic [ref=f2e67]:
+              - generic "当前知识空间" [ref=f2e68]:
+                - paragraph [ref=f2e69]: 授权知识空间
+                - button "HR 政策与员工手册 v42" [ref=f2e70] [cursor=pointer]:
+                  - generic [ref=f2e72]: HR 政策与员工手册
+                  - generic [ref=f2e73]: v42
+                - button "IT 运维 SOP v18" [ref=f2e74] [cursor=pointer]:
+                  - generic [ref=f2e76]: IT 运维 SOP
+                  - generic [ref=f2e77]: v18
+                - button "合规制度库 2 WARN" [ref=f2e78] [cursor=pointer]:
+                  - generic [ref=f2e80]: 合规制度库
+                  - generic [ref=f2e81]: 2 WARN
+              - generic [ref=f2e82]:
+                - generic [ref=f2e83]:
+                  - generic [ref=f2e84]: 问题
+                  - textbox "问题" [ref=f2e85]: 员工每周远程办公 3 天，需要经过哪些审批？
+                - generic "快速问题" [ref=f2e86]:
+                  - button "数据库连接池耗尽时，应该先检查哪些指标？" [ref=f2e87] [cursor=pointer]
+                  - button "客户数据导出审批超过 7 天没有处理，升级路径是什么？" [ref=f2e88] [cursor=pointer]
+                  - button "试用期员工是否可以申请远程办公？" [ref=f2e89] [cursor=pointer]
+                - generic [ref=f2e90]:
+                  - generic [ref=f2e91]:
+                    - generic [ref=f2e92]: 重排模型
+                    - button "重排模型开关" [ref=f2e93] [cursor=pointer]
+                  - generic [ref=f2e94]:
+                    - generic [ref=f2e95]: 仅看最新版本
+                    - button "仅看最新版本开关" [ref=f2e96] [cursor=pointer]
+                  - generic [ref=f2e97]:
+                    - generic [ref=f2e98]: 显示低置信证据
+                    - button "显示低置信证据开关" [ref=f2e99] [cursor=pointer]
+                  - generic [ref=f2e100]:
+                    - generic [ref=f2e101]:
+                      - generic [ref=f2e102]: 相似度阈值
+                      - generic [ref=f2e103]: "0.76"
+                    - slider "相似度阈值" [ref=f2e104]: "0.76"
+                - button "生成回答" [ref=f2e105] [cursor=pointer]
+          - region "回答区" [ref=f2e108]:
+            - generic [ref=f2e109]:
+              - heading "回答与引用" [level=2] [ref=f2e110]
+              - generic [ref=f2e114]: 检索完成 · 5 条引用
+            - generic [ref=f2e115]:
+              - generic "回答视图" [ref=f2e116]:
+                - button "综合答案" [ref=f2e117] [cursor=pointer]
+                - button "证据优先" [ref=f2e118] [cursor=pointer]
+                - button "差异对照" [ref=f2e119] [cursor=pointer]
+              - generic [ref=f2e120]: 响应 1.42s
+              - generic [ref=f2e121]: 引用覆盖率 92%
+              - generic [ref=f2e122]: 新旧制度冲突 1
+            - generic [ref=f2e123]:
+              - generic [ref=f2e124]:
+                - generic [ref=f2e125]: 你
+                - paragraph [ref=f2e127]: 员工每周远程办公 3 天，需要经过哪些审批？
+              - generic [ref=f2e128]:
+                - generic [ref=f2e129]: EKB
+                - generic [ref=f2e130]:
+                  - paragraph [ref=f2e131]:
+                    - text: 根据 2026 版员工手册，常规远程办公上限为每周 2 天；连续或固定每周 3 天属于扩展远程安排，需要直属主管确认、部门负责人审批，并由 HRBP 归档备案。
+                    - generic [ref=f2e132]: "1"
+                    - generic [ref=f2e133]: "2"
+                  - paragraph [ref=f2e134]:
+                    - text: 如果申请人处于试用期、涉及客户现场支持、或岗位在合规高敏清单内，还需要补充数据访问风险确认。系统检索到一条 2025 旧版流程仍被内部 FAQ 引用，建议以 2026 版手册为准。
+                    - generic [ref=f2e135]: "3"
+                    - generic [ref=f2e136]: "5"
+                  - generic [ref=f2e137]:
+                    - generic [ref=f2e138]: 证据支持
+                    - generic [ref=f2e141]: 5 条来源
+                    - button "有帮助" [ref=f2e144] [cursor=pointer]
+                    - button "引用有误" [ref=f2e145] [cursor=pointer]
+            - generic [ref=f2e147]:
+              - textbox "追问" [ref=f2e148]:
+                - /placeholder: 继续追问当前证据链
+              - button "发送" [ref=f2e149] [cursor=pointer]
+          - region "证据检查器" [ref=f2e152]:
+            - generic [ref=f2e153]:
+              - heading "证据检查器" [level=2] [ref=f2e154]
+              - generic [ref=f2e158]: chunk c-3842
+            - generic [ref=f2e159]:
+              - generic [ref=f2e160]:
+                - generic [ref=f2e161]:
+                  - generic [ref=f2e162]: 语义相似度
+                  - generic [ref=f2e165]: "0.91"
+                - generic [ref=f2e166]:
+                  - generic [ref=f2e167]: 关键词命中
+                  - generic [ref=f2e170]: "0.84"
+                - generic [ref=f2e171]:
+                  - generic [ref=f2e172]: 时效性
+                  - generic [ref=f2e175]: "2026"
+                - generic [ref=f2e176]:
+                  - generic [ref=f2e177]: 权限匹配
+                  - generic [ref=f2e180]: 通过
+              - generic [ref=f2e181]:
+                - article [ref=f2e182]:
+                  - generic [ref=f2e183]: "1"
+                  - generic [ref=f2e184]:
+                    - heading "员工手册 2026 · 远程办公政策" [level=3] [ref=f2e185]
+                    - paragraph [ref=f2e186]: 固定每周超过 2 天远程办公，应取得直属主管、部门负责人审批，并由 HRBP 备案。
+                    - generic [ref=f2e187]:
+                      - generic [ref=f2e188]: v42
+                      - generic [ref=f2e189]: 第 4.2 节
+                      - generic [ref=f2e190]: 员工可见
+                - article [ref=f2e191]:
+                  - generic [ref=f2e192]: "2"
+                  - generic [ref=f2e193]:
+                    - heading "HRBP 操作指引 · 审批流" [level=3] [ref=f2e194]
+                    - paragraph [ref=f2e195]: HRBP 在审批结束后记录远程办公周期、岗位类型、数据访问等级。
+                    - generic [ref=f2e196]:
+                      - generic [ref=f2e197]: v18
+                      - generic [ref=f2e198]: 流程图 A
+                - article [ref=f2e199]:
+                  - generic [ref=f2e200]: "5"
+                  - generic [ref=f2e201]:
+                    - heading "旧版 FAQ · 远程办公例外" [level=3] [ref=f2e202]
+                    - paragraph [ref=f2e203]: 旧流程仍显示“主管审批即可”，与 2026 手册存在冲突。
+                    - generic [ref=f2e204]:
+                      - generic [ref=f2e205]: 旧版引用
+                      - generic [ref=f2e206]: 需治理
+              - generic [ref=f2e207]:
+                - paragraph [ref=f2e208]: 检索链路
+                - list [ref=f2e209]:
+                  - listitem [ref=f2e210]:
+                    - generic [ref=f2e212]: 查询改写：远程办公 3 天 审批 试用期
+                  - listitem [ref=f2e213]:
+                    - generic [ref=f2e215]: Hybrid 召回：向量 46 条，BM25 31 条
+                  - listitem [ref=f2e216]:
+                    - generic [ref=f2e218]: 重排：保留 8 条，过滤 2 条越权片段
+                  - listitem [ref=f2e219]:
+                    - generic [ref=f2e221]: 引用校验：发现 1 条旧版制度冲突
+        - generic [ref=f2e222]:
+          - region "知识治理队列" [ref=f2e223]:
+            - generic [ref=f2e224]:
+              - heading "低置信与冲突队列" [level=2] [ref=f2e225]
+              - generic [ref=f2e229]: 7 待处理
+            - generic [ref=f2e230]:
+              - generic [ref=f2e231]:
+                - generic [ref=f2e232]:
+                  - generic [ref=f2e233]: 旧版 FAQ 仍被高频引用
+                  - generic [ref=f2e234]: HR 政策与员工手册 · 最近 24h 命中 14 次
+                - button "分派" [ref=f2e235] [cursor=pointer]
+              - generic [ref=f2e236]:
+                - generic [ref=f2e237]:
+                  - generic [ref=f2e238]: 合规制度库解析失败：表格跨页
+                  - generic [ref=f2e239]: 合规制度库 · 解析器 Docling OCR
+                - button "重试" [ref=f2e240] [cursor=pointer]
+              - generic [ref=f2e241]:
+                - generic [ref=f2e242]:
+                  - generic [ref=f2e243]: VPN SOP 缺少 macOS 15 步骤
+                  - generic [ref=f2e244]: IT 运维 SOP · 用户反馈 3 次
+                - button "补充" [ref=f2e245] [cursor=pointer]
+          - region "召回质量趋势" [ref=f2e246]:
+            - generic [ref=f2e247]:
+              - heading "召回质量" [level=2] [ref=f2e248]
+              - generic [ref=f2e252]: 7 日稳定
+            - generic [ref=f2e254]:
+              - generic [ref=f2e255]:
+                - generic [ref=f2e256]: 引用正确率
+                - strong [ref=f2e259]: 92%
+              - generic [ref=f2e260]:
+                - generic [ref=f2e261]: 低置信率
+                - strong [ref=f2e264]: 11%
+              - generic [ref=f2e265]:
+                - generic [ref=f2e266]: 拒答准确率
+                - strong [ref=f2e269]: 88%
+              - generic [ref=f2e270]:
+                - generic [ref=f2e271]: 版本新鲜度
+                - strong [ref=f2e274]: 96%
+    - region [ref=f2e275]:
+      - heading "GitHub 对标转译" [level=2] [ref=f2e276]
+      - paragraph [ref=f2e277]: 这份 v6 设计稿吸收开源知识库/RAG 产品的可用模式，但落点保持在 EKB 现有的四页架构：问答、知识库、检索、运营。重点不是增加炫技入口，而是把“可信答案”拆成可检索、可审计、可治理的界面对象。
+      - generic [ref=f2e278]:
+        - article [ref=f2e279]:
+          - strong [ref=f2e280]: Dify
+          - generic [ref=f2e281]: 知识管道、数据源接入、测试与监控启发了检索设置、数据源连接和质量门禁。
+        - article [ref=f2e282]:
+          - strong [ref=f2e283]: RAGFlow
+          - generic [ref=f2e284]: 分块可视化、引用追踪和混合检索启发了右侧证据检查器与检索链路。
+        - article [ref=f2e285]:
+          - strong [ref=f2e286]: MaxKB
+          - generic [ref=f2e287]: 开箱即用的问答与嵌入场景启发了左侧 KB 选择、会话和快速问答。
+        - article [ref=f2e288]:
+          - strong [ref=f2e289]: AnythingLLM
+          - generic [ref=f2e290]: Workspace + 文档拖拽 + 来源引用启发了低摩擦提问区和文档清单。
+        - article [ref=f2e291]:
+          - strong [ref=f2e292]: Open WebUI
+          - generic [ref=f2e293]: 知识集合、检索模式、目录同步和 API/导出启发了检索过滤与资产同步状态。
+        - article [ref=f2e294]:
+          - strong [ref=f2e295]: WeKnora
+          - generic [ref=f2e296]: 企业文档理解、Wiki/图谱、向量库绑定和审计启发了治理队列与运营审计。
+    - paragraph [ref=f2e297]: EKB UI design draft v6 · Galaxy Motion benchmark prototype · no backend connection
+  - navigation "Dock 快捷导航" [ref=f2e298]:
+    - button "问答助手" [ref=f2e299] [cursor=pointer]
+    - button "知识库" [ref=f2e302] [cursor=pointer]
+    - button "检索中心" [ref=f2e305] [cursor=pointer]
+    - button "运营看板" [ref=f2e308] [cursor=pointer]

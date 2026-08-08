@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from dataclasses import dataclass
 from typing import Optional
 
 from ekb_api import models
@@ -87,6 +88,20 @@ def _decode_preview_text(raw_bytes: bytes) -> str:
     if text:
         return text
     return "该文件已进入入库流程；真实解析器会在 M1-04 接入。"
+
+
+@dataclass
+class SearchContext:
+    """M4-3 检索优化：预取的检索上下文，多路召回共享。
+
+    避免每个子查询重复全表扫描 + 重复建 BM25 索引。
+    """
+
+    rows: list  # ORM Chunk rows
+    corpus: list[str]
+    bm25: Optional[object]  # _Bm25 实例或 None
+    has_embeddings: bool
+    settings: object  # Settings 实例
 
 
 class SqlStore:
@@ -889,6 +904,109 @@ class SqlStore:
             score=0.0,
             updated_at=row.updated_at,
         )
+
+    # ---- M4-3 检索优化：共享上下文 + 并行多路召回 ----
+
+    def fetch_search_context(
+        self, auth: AuthContext, kb_ids: list[str]
+    ) -> Optional[SearchContext]:
+        """一次性获取检索上下文：allowed_kb_ids + rows + BM25 索引 + embedding 可用性。
+
+        M4-3 优化：多路召回时避免 N 次重复全表查询 + N 次重复建 BM25 索引。
+        retrieve 层调用一次，各子查询共享同一上下文。
+        """
+        from ekb_api.core.config import get_settings
+        from ekb_api.ranking import _Bm25
+
+        allowed_kb_ids = {
+            kb.id for kb in self.list_knowledge_bases(auth) if not kb_ids or kb.id in kb_ids
+        }
+        if not allowed_kb_ids:
+            return None
+
+        SessionLocal = get_session_local()
+        with SessionLocal() as session:
+            rows = (
+                session.query(models.Chunk)
+                .join(models.Document, models.Document.id == models.Chunk.doc_id)
+                .filter(models.Document.status == DocumentStatus.READY.value)
+                .filter(models.Chunk.tenant_id == auth.tenant_id)
+                .filter(models.Chunk.kb_id.in_(allowed_kb_ids))
+                .all()
+            )
+        if not rows:
+            return None
+
+        settings = get_settings()
+        corpus = [f"{r.title} {' '.join(r.section_path or [])} {r.content}" for r in rows]
+        bm25 = _Bm25(corpus) if settings.retrieval_bm25_enabled else None
+        has_embeddings = any(r.embedding for r in rows)
+        return SearchContext(
+            rows=rows,
+            corpus=corpus,
+            bm25=bm25,
+            has_embeddings=has_embeddings,
+            settings=settings,
+        )
+
+    def search_with_context(
+        self, ctx: SearchContext, query: str, top_k: int
+    ) -> list[Chunk]:
+        """在预取的检索上下文上执行单查询检索（BM25 + 语义门禁 + Rerank）。
+
+        M4-3 优化：与 search() 逻辑等价，但复用 ctx 中预取的 rows/corpus/BM25，
+        消除多路召回时的重复全表扫描和索引构建。
+        """
+        from ekb_api.embedding import cosine_similarity, embed_one
+        from ekb_api.ranking import rerank
+
+        rows = ctx.rows
+        settings = ctx.settings
+
+        # 词法 BM25（复用预建索引）。
+        if ctx.bm25 is not None:
+            lexical_scores = ctx.bm25.scores(query)
+        else:
+            lexical_scores = [0.0] * len(rows)
+
+        # 语义/关键词代理分 + 候选门禁。
+        semantic_scores = [0.0] * len(rows)
+        candidates: set[int] = set()
+        if ctx.has_embeddings:
+            query_vec = embed_one(query)
+            qdim = len(query_vec)
+            threshold = settings.retrieval_cosine_threshold
+            for i, row in enumerate(rows):
+                if row.embedding and len(row.embedding) == qdim:
+                    score = cosine_similarity(query_vec, row.embedding)
+                    semantic_scores[i] = score
+                    if score >= threshold:
+                        candidates.add(i)
+            if not candidates:
+                for i in range(len(rows)):
+                    if _keyword_score(query, ctx.corpus[i]) > 0:
+                        candidates.add(i)
+        else:
+            for i in range(len(rows)):
+                if _keyword_score(query, ctx.corpus[i]) > 0:
+                    candidates.add(i)
+
+        if not candidates:
+            return []
+
+        cand_idx = sorted(candidates)
+        pool_chunks = [self._chunk_from_row(rows[i]) for i in cand_idx]
+        pool_sem = [semantic_scores[i] for i in cand_idx]
+        pool_lex = [lexical_scores[i] for i in cand_idx]
+        reranked = rerank(
+            query,
+            pool_chunks,
+            semantic_scores=pool_sem,
+            lexical_scores=pool_lex,
+            pool_size=len(pool_chunks),
+            rrf_k=settings.retrieval_rrf_k,
+        )
+        return reranked[:top_k]
 
     def search(self, auth: AuthContext, query: str, kb_ids: list[str], top_k: int) -> list[Chunk]:
         """M1-05 混合检索：BM25 词法召回 + 语义召回 → RRF 融合 → Rerank 精排。

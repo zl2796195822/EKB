@@ -1,0 +1,144 @@
+- generic [ref=f1e1]:
+  - generic [ref=f1e2]:
+    - banner [ref=f1e3]:
+      - navigation "主导航" [ref=f1e5]:
+        - button "问答助手" [ref=f1e332] [cursor=pointer]
+        - button "知识库" [active] [ref=f1e333] [cursor=pointer]
+        - button "检索中心" [ref=f1e334] [cursor=pointer]
+        - button "运营看板" [ref=f1e335] [cursor=pointer]
+    - main [ref=f1e19]:
+      - generic [ref=f1e20]:
+        - generic [ref=f1e22]:
+          - generic [ref=f1e23]: Enterprise Knowledge Base · Galaxy Motion v6
+          - strong [ref=f1e24]: 知识资产
+        - searchbox "全局搜索" [ref=f1e28]: 远程办公审批
+        - generic "当前用户" [ref=f1e30]: A
+      - region [ref=f1e336]:
+        - generic [ref=f1e337]:
+          - generic [ref=f1e338]:
+            - heading "知识资产" [level=1] [ref=f1e339]
+            - paragraph [ref=f1e340]: 按知识库、文档、版本、解析状态和权限边界管理企业知识。
+          - generic [ref=f1e341]:
+            - button "连接数据源" [ref=f1e342] [cursor=pointer]
+            - button "上传文档" [ref=f1e345] [cursor=pointer]
+        - generic [ref=f1e348]:
+          - generic [ref=f1e349]:
+            - generic [ref=f1e350]: 知识库
+            - strong [ref=f1e351]: "4"
+            - generic [ref=f1e352]: 全部有 owner
+          - generic [ref=f1e353]:
+            - generic [ref=f1e354]: 文档
+            - strong [ref=f1e355]: "312"
+            - generic [ref=f1e356]: +18 本周新增
+          - generic [ref=f1e357]:
+            - generic [ref=f1e358]: 解析成功率
+            - strong [ref=f1e359]: 98.7%
+            - generic [ref=f1e360]: 高于阈值
+          - generic [ref=f1e361]:
+            - generic [ref=f1e362]: 待治理
+            - strong [ref=f1e363]: "7"
+            - generic [ref=f1e364]: 需处理
+        - generic [ref=f1e365]:
+          - generic [ref=f1e366]:
+            - generic [ref=f1e367]:
+              - heading "文档清单" [level=2] [ref=f1e368]
+              - generic [ref=f1e372]: 按更新排序
+            - table [ref=f1e374]:
+              - rowgroup [ref=f1e375]:
+                - row [ref=f1e376]:
+                  - columnheader "文档" [ref=f1e377]
+                  - columnheader "状态" [ref=f1e378]
+                  - columnheader "来源" [ref=f1e379]
+                  - columnheader "版本" [ref=f1e380]
+                  - columnheader "权限" [ref=f1e381]
+                  - columnheader "最近索引" [ref=f1e382]
+              - rowgroup [ref=f1e383]:
+                - row [ref=f1e384]:
+                  - cell "员工手册 2026.pdf HR 政策与员工手册" [ref=f1e385]:
+                    - generic [ref=f1e386]:
+                      - strong [ref=f1e387]: 员工手册 2026.pdf
+                      - generic [ref=f1e388]: HR 政策与员工手册
+                  - cell "就绪" [ref=f1e389]
+                  - cell "Confluence Sync" [ref=f1e391]
+                  - cell "v42" [ref=f1e392]
+                  - cell "员工可见" [ref=f1e393]
+                  - cell "18 分钟前" [ref=f1e394]
+                - row [ref=f1e395]:
+                  - cell "远程办公 FAQ.md HR 政策与员工手册" [ref=f1e396]:
+                    - generic [ref=f1e397]:
+                      - strong [ref=f1e398]: 远程办公 FAQ.md
+                      - generic [ref=f1e399]: HR 政策与员工手册
+                  - cell "需复核" [ref=f1e400]
+                  - cell "Git 仓库" [ref=f1e402]
+                  - cell "v17" [ref=f1e403]
+                  - cell "员工可见" [ref=f1e404]
+                  - cell "2 小时前" [ref=f1e405]
+                - row [ref=f1e406]:
+                  - cell "客户数据导出审批.xlsx 合规制度库" [ref=f1e407]:
+                    - generic [ref=f1e408]:
+                      - strong [ref=f1e409]: 客户数据导出审批.xlsx
+                      - generic [ref=f1e410]: 合规制度库
+                  - cell "解析失败" [ref=f1e411]
+                  - cell "SharePoint" [ref=f1e413]
+                  - cell "v9" [ref=f1e414]
+                  - cell "合规团队" [ref=f1e415]
+                  - cell "等待重试" [ref=f1e416]
+                - row [ref=f1e417]:
+                  - cell "VPN 访问排障 SOP.docx IT 运维 SOP" [ref=f1e418]:
+                    - generic [ref=f1e419]:
+                      - strong [ref=f1e420]: VPN 访问排障 SOP.docx
+                      - generic [ref=f1e421]: IT 运维 SOP
+                  - cell "就绪" [ref=f1e422]
+                  - cell "本地上传" [ref=f1e424]
+                  - cell "v18" [ref=f1e425]
+                  - cell "IT + 员工" [ref=f1e426]
+                  - cell "1 小时前" [ref=f1e427]
+          - complementary [ref=f1e428]:
+            - generic [ref=f1e429]:
+              - heading "分块与版本" [level=2] [ref=f1e430]
+              - generic [ref=f1e434]: v42
+            - generic [ref=f1e436]:
+              - generic [ref=f1e437]:
+                - strong [ref=f1e438]: c-3842
+                - generic [ref=f1e439]: 远程办公审批上限与例外条件
+                - generic [ref=f1e440]: "0.91"
+              - generic [ref=f1e441]:
+                - strong [ref=f1e442]: c-3843
+                - generic [ref=f1e443]: 试用期、客户现场与高敏岗位限制
+                - generic [ref=f1e444]: "0.88"
+              - generic [ref=f1e445]:
+                - strong [ref=f1e446]: c-3844
+                - generic [ref=f1e447]: HRBP 备案字段与审批流回写
+                - generic [ref=f1e448]: "0.84"
+              - generic [ref=f1e449]:
+                - strong [ref=f1e450]: c-1021
+                - generic [ref=f1e451]: 旧版 FAQ 遗留规则，待废弃
+                - generic [ref=f1e452]: 冲突
+    - region [ref=f1e275]:
+      - heading "GitHub 对标转译" [level=2] [ref=f1e276]
+      - paragraph [ref=f1e277]: 这份 v5 设计稿吸收开源知识库/RAG 产品的可用模式，但落点保持在 EKB 现有的四页架构：问答、知识库、检索、运营。重点不是增加炫技入口，而是把“可信答案”拆成可检索、可审计、可治理的界面对象。
+      - generic [ref=f1e278]:
+        - article [ref=f1e279]:
+          - strong [ref=f1e280]: Dify
+          - generic [ref=f1e281]: 知识管道、数据源接入、测试与监控启发了检索设置、数据源连接和质量门禁。
+        - article [ref=f1e282]:
+          - strong [ref=f1e283]: RAGFlow
+          - generic [ref=f1e284]: 分块可视化、引用追踪和混合检索启发了右侧证据检查器与检索链路。
+        - article [ref=f1e285]:
+          - strong [ref=f1e286]: MaxKB
+          - generic [ref=f1e287]: 开箱即用的问答与嵌入场景启发了左侧 KB 选择、会话和快速问答。
+        - article [ref=f1e288]:
+          - strong [ref=f1e289]: AnythingLLM
+          - generic [ref=f1e290]: Workspace + 文档拖拽 + 来源引用启发了低摩擦提问区和文档清单。
+        - article [ref=f1e291]:
+          - strong [ref=f1e292]: Open WebUI
+          - generic [ref=f1e293]: 知识集合、检索模式、目录同步和 API/导出启发了检索过滤与资产同步状态。
+        - article [ref=f1e294]:
+          - strong [ref=f1e295]: WeKnora
+          - generic [ref=f1e296]: 企业文档理解、Wiki/图谱、向量库绑定和审计启发了治理队列与运营审计。
+    - paragraph [ref=f1e297]: EKB UI design draft v6 · Galaxy Motion benchmark prototype · no backend connection
+  - navigation "Dock 快捷导航" [ref=f1e298]:
+    - button "问答助手" [ref=f1e299] [cursor=pointer]
+    - button "知识库" [ref=f1e302] [cursor=pointer]
+    - button "检索中心" [ref=f1e305] [cursor=pointer]
+    - button "运营看板" [ref=f1e308] [cursor=pointer]

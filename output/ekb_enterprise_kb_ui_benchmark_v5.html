@@ -1,0 +1,2090 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>EKB 企业知识库 UI 设计稿 v5</title>
+  <link rel="icon" href="data:," />
+  <style>
+    :root {
+      --primary: #2563eb;
+      --primary-strong: #1d4ed8;
+      --primary-soft: #eaf1ff;
+      --accent: #0d9488;
+      --accent-soft: #e7f6f3;
+      --green: #14804a;
+      --green-soft: #e8f6ee;
+      --amber: #a15c07;
+      --amber-soft: #fff4d9;
+      --red: #c2413a;
+      --red-soft: #fdebea;
+      --ink-1: #111827;
+      --ink-2: #334155;
+      --ink-3: #64748b;
+      --ink-4: #94a3b8;
+      --paper: #f6f7f4;
+      --panel: #ffffff;
+      --panel-alt: #fbfcf8;
+      --line: #dfe6df;
+      --line-strong: #cbd5d1;
+      --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.05);
+      --shadow-md: 0 12px 34px rgba(15, 23, 42, 0.08);
+      --radius: 8px;
+      --font-ui: Inter, "HarmonyOS Sans SC", "Source Han Sans CN", "PingFang SC",
+        "Microsoft YaHei", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --font-mono: "SF Mono", "JetBrains Mono", Consolas, ui-monospace, monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      min-width: 320px;
+      background: var(--paper);
+    }
+
+    body {
+      margin: 0;
+      color: var(--ink-1);
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(246, 247, 244, 0) 260px),
+        var(--paper);
+      font-family: var(--font-ui);
+      font-size: 14px;
+      line-height: 1.5;
+      letter-spacing: 0;
+    }
+
+    button,
+    input,
+    textarea,
+    select {
+      font: inherit;
+      letter-spacing: 0;
+    }
+
+    button {
+      cursor: pointer;
+    }
+
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.58;
+    }
+
+    svg {
+      display: block;
+    }
+
+    .svg-sprite {
+      position: absolute;
+      width: 0;
+      height: 0;
+      overflow: hidden;
+    }
+
+    .icon {
+      width: 16px;
+      height: 16px;
+      flex: 0 0 auto;
+      stroke: currentColor;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      fill: none;
+    }
+
+    .icon-fill {
+      fill: currentColor;
+      stroke: none;
+    }
+
+    .page-wrap {
+      width: 100%;
+      padding: 16px;
+    }
+
+    .product-shell {
+      display: grid;
+      grid-template-columns: 268px minmax(0, 1fr);
+      gap: 16px;
+      width: min(100%, 1580px);
+      margin: 0 auto;
+    }
+
+    .sidebar {
+      position: sticky;
+      top: 16px;
+      display: grid;
+      grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+      gap: 16px;
+      height: calc(100vh - 32px);
+      min-height: 680px;
+      padding: 16px;
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #eef1eb;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .brand-mark {
+      display: grid;
+      width: 36px;
+      height: 36px;
+      place-items: center;
+      border-radius: 8px;
+      color: #fff;
+      background: #214d46;
+      font-size: 19px;
+      font-weight: 800;
+    }
+
+    .brand strong,
+    .brand span {
+      display: block;
+    }
+
+    .brand strong {
+      font-size: 15px;
+      letter-spacing: 0;
+    }
+
+    .brand span {
+      color: #65756f;
+      font-size: 12px;
+    }
+
+    .tenant-card {
+      display: grid;
+      gap: 10px;
+      padding: 12px;
+      border: 1px solid #d6dfd7;
+      border-radius: var(--radius);
+      background: rgba(255, 255, 255, 0.68);
+    }
+
+    .tenant-line {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      color: var(--ink-3);
+      font-size: 12px;
+    }
+
+    .tenant-line strong {
+      color: var(--ink-1);
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .status-pill,
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 24px;
+      padding: 3px 8px;
+      border: 1px solid transparent;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .status-ok {
+      color: var(--green);
+      background: var(--green-soft);
+    }
+
+    .status-info {
+      color: var(--primary);
+      background: var(--primary-soft);
+    }
+
+    .status-warn {
+      color: var(--amber);
+      background: var(--amber-soft);
+    }
+
+    .status-danger {
+      color: var(--red);
+      background: var(--red-soft);
+    }
+
+    .chip-neutral {
+      color: var(--ink-2);
+      background: #eef2f0;
+      border-color: #d7dfdc;
+    }
+
+    .section-kicker {
+      margin: 0 0 8px;
+      color: #6b7b75;
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .nav-list,
+    .kb-list,
+    .conversation-list {
+      display: grid;
+      gap: 6px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .nav-button,
+    .kb-button,
+    .conversation-button {
+      width: 100%;
+      border: 1px solid transparent;
+      border-radius: var(--radius);
+      background: transparent;
+      color: var(--ink-2);
+      text-align: left;
+    }
+
+    .nav-button {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-height: 40px;
+      padding: 9px 10px;
+      font-weight: 700;
+    }
+
+    .nav-button:hover,
+    .nav-button.is-active {
+      border-color: #c8d9d2;
+      color: #173f39;
+      background: #fbfdf8;
+    }
+
+    .nav-button .count {
+      margin-left: auto;
+      color: var(--ink-3);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 700;
+    }
+
+    .kb-button {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      gap: 9px;
+      align-items: center;
+      min-height: 48px;
+      padding: 9px;
+    }
+
+    .kb-button:hover,
+    .kb-button.is-active {
+      border-color: #c7d9d2;
+      background: #fbfdf8;
+    }
+
+    .dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 0 4px var(--accent-soft);
+    }
+
+    .dot-blue {
+      background: var(--primary);
+      box-shadow: 0 0 0 4px var(--primary-soft);
+    }
+
+    .dot-amber {
+      background: #d97706;
+      box-shadow: 0 0 0 4px var(--amber-soft);
+    }
+
+    .line-main,
+    .line-sub {
+      display: block;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .line-main {
+      color: var(--ink-1);
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    .line-sub {
+      color: var(--ink-3);
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .tiny-count {
+      color: var(--ink-3);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 700;
+    }
+
+    .conversation-button {
+      display: grid;
+      gap: 2px;
+      padding: 9px 10px;
+    }
+
+    .conversation-button:hover,
+    .conversation-button.is-active {
+      border-color: #d1ded8;
+      background: #fbfdf8;
+    }
+
+    .sidebar-footer {
+      display: grid;
+      gap: 8px;
+      padding-top: 12px;
+      border-top: 1px solid #dbe4db;
+    }
+
+    .small-button,
+    .icon-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      min-height: 34px;
+      padding: 7px 10px;
+      border: 1px solid var(--line-strong);
+      border-radius: 8px;
+      background: var(--panel);
+      color: var(--ink-2);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .small-button:hover,
+    .icon-button:hover {
+      border-color: #9fb4ad;
+      background: #f7faf6;
+    }
+
+    .main {
+      min-width: 0;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      min-height: 64px;
+      margin-bottom: 16px;
+      padding: 12px 14px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: rgba(255, 255, 255, 0.86);
+      box-shadow: var(--shadow-sm);
+      backdrop-filter: blur(14px);
+    }
+
+    .topbar-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+    }
+
+    .crumbs {
+      display: grid;
+      gap: 1px;
+      min-width: 0;
+    }
+
+    .crumbs span {
+      color: var(--ink-3);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .crumbs strong {
+      overflow: hidden;
+      color: var(--ink-1);
+      font-size: 16px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .global-search {
+      position: relative;
+      width: min(100%, 420px);
+      min-width: 240px;
+    }
+
+    .global-search .icon {
+      position: absolute;
+      top: 50%;
+      left: 12px;
+      color: var(--ink-4);
+      transform: translateY(-50%);
+    }
+
+    .global-search input {
+      width: 100%;
+      height: 40px;
+      padding: 0 14px 0 36px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      outline: 0;
+      background: #f8faf7;
+      color: var(--ink-1);
+    }
+
+    .global-search input:focus,
+    .query-textarea:focus,
+    .field-control:focus,
+    select:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.14);
+    }
+
+    .topbar-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .avatar {
+      display: grid;
+      width: 34px;
+      height: 34px;
+      place-items: center;
+      border-radius: 50%;
+      color: #173f39;
+      background: #dcebe4;
+      font-weight: 900;
+    }
+
+    .screen {
+      display: none;
+    }
+
+    .screen.is-active {
+      display: block;
+    }
+
+    .screen-head {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 14px;
+    }
+
+    .screen-title {
+      margin: 0;
+      color: var(--ink-1);
+      font-size: 24px;
+      line-height: 1.2;
+    }
+
+    .screen-subtitle {
+      margin: 5px 0 0;
+      color: var(--ink-3);
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .head-actions {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+
+    .primary-button,
+    .secondary-button,
+    .danger-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      min-height: 38px;
+      padding: 8px 12px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 900;
+    }
+
+    .primary-button {
+      border: 1px solid var(--primary);
+      color: #fff;
+      background: var(--primary);
+    }
+
+    .primary-button:hover {
+      border-color: var(--primary-strong);
+      background: var(--primary-strong);
+    }
+
+    .secondary-button {
+      border: 1px solid var(--line-strong);
+      color: var(--ink-2);
+      background: var(--panel);
+    }
+
+    .secondary-button:hover {
+      border-color: #aab8b3;
+      background: #f8faf7;
+    }
+
+    .danger-button {
+      border: 1px solid #f2b8b5;
+      color: var(--red);
+      background: var(--red-soft);
+    }
+
+    .context-strip {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+
+    .context-cell {
+      min-width: 0;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: rgba(255, 255, 255, 0.74);
+    }
+
+    .context-label {
+      display: block;
+      margin-bottom: 4px;
+      color: var(--ink-3);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .context-value {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      min-width: 0;
+      color: var(--ink-1);
+      font-size: 13px;
+      font-weight: 900;
+    }
+
+    .context-value span {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .qa-grid {
+      display: grid;
+      grid-template-columns: 304px minmax(0, 1.1fr) 348px;
+      gap: 16px;
+      align-items: start;
+    }
+
+    .panel {
+      min-width: 0;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--panel);
+      box-shadow: var(--shadow-sm);
+    }
+
+    .panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      min-height: 52px;
+      padding: 13px 14px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .panel-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      margin: 0;
+      color: var(--ink-1);
+      font-size: 14px;
+      font-weight: 900;
+    }
+
+    .panel-title span {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .panel-body {
+      padding: 14px;
+    }
+
+    .panel-body.flush {
+      padding: 0;
+    }
+
+    .query-card {
+      display: grid;
+      gap: 14px;
+    }
+
+    .field-label {
+      display: block;
+      margin-bottom: 7px;
+      color: var(--ink-2);
+      font-size: 12px;
+      font-weight: 900;
+    }
+
+    .query-textarea {
+      display: block;
+      width: 100%;
+      min-height: 118px;
+      padding: 12px;
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius);
+      outline: 0;
+      resize: vertical;
+      color: var(--ink-1);
+      background: #fbfcfa;
+      line-height: 1.55;
+    }
+
+    .quick-list {
+      display: grid;
+      gap: 8px;
+    }
+
+    .quick-button {
+      display: block;
+      width: 100%;
+      padding: 9px 10px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #fbfcfa;
+      color: var(--ink-2);
+      text-align: left;
+      font-size: 12px;
+      font-weight: 750;
+    }
+
+    .quick-button:hover {
+      border-color: #b7c8c1;
+      background: #f5faf7;
+    }
+
+    .setting-grid {
+      display: grid;
+      gap: 10px;
+      padding-top: 12px;
+      border-top: 1px solid var(--line);
+    }
+
+    .setting-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      color: var(--ink-2);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .toggle {
+      position: relative;
+      width: 40px;
+      height: 22px;
+      border: 0;
+      border-radius: 999px;
+      background: #d5ded9;
+    }
+
+    .toggle::after {
+      position: absolute;
+      top: 3px;
+      left: 3px;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: #fff;
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.16);
+      content: "";
+      transition: transform 180ms ease;
+    }
+
+    .toggle.is-on {
+      background: var(--accent);
+    }
+
+    .toggle.is-on::after {
+      transform: translateX(18px);
+    }
+
+    .slider-row {
+      display: grid;
+      gap: 6px;
+    }
+
+    input[type="range"] {
+      width: 100%;
+      accent-color: var(--primary);
+    }
+
+    .chat-workspace {
+      display: grid;
+      grid-template-rows: auto minmax(420px, 1fr) auto;
+      min-height: 760px;
+    }
+
+    .answer-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      overflow-x: auto;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .segmented {
+      display: inline-flex;
+      padding: 3px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #f8faf7;
+    }
+
+    .segmented button {
+      min-height: 28px;
+      padding: 4px 9px;
+      border: 0;
+      border-radius: 6px;
+      color: var(--ink-3);
+      background: transparent;
+      font-size: 12px;
+      font-weight: 900;
+    }
+
+    .segmented button.is-on {
+      color: var(--primary);
+      background: #fff;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .message-stream {
+      display: grid;
+      align-content: start;
+      gap: 18px;
+      padding: 18px;
+      overflow: auto;
+      background:
+        linear-gradient(180deg, rgba(250, 252, 248, 0.92), rgba(255, 255, 255, 0.96)),
+        #fff;
+    }
+
+    .message-row {
+      display: grid;
+      grid-template-columns: 54px minmax(0, 1fr);
+      gap: 12px;
+      max-width: 860px;
+    }
+
+    .message-row.user {
+      grid-template-columns: minmax(0, 1fr) 54px;
+      justify-self: end;
+      width: min(100%, 780px);
+    }
+
+    .message-role {
+      padding-top: 5px;
+      color: var(--ink-3);
+      font-size: 12px;
+      font-weight: 900;
+    }
+
+    .message-row.user .message-role {
+      grid-column: 2;
+      text-align: right;
+    }
+
+    .bubble {
+      min-width: 0;
+      padding: 13px 14px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #fff;
+      color: var(--ink-1);
+      box-shadow: var(--shadow-sm);
+    }
+
+    .message-row.user .bubble {
+      grid-column: 1;
+      grid-row: 1;
+      border-color: #d6e7ff;
+      background: var(--primary-soft);
+    }
+
+    .bubble p {
+      margin: 0;
+      font-size: 14px;
+      line-height: 1.72;
+    }
+
+    .bubble p + p {
+      margin-top: 10px;
+    }
+
+    .cite-mark {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 22px;
+      height: 22px;
+      margin: 0 2px;
+      padding: 0 6px;
+      border-radius: 999px;
+      color: var(--primary);
+      background: var(--primary-soft);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 900;
+      vertical-align: 1px;
+    }
+
+    .answer-foot {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid var(--line);
+    }
+
+    .composer {
+      display: grid;
+      gap: 10px;
+      padding: 14px;
+      border-top: 1px solid var(--line);
+      background: #fbfcfa;
+    }
+
+    .composer-bar {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: end;
+    }
+
+    .composer textarea {
+      min-height: 56px;
+    }
+
+    .evidence-list {
+      display: grid;
+      gap: 0;
+    }
+
+    .evidence-item {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      gap: 10px;
+      padding: 13px 14px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .evidence-index {
+      display: grid;
+      width: 28px;
+      height: 28px;
+      place-items: center;
+      border-radius: 8px;
+      color: var(--primary);
+      background: var(--primary-soft);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      font-weight: 900;
+    }
+
+    .evidence-title {
+      margin: 0 0 4px;
+      overflow: hidden;
+      color: var(--ink-1);
+      font-size: 13px;
+      font-weight: 900;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .evidence-snippet {
+      margin: 0;
+      color: var(--ink-3);
+      font-size: 12px;
+      line-height: 1.55;
+    }
+
+    .evidence-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 8px;
+    }
+
+    .inspector-block {
+      display: grid;
+      gap: 10px;
+      padding: 14px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .score-row {
+      display: grid;
+      grid-template-columns: 82px minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: center;
+      color: var(--ink-2);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .meter {
+      position: relative;
+      height: 8px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: #e8eeeb;
+    }
+
+    .meter span {
+      position: absolute;
+      inset: 0 auto 0 0;
+      width: var(--value);
+      border-radius: inherit;
+      background: linear-gradient(90deg, var(--primary), var(--accent));
+    }
+
+    .timeline {
+      display: grid;
+      gap: 10px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .timeline li {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      gap: 9px;
+      color: var(--ink-3);
+      font-size: 12px;
+    }
+
+    .timeline .step-dot {
+      width: 10px;
+      height: 10px;
+      margin-top: 4px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 0 4px var(--accent-soft);
+    }
+
+    .bottom-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
+      gap: 16px;
+      margin-top: 16px;
+    }
+
+    .queue-list {
+      display: grid;
+      gap: 0;
+    }
+
+    .queue-item {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: center;
+      padding: 13px 14px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .queue-item:last-child,
+    .evidence-item:last-child {
+      border-bottom: 0;
+    }
+
+    .queue-title {
+      display: block;
+      overflow: hidden;
+      color: var(--ink-1);
+      font-weight: 900;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .queue-meta {
+      display: block;
+      margin-top: 2px;
+      color: var(--ink-3);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .metric {
+      display: grid;
+      gap: 8px;
+      min-height: 112px;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--panel);
+      box-shadow: var(--shadow-sm);
+    }
+
+    .metric span {
+      color: var(--ink-3);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .metric strong {
+      color: var(--ink-1);
+      font-family: var(--font-mono);
+      font-size: 26px;
+      line-height: 1;
+    }
+
+    .metric small {
+      color: var(--green);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .asset-layout,
+    .search-layout,
+    .ops-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 350px;
+      gap: 16px;
+      align-items: start;
+    }
+
+    .data-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    .data-table th,
+    .data-table td {
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    .data-table th {
+      color: var(--ink-3);
+      background: #f8faf7;
+      font-size: 12px;
+      font-weight: 900;
+    }
+
+    .data-table td {
+      color: var(--ink-2);
+      font-size: 13px;
+      font-weight: 650;
+    }
+
+    .data-table tbody tr {
+      transition: background 160ms ease;
+    }
+
+    .data-table tbody tr:hover,
+    .data-table tbody tr.is-selected {
+      background: #f8fbff;
+    }
+
+    .doc-name {
+      display: grid;
+      gap: 3px;
+      min-width: 220px;
+    }
+
+    .doc-name strong {
+      color: var(--ink-1);
+      font-weight: 900;
+    }
+
+    .doc-name small,
+    .mono {
+      color: var(--ink-3);
+      font-family: var(--font-mono);
+      font-size: 12px;
+    }
+
+    .split-preview {
+      display: grid;
+      gap: 8px;
+    }
+
+    .chunk-row {
+      display: grid;
+      grid-template-columns: 54px minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: center;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfcfa;
+    }
+
+    .chunk-row strong {
+      color: var(--ink-1);
+      font-family: var(--font-mono);
+      font-size: 12px;
+    }
+
+    .chunk-row span {
+      overflow: hidden;
+      color: var(--ink-3);
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .search-form {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+
+    .field-control {
+      width: 100%;
+      height: 40px;
+      padding: 0 12px;
+      border: 1px solid var(--line-strong);
+      border-radius: 8px;
+      outline: 0;
+      color: var(--ink-1);
+      background: #fff;
+    }
+
+    .filters {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+
+    .filter-chip {
+      min-height: 30px;
+      padding: 5px 10px;
+      border: 1px solid var(--line-strong);
+      border-radius: 999px;
+      color: var(--ink-2);
+      background: #fff;
+      font-size: 12px;
+      font-weight: 850;
+    }
+
+    .filter-chip.is-on {
+      border-color: #bcd4ff;
+      color: var(--primary);
+      background: var(--primary-soft);
+    }
+
+    .result-list {
+      display: grid;
+      gap: 10px;
+    }
+
+    .result-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 116px;
+      gap: 12px;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--panel);
+    }
+
+    .result-row h3 {
+      margin: 0 0 6px;
+      color: var(--ink-1);
+      font-size: 15px;
+    }
+
+    .result-row p {
+      margin: 0;
+      color: var(--ink-3);
+      font-size: 13px;
+      line-height: 1.6;
+    }
+
+    mark {
+      padding: 0 3px;
+      border-radius: 4px;
+      color: #173f39;
+      background: #dff4ec;
+    }
+
+    .score-box {
+      display: grid;
+      align-content: start;
+      gap: 7px;
+      text-align: right;
+    }
+
+    .score-box strong {
+      color: var(--primary);
+      font-family: var(--font-mono);
+      font-size: 20px;
+    }
+
+    .bar-chart {
+      display: grid;
+      gap: 12px;
+    }
+
+    .bar-row {
+      display: grid;
+      grid-template-columns: 120px minmax(0, 1fr) 54px;
+      gap: 10px;
+      align-items: center;
+      color: var(--ink-2);
+      font-size: 12px;
+      font-weight: 850;
+    }
+
+    .bar {
+      height: 10px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: #edf2ef;
+    }
+
+    .bar span {
+      display: block;
+      width: var(--value);
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, var(--primary), var(--accent));
+    }
+
+    .audit-list {
+      display: grid;
+      gap: 0;
+    }
+
+    .audit-row {
+      display: grid;
+      grid-template-columns: 78px minmax(0, 1fr);
+      gap: 10px;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .audit-row:last-child {
+      border-bottom: 0;
+    }
+
+    .audit-time {
+      color: var(--ink-3);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .audit-main {
+      display: grid;
+      gap: 3px;
+      min-width: 0;
+    }
+
+    .audit-main strong {
+      overflow: hidden;
+      color: var(--ink-1);
+      font-size: 13px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .audit-main span {
+      color: var(--ink-3);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .benchmark-section {
+      width: min(100%, 1580px);
+      margin: 16px auto 0;
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: rgba(255, 255, 255, 0.78);
+      box-shadow: var(--shadow-sm);
+    }
+
+    .benchmark-section h2 {
+      margin: 0 0 8px;
+      font-size: 18px;
+    }
+
+    .benchmark-section > p {
+      max-width: 980px;
+      margin: 0 0 14px;
+      color: var(--ink-3);
+      font-size: 13px;
+      font-weight: 650;
+    }
+
+    .benchmark-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .benchmark-card {
+      display: grid;
+      gap: 7px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #fbfcfa;
+    }
+
+    .benchmark-card strong {
+      color: var(--ink-1);
+      font-size: 13px;
+    }
+
+    .benchmark-card span {
+      color: var(--ink-3);
+      font-size: 12px;
+      line-height: 1.55;
+    }
+
+    .prototype-note {
+      width: min(100%, 1580px);
+      margin: 10px auto 0;
+      color: var(--ink-3);
+      font-size: 12px;
+      text-align: right;
+    }
+
+    @media (max-width: 1280px) {
+      .qa-grid,
+      .asset-layout,
+      .search-layout,
+      .ops-layout {
+        grid-template-columns: 1fr;
+      }
+
+      .chat-workspace {
+        min-height: 660px;
+      }
+
+      .metrics-grid,
+      .context-strip,
+      .benchmark-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+
+    @media (max-width: 900px) {
+      .page-wrap {
+        padding: 10px;
+      }
+
+      .product-shell {
+        grid-template-columns: 1fr;
+      }
+
+      .main {
+        order: 1;
+      }
+
+      .sidebar {
+        order: 2;
+        position: static;
+        height: auto;
+        min-height: 0;
+      }
+
+      .nav-list,
+      .kb-list {
+        grid-auto-flow: column;
+        grid-auto-columns: minmax(180px, 1fr);
+        overflow-x: auto;
+      }
+
+      .conversation-list {
+        max-height: 180px;
+        overflow: auto;
+      }
+
+      .topbar,
+      .screen-head,
+      .bottom-grid {
+        display: grid;
+        grid-template-columns: 1fr;
+      }
+
+      .global-search {
+        width: 100%;
+        min-width: 0;
+      }
+
+      .topbar-actions,
+      .head-actions {
+        justify-content: flex-start;
+      }
+    }
+
+    @media (max-width: 640px) {
+      .metrics-grid,
+      .context-strip,
+      .benchmark-grid,
+      .composer-bar,
+      .search-form {
+        grid-template-columns: 1fr;
+      }
+
+      .result-row {
+        grid-template-columns: 1fr;
+      }
+
+      .score-box {
+        text-align: left;
+      }
+
+      .data-table {
+        min-width: 760px;
+      }
+
+      .table-scroll {
+        overflow-x: auto;
+      }
+    }
+  </style>
+</head>
+<body>
+  <svg class="svg-sprite" aria-hidden="true">
+    <symbol id="i-chat" viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-8 8H7l-4 3v-6a8 8 0 1 1 18-5Z" /></symbol>
+    <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" /><path d="M4 4.5A2.5 2.5 0 0 1 6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15Z" /></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></symbol>
+    <symbol id="i-gauge" viewBox="0 0 24 24"><path d="M21 14a9 9 0 1 0-18 0" /><path d="M12 14l4-5" /><path d="M7 14h10" /></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z" /><path d="m9 12 2 2 4-5" /></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" /><path d="M14 2v6h6" /><path d="M8 13h8" /><path d="M8 17h6" /></symbol>
+    <symbol id="i-upload" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="M17 8 12 3 7 8" /><path d="M12 3v12" /></symbol>
+    <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.1 0l2-2a5 5 0 0 0-7.1-7.1l-1.1 1.1" /><path d="M14 11a5 5 0 0 0-7.1 0l-2 2A5 5 0 0 0 12 20.1l1.1-1.1" /></symbol>
+    <symbol id="i-send" viewBox="0 0 24 24"><path d="m22 2-7 20-4-9-9-4Z" /><path d="M22 2 11 13" /></symbol>
+    <symbol id="i-filter" viewBox="0 0 24 24"><path d="M3 5h18" /><path d="M6 12h12" /><path d="M10 19h4" /></symbol>
+    <symbol id="i-database" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="8" ry="3" /><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5" /><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3" /></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m20 6-11 11-5-5" /></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="m12 3 10 18H2Z" /><path d="M12 9v5" /><path d="M12 18h.01" /></symbol>
+    <symbol id="i-chart" viewBox="0 0 24 24"><path d="M3 3v18h18" /><path d="m7 15 4-4 3 3 5-7" /></symbol>
+  </svg>
+
+  <div class="page-wrap">
+    <div class="product-shell">
+      <aside class="sidebar" aria-label="EKB 导航">
+        <div class="brand">
+          <span class="brand-mark">E</span>
+          <div>
+            <strong>EKB</strong>
+            <span>企业知识库</span>
+          </div>
+        </div>
+
+        <section class="tenant-card" aria-label="当前租户">
+          <div class="tenant-line">
+            <span>租户</span>
+            <strong>环球保险集团</strong>
+          </div>
+          <div class="tenant-line">
+            <span>身份</span>
+            <span class="status-pill status-ok"><svg class="icon"><use href="#i-shield" /></svg>已鉴权</span>
+          </div>
+          <div class="tenant-line">
+            <span>策略</span>
+            <strong>RBAC · 数据不出域</strong>
+          </div>
+        </section>
+
+        <nav aria-label="主功能">
+          <p class="section-kicker">工作台</p>
+          <ul class="nav-list">
+            <li><button class="nav-button is-active" data-screen="qa"><svg class="icon"><use href="#i-chat" /></svg>问答助手<span class="count">12</span></button></li>
+            <li><button class="nav-button" data-screen="kb"><svg class="icon"><use href="#i-book" /></svg>知识资产<span class="count">4</span></button></li>
+            <li><button class="nav-button" data-screen="search"><svg class="icon"><use href="#i-search" /></svg>检索中心<span class="count">128</span></button></li>
+            <li><button class="nav-button" data-screen="ops"><svg class="icon"><use href="#i-gauge" /></svg>运营治理<span class="count">7</span></button></li>
+          </ul>
+        </nav>
+
+        <section aria-label="知识库列表">
+          <p class="section-kicker">授权知识库</p>
+          <ul class="kb-list">
+            <li><button class="kb-button is-active"><span class="dot"></span><span><span class="line-main">HR 政策与员工手册</span><span class="line-sub">1,248 段 · 98.7% 就绪</span></span><span class="tiny-count">v42</span></button></li>
+            <li><button class="kb-button"><span class="dot dot-blue"></span><span><span class="line-main">IT 运维 SOP</span><span class="line-sub">876 段 · 今日同步</span></span><span class="tiny-count">v18</span></button></li>
+            <li><button class="kb-button"><span class="dot dot-amber"></span><span><span class="line-main">合规制度库</span><span class="line-sub">2 个解析告警</span></span><span class="tiny-count">v9</span></button></li>
+          </ul>
+        </section>
+
+        <section aria-label="会话历史">
+          <p class="section-kicker">最近会话</p>
+          <ul class="conversation-list">
+            <li><button class="conversation-button is-active"><span class="line-main">远程办公审批边界</span><span class="line-sub">16 分钟前 · 引用 5</span></button></li>
+            <li><button class="conversation-button"><span class="line-main">VPN 登录失败排障</span><span class="line-sub">昨天 · 引用 3</span></button></li>
+            <li><button class="conversation-button"><span class="line-main">新人入职材料清单</span><span class="line-sub">周三 · 引用 6</span></button></li>
+          </ul>
+        </section>
+
+        <div class="sidebar-footer">
+          <button class="small-button"><svg class="icon"><use href="#i-upload" /></svg>上传文档</button>
+          <button class="small-button"><svg class="icon"><use href="#i-chart" /></svg>查看审计</button>
+        </div>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <div class="topbar-left">
+            <div class="crumbs">
+              <span>Enterprise Knowledge Base · Galaxy Motion v5</span>
+              <strong id="active-title">问答工作台</strong>
+            </div>
+          </div>
+          <label class="global-search">
+            <svg class="icon"><use href="#i-search" /></svg>
+            <input id="globalSearch" type="search" value="远程办公审批" aria-label="全局搜索" />
+          </label>
+          <div class="topbar-actions">
+            <span class="status-pill status-info"><svg class="icon"><use href="#i-clock" /></svg>索引延迟 18m</span>
+            <span class="avatar" aria-label="当前用户">A</span>
+          </div>
+        </header>
+
+        <section id="screen-qa" class="screen is-active" aria-labelledby="qa-title">
+          <div class="screen-head">
+            <div>
+              <h1 class="screen-title" id="qa-title">问答工作台</h1>
+              <p class="screen-subtitle">当前会话绑定 HR 政策知识库，回答区与证据区同步展示权限、版本和召回质量。</p>
+            </div>
+            <div class="head-actions">
+              <button class="secondary-button"><svg class="icon"><use href="#i-file" /></svg>导出会话</button>
+              <button class="primary-button"><svg class="icon"><use href="#i-chat" /></svg>新建会话</button>
+            </div>
+          </div>
+
+          <div class="context-strip" aria-label="当前上下文">
+            <div class="context-cell"><span class="context-label">知识库</span><span class="context-value"><svg class="icon"><use href="#i-book" /></svg><span>HR 政策与员工手册</span></span></div>
+            <div class="context-cell"><span class="context-label">检索模式</span><span class="context-value"><svg class="icon"><use href="#i-filter" /></svg><span>Hybrid · BM25 + Vector + Rerank</span></span></div>
+            <div class="context-cell"><span class="context-label">权限范围</span><span class="context-value"><svg class="icon"><use href="#i-shield" /></svg><span>员工可见 · 薪酬段落脱敏</span></span></div>
+            <div class="context-cell"><span class="context-label">可信状态</span><span class="context-value"><span class="status-pill status-ok">证据充分</span><span class="status-pill status-warn">1 处需复核</span></span></div>
+          </div>
+
+          <div class="qa-grid">
+            <section class="panel" aria-label="提问与检索设置">
+              <div class="panel-header">
+                <h2 class="panel-title"><svg class="icon"><use href="#i-send" /></svg><span>提问</span></h2>
+                <span class="chip chip-neutral">top-k 8</span>
+              </div>
+              <div class="panel-body">
+                <div class="query-card">
+                  <label>
+                    <span class="field-label">问题</span>
+                    <textarea id="questionInput" class="query-textarea">员工每周远程办公 3 天，需要经过哪些审批？</textarea>
+                  </label>
+                  <div class="quick-list" aria-label="快速问题">
+                    <button class="quick-button" data-fill="数据库连接池耗尽时，应该先检查哪些指标？">数据库连接池耗尽时，应该先检查哪些指标？</button>
+                    <button class="quick-button" data-fill="客户数据导出审批超过 7 天没有处理，升级路径是什么？">客户数据导出审批超过 7 天没有处理，升级路径是什么？</button>
+                    <button class="quick-button" data-fill="试用期员工是否可以申请远程办公？">试用期员工是否可以申请远程办公？</button>
+                  </div>
+                  <div class="setting-grid">
+                    <div class="setting-row"><span>重排模型</span><button class="toggle is-on" aria-label="重排模型开关"></button></div>
+                    <div class="setting-row"><span>仅看最新版本</span><button class="toggle is-on" aria-label="仅看最新版本开关"></button></div>
+                    <div class="setting-row"><span>显示低置信证据</span><button class="toggle" aria-label="显示低置信证据开关"></button></div>
+                    <div class="slider-row">
+                      <div class="setting-row"><span>相似度阈值</span><span id="thresholdLabel">0.76</span></div>
+                      <input id="thresholdRange" type="range" min="0.50" max="0.95" step="0.01" value="0.76" aria-label="相似度阈值" />
+                    </div>
+                  </div>
+                  <button id="askButton" class="primary-button"><svg class="icon"><use href="#i-send" /></svg>生成回答</button>
+                </div>
+              </div>
+            </section>
+
+            <section class="panel chat-workspace" aria-label="回答区">
+              <div class="panel-header">
+                <h2 class="panel-title"><svg class="icon"><use href="#i-chat" /></svg><span>回答与引用</span></h2>
+                <span id="liveStatus" class="status-pill status-ok">检索完成 · 5 条引用</span>
+              </div>
+              <div class="answer-toolbar">
+                <span class="segmented" aria-label="回答视图">
+                  <button class="is-on">综合答案</button>
+                  <button>证据优先</button>
+                  <button>差异对照</button>
+                </span>
+                <span class="chip status-info">响应 1.42s</span>
+                <span class="chip status-ok">引用覆盖率 92%</span>
+                <span class="chip status-warn">新旧制度冲突 1</span>
+              </div>
+              <div id="messageStream" class="message-stream">
+                <div class="message-row user">
+                  <span class="message-role">你</span>
+                  <div class="bubble">
+                    <p>员工每周远程办公 3 天，需要经过哪些审批？</p>
+                  </div>
+                </div>
+                <div class="message-row assistant">
+                  <span class="message-role">EKB</span>
+                  <div class="bubble">
+                    <p>根据 2026 版员工手册，常规远程办公上限为每周 2 天；连续或固定每周 3 天属于扩展远程安排，需要直属主管确认、部门负责人审批，并由 HRBP 归档备案。<span class="cite-mark">1</span><span class="cite-mark">2</span></p>
+                    <p>如果申请人处于试用期、涉及客户现场支持、或岗位在合规高敏清单内，还需要补充数据访问风险确认。系统检索到一条 2025 旧版流程仍被内部 FAQ 引用，建议以 2026 版手册为准。<span class="cite-mark">3</span><span class="cite-mark">5</span></p>
+                    <div class="answer-foot">
+                      <span class="status-pill status-ok"><svg class="icon"><use href="#i-check" /></svg>证据支持</span>
+                      <span class="status-pill status-info"><svg class="icon"><use href="#i-link" /></svg>5 条来源</span>
+                      <button class="small-button">有帮助</button>
+                      <button class="small-button">引用有误</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <form class="composer">
+                <div class="composer-bar">
+                  <textarea class="query-textarea" rows="2" aria-label="追问" placeholder="继续追问当前证据链"></textarea>
+                  <button class="primary-button" type="button"><svg class="icon"><use href="#i-send" /></svg>发送</button>
+                </div>
+              </form>
+            </section>
+
+            <section class="panel" aria-label="证据检查器">
+              <div class="panel-header">
+                <h2 class="panel-title"><svg class="icon"><use href="#i-link" /></svg><span>证据检查器</span></h2>
+                <span class="chip status-info">chunk c-3842</span>
+              </div>
+              <div class="panel-body flush">
+                <div class="inspector-block">
+                  <div class="score-row"><span>语义相似度</span><span class="meter" style="--value: 91%"><span></span></span><b>0.91</b></div>
+                  <div class="score-row"><span>关键词命中</span><span class="meter" style="--value: 84%"><span></span></span><b>0.84</b></div>
+                  <div class="score-row"><span>时效性</span><span class="meter" style="--value: 96%"><span></span></span><b>2026</b></div>
+                  <div class="score-row"><span>权限匹配</span><span class="meter" style="--value: 100%"><span></span></span><b>通过</b></div>
+                </div>
+                <div class="evidence-list">
+                  <article class="evidence-item">
+                    <span class="evidence-index">1</span>
+                    <div>
+                      <h3 class="evidence-title">员工手册 2026 · 远程办公政策</h3>
+                      <p class="evidence-snippet">固定每周超过 2 天远程办公，应取得直属主管、部门负责人审批，并由 HRBP 备案。</p>
+                      <div class="evidence-meta"><span class="chip status-ok">v42</span><span class="chip chip-neutral">第 4.2 节</span><span class="chip status-info">员工可见</span></div>
+                    </div>
+                  </article>
+                  <article class="evidence-item">
+                    <span class="evidence-index">2</span>
+                    <div>
+                      <h3 class="evidence-title">HRBP 操作指引 · 审批流</h3>
+                      <p class="evidence-snippet">HRBP 在审批结束后记录远程办公周期、岗位类型、数据访问等级。</p>
+                      <div class="evidence-meta"><span class="chip status-ok">v18</span><span class="chip chip-neutral">流程图 A</span></div>
+                    </div>
+                  </article>
+                  <article class="evidence-item">
+                    <span class="evidence-index">5</span>
+                    <div>
+                      <h3 class="evidence-title">旧版 FAQ · 远程办公例外</h3>
+                      <p class="evidence-snippet">旧流程仍显示“主管审批即可”，与 2026 手册存在冲突。</p>
+                      <div class="evidence-meta"><span class="chip status-warn">旧版引用</span><span class="chip chip-neutral">需治理</span></div>
+                    </div>
+                  </article>
+                </div>
+                <div class="inspector-block">
+                  <p class="section-kicker">检索链路</p>
+                  <ol class="timeline">
+                    <li><span class="step-dot"></span><span>查询改写：远程办公 3 天 审批 试用期</span></li>
+                    <li><span class="step-dot"></span><span>Hybrid 召回：向量 46 条，BM25 31 条</span></li>
+                    <li><span class="step-dot"></span><span>重排：保留 8 条，过滤 2 条越权片段</span></li>
+                    <li><span class="step-dot"></span><span>引用校验：发现 1 条旧版制度冲突</span></li>
+                  </ol>
+                </div>
+              </div>
+            </section>
+          </div>
+
+          <div class="bottom-grid">
+            <section class="panel" aria-label="知识治理队列">
+              <div class="panel-header">
+                <h2 class="panel-title"><svg class="icon"><use href="#i-alert" /></svg><span>低置信与冲突队列</span></h2>
+                <span class="chip status-warn">7 待处理</span>
+              </div>
+              <div class="queue-list">
+                <div class="queue-item"><span><span class="queue-title">旧版 FAQ 仍被高频引用</span><span class="queue-meta">HR 政策与员工手册 · 最近 24h 命中 14 次</span></span><button class="small-button">分派</button></div>
+                <div class="queue-item"><span><span class="queue-title">合规制度库解析失败：表格跨页</span><span class="queue-meta">合规制度库 · 解析器 Docling OCR</span></span><button class="small-button">重试</button></div>
+                <div class="queue-item"><span><span class="queue-title">VPN SOP 缺少 macOS 15 步骤</span><span class="queue-meta">IT 运维 SOP · 用户反馈 3 次</span></span><button class="small-button">补充</button></div>
+              </div>
+            </section>
+
+            <section class="panel" aria-label="召回质量趋势">
+              <div class="panel-header">
+                <h2 class="panel-title"><svg class="icon"><use href="#i-chart" /></svg><span>召回质量</span></h2>
+                <span class="chip status-ok">7 日稳定</span>
+              </div>
+              <div class="panel-body">
+                <div class="bar-chart">
+                  <div class="bar-row"><span>引用正确率</span><span class="bar" style="--value: 92%"><span></span></span><strong>92%</strong></div>
+                  <div class="bar-row"><span>低置信率</span><span class="bar" style="--value: 11%"><span></span></span><strong>11%</strong></div>
+                  <div class="bar-row"><span>拒答准确率</span><span class="bar" style="--value: 88%"><span></span></span><strong>88%</strong></div>
+                  <div class="bar-row"><span>版本新鲜度</span><span class="bar" style="--value: 96%"><span></span></span><strong>96%</strong></div>
+                </div>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <section id="screen-kb" class="screen" aria-labelledby="kb-title">
+          <div class="screen-head">
+            <div>
+              <h1 class="screen-title" id="kb-title">知识资产</h1>
+              <p class="screen-subtitle">按知识库、文档、版本、解析状态和权限边界管理企业知识。</p>
+            </div>
+            <div class="head-actions">
+              <button class="secondary-button"><svg class="icon"><use href="#i-database" /></svg>连接数据源</button>
+              <button class="primary-button"><svg class="icon"><use href="#i-upload" /></svg>上传文档</button>
+            </div>
+          </div>
+
+          <div class="metrics-grid">
+            <div class="metric"><span>知识库</span><strong>4</strong><small>全部有 owner</small></div>
+            <div class="metric"><span>文档</span><strong>312</strong><small>+18 本周新增</small></div>
+            <div class="metric"><span>解析成功率</span><strong>98.7%</strong><small>高于阈值</small></div>
+            <div class="metric"><span>待治理</span><strong>7</strong><small style="color: var(--amber)">需处理</small></div>
+          </div>
+
+          <div class="asset-layout">
+            <section class="panel">
+              <div class="panel-header">
+                <h2 class="panel-title"><svg class="icon"><use href="#i-file" /></svg><span>文档清单</span></h2>
+                <span class="chip chip-neutral">按更新排序</span>
+              </div>
+              <div class="table-scroll">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>文档</th>
+                      <th>状态</th>
+                      <th>来源</th>
+                      <th>版本</th>
+                      <th>权限</th>
+                      <th>最近索引</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr class="is-selected" data-doc="remote">
+                      <td><span class="doc-name"><strong>员工手册 2026.pdf</strong><small>HR 政策与员工手册</small></span></td>
+                      <td><span class="status-pill status-ok">就绪</span></td>
+                      <td>Confluence Sync</td>
+                      <td><span class="mono">v42</span></td>
+                      <td>员工可见</td>
+                      <td>18 分钟前</td>
+                    </tr>
+                    <tr data-doc="faq">
+                      <td><span class="doc-name"><strong>远程办公 FAQ.md</strong><small>HR 政策与员工手册</small></span></td>
+                      <td><span class="status-pill status-warn">需复核</span></td>
+                      <td>Git 仓库</td>
+                      <td><span class="mono">v17</span></td>
+                      <td>员工可见</td>
+                      <td>2 小时前</td>
+                    </tr>
+                    <tr data-doc="compliance">
+                      <td><span class="doc-name"><strong>客户数据导出审批.xlsx</strong><small>合规制度库</small></span></td>
+                      <td><span class="status-pill status-danger">解析失败</span></td>
+                      <td>SharePoint</td>
+                      <td><span class="mono">v9</span></td>
+                      <td>合规团队</td>
+                      <td>等待重试</td>
+                    </tr>
+                    <tr data-doc="vpn">
+                      <td><span class="doc-name"><strong>VPN 访问排障 SOP.docx</strong><small>IT 运维 SOP</small></span></td>
+                      <td><span class="status-pill status-ok">就绪</span></td>
+                      <td>本地上传</td>
+                      <td><span class="mono">v18</span></td>
+                      <td>IT + 员工</td>
+                      <td>1 小时前</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <aside class="panel">
+              <div class="panel-header">
+                <h2 class="panel-title"><svg class="icon"><use href="#i-database" /></svg><span>分块与版本</span></h2>
+                <span class="chip status-ok">v42</span>
+              </div>
+              <div class="panel-body">
+                <div class="split-preview">
+                  <div class="chunk-row"><strong>c-3842</strong><span>远程办公审批上限与例外条件</span><span class="chip status-ok">0.91</span></div>
+                  <div class="chunk-row"><strong>c-3843</strong><span>试用期、客户现场与高敏岗位限制</span><span class="chip status-ok">0.88</span></div>
+                  <div class="chunk-row"><strong>c-3844</strong><span>HRBP 备案字段与审批流回写</span><span class="chip status-info">0.84</span></div>
+                  <div class="chunk-row"><strong>c-1021</strong><span>旧版 FAQ 遗留规则，待废弃</span><span class="chip status-warn">冲突</span></div>
+                </div>
+              </div>
+            </aside>
+          </div>
+        </section>
+
+        <section id="screen-search" class="screen" aria-labelledby="search-title">
+          <div class="screen-head">
+            <div>
+              <h1 class="screen-title" id="search-title">检索中心</h1>
+              <p class="screen-subtitle">搜索结果按相关性、权限、版本和来源可解释性排序。</p>
+            </div>
+          </div>
+
+          <div class="search-layout">
+            <section>
+              <form class="search-form">
+                <input class="field-control" value="远程办公 审批 3 天" aria-label="检索关键词" />
+                <button class="primary-button" type="button"><svg class="icon"><use href="#i-search" /></svg>检索</button>
+              </form>
+              <div class="filters">
+                <button class="filter-chip is-on">全部</button>
+                <button class="filter-chip is-on">文档</button>
+                <button class="filter-chip">会话</button>
+                <button class="filter-chip">FAQ</button>
+                <button class="filter-chip">30 天内</button>
+                <button class="filter-chip">仅最新版</button>
+                <button class="filter-chip">含低置信</button>
+              </div>
+              <div class="result-list">
+                <article class="result-row">
+                  <div>
+                    <h3>员工手册 2026 · 远程办公政策</h3>
+                    <p>固定每周超过 <mark>2 天</mark> 的远程安排，需要主管、部门负责人审批并由 HRBP 备案。</p>
+                    <div class="evidence-meta"><span class="chip status-ok">v42</span><span class="chip status-info">第 4.2 节</span><span class="chip chip-neutral">HR 政策与员工手册</span></div>
+                  </div>
+                  <div class="score-box"><strong>0.91</strong><span class="chip status-ok">高相关</span></div>
+                </article>
+                <article class="result-row">
+                  <div>
+                    <h3>HRBP 操作指引 · 审批流</h3>
+                    <p>审批完成后，HRBP 应记录 <mark>远程办公周期</mark>、岗位类型和数据访问等级。</p>
+                    <div class="evidence-meta"><span class="chip status-ok">v18</span><span class="chip chip-neutral">流程图 A</span></div>
+                  </div>
+                  <div class="score-box"><strong>0.88</strong><span class="chip status-ok">高相关</span></div>
+                </article>
+                <article class="result-row">
+                  <div>
+                    <h3>远程办公 FAQ · 例外审批</h3>
+                    <p>旧版 FAQ 提到“主管审批即可”，与当前制度存在冲突，系统建议进入治理队列。</p>
+                    <div class="evidence-meta"><span class="chip status-warn">旧版</span><span class="chip chip-neutral">FAQ</span></div>
+                  </div>
+                  <div class="score-box"><strong>0.77</strong><span class="chip status-warn">需复核</span></div>
+                </article>
+              </div>
+            </section>
+
+            <aside class="panel">
+              <div class="panel-header">
+                <h2 class="panel-title"><svg class="icon"><use href="#i-filter" /></svg><span>检索解释</span></h2>
+                <span class="chip status-info">Hybrid</span>
+              </div>
+              <div class="panel-body">
+                <div class="bar-chart">
+                  <div class="bar-row"><span>向量召回</span><span class="bar" style="--value: 92%"><span></span></span><strong>46</strong></div>
+                  <div class="bar-row"><span>BM25 召回</span><span class="bar" style="--value: 62%"><span></span></span><strong>31</strong></div>
+                  <div class="bar-row"><span>重排保留</span><span class="bar" style="--value: 16%"><span></span></span><strong>8</strong></div>
+                  <div class="bar-row"><span>权限过滤</span><span class="bar" style="--value: 6%"><span></span></span><strong>2</strong></div>
+                </div>
+              </div>
+            </aside>
+          </div>
+        </section>
+
+        <section id="screen-ops" class="screen" aria-labelledby="ops-title">
+          <div class="screen-head">
+            <div>
+              <h1 class="screen-title" id="ops-title">运营治理</h1>
+              <p class="screen-subtitle">以质量、成本、安全和用户反馈为中心监控 RAG 系统。</p>
+            </div>
+            <div class="head-actions">
+              <button class="secondary-button"><svg class="icon"><use href="#i-file" /></svg>导出日报</button>
+            </div>
+          </div>
+
+          <div class="metrics-grid">
+            <div class="metric"><span>总问答数</span><strong>12,486</strong><small>+8.4% 近 7 天</small></div>
+            <div class="metric"><span>引用正确率</span><strong>92%</strong><small>达到门禁</small></div>
+            <div class="metric"><span>P95 响应</span><strong>2.1s</strong><small style="color: var(--amber)">略高</small></div>
+            <div class="metric"><span>越权拦截</span><strong>38</strong><small>全部拒绝</small></div>
+          </div>
+
+          <div class="ops-layout">
+            <section class="panel">
+              <div class="panel-header">
+                <h2 class="panel-title"><svg class="icon"><use href="#i-chart" /></svg><span>质量趋势</span></h2>
+                <span class="chip chip-neutral">7 日</span>
+              </div>
+              <div class="panel-body">
+                <div class="bar-chart">
+                  <div class="bar-row"><span>答案被采纳</span><span class="bar" style="--value: 78%"><span></span></span><strong>78%</strong></div>
+                  <div class="bar-row"><span>引用覆盖</span><span class="bar" style="--value: 92%"><span></span></span><strong>92%</strong></div>
+                  <div class="bar-row"><span>拒答准确</span><span class="bar" style="--value: 88%"><span></span></span><strong>88%</strong></div>
+                  <div class="bar-row"><span>人工复核</span><span class="bar" style="--value: 14%"><span></span></span><strong>14%</strong></div>
+                </div>
+              </div>
+            </section>
+
+            <aside class="panel">
+              <div class="panel-header">
+                <h2 class="panel-title"><svg class="icon"><use href="#i-shield" /></svg><span>审计日志</span></h2>
+              </div>
+              <div class="audit-list">
+                <div class="audit-row"><span class="audit-time">14:28</span><span class="audit-main"><strong>qa.ask · HR 政策与员工手册</strong><span>user alin · trace 8f23</span></span></div>
+                <div class="audit-row"><span class="audit-time">14:21</span><span class="audit-main"><strong>kb.upload · 客户数据导出审批</strong><span>parse_failed · table span</span></span></div>
+                <div class="audit-row"><span class="audit-time">13:57</span><span class="audit-main"><strong>auth.deny · 薪酬附件</strong><span>role mismatch · masked</span></span></div>
+                <div class="audit-row"><span class="audit-time">13:42</span><span class="audit-main"><strong>feedback.down · 引用不支持结论</strong><span>queued for reviewer</span></span></div>
+              </div>
+            </aside>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <section class="benchmark-section" aria-labelledby="benchmark-title">
+      <h2 id="benchmark-title">GitHub 对标转译</h2>
+      <p>这份 v5 设计稿吸收开源知识库/RAG 产品的可用模式，但落点保持在 EKB 现有的四页架构：问答、知识库、检索、运营。重点不是增加炫技入口，而是把“可信答案”拆成可检索、可审计、可治理的界面对象。</p>
+      <div class="benchmark-grid">
+        <article class="benchmark-card"><strong>Dify</strong><span>知识管道、数据源接入、测试与监控启发了检索设置、数据源连接和质量门禁。</span></article>
+        <article class="benchmark-card"><strong>RAGFlow</strong><span>分块可视化、引用追踪和混合检索启发了右侧证据检查器与检索链路。</span></article>
+        <article class="benchmark-card"><strong>MaxKB</strong><span>开箱即用的问答与嵌入场景启发了左侧 KB 选择、会话和快速问答。</span></article>
+        <article class="benchmark-card"><strong>AnythingLLM</strong><span>Workspace + 文档拖拽 + 来源引用启发了低摩擦提问区和文档清单。</span></article>
+        <article class="benchmark-card"><strong>Open WebUI</strong><span>知识集合、检索模式、目录同步和 API/导出启发了检索过滤与资产同步状态。</span></article>
+        <article class="benchmark-card"><strong>WeKnora</strong><span>企业文档理解、Wiki/图谱、向量库绑定和审计启发了治理队列与运营审计。</span></article>
+      </div>
+    </section>
+    <p class="prototype-note">EKB UI design draft v5 · static HTML prototype · no backend connection</p>
+  </div>
+
+  <script>
+    (function () {
+      const titles = {
+        qa: "问答工作台",
+        kb: "知识资产",
+        search: "检索中心",
+        ops: "运营治理"
+      };
+      const activeTitle = document.getElementById("active-title");
+      const navButtons = Array.from(document.querySelectorAll("[data-screen]"));
+      const screens = Array.from(document.querySelectorAll(".screen"));
+
+      function setScreen(screenName) {
+        navButtons.forEach((button) => {
+          button.classList.toggle("is-active", button.dataset.screen === screenName);
+        });
+        screens.forEach((screen) => {
+          screen.classList.toggle("is-active", screen.id === "screen-" + screenName);
+        });
+        if (activeTitle) activeTitle.textContent = titles[screenName] || "EKB";
+      }
+
+      navButtons.forEach((button) => {
+        button.addEventListener("click", () => setScreen(button.dataset.screen));
+      });
+
+      Array.from(document.querySelectorAll(".toggle")).forEach((button) => {
+        button.addEventListener("click", () => button.classList.toggle("is-on"));
+      });
+
+      Array.from(document.querySelectorAll("[data-fill]")).forEach((button) => {
+        button.addEventListener("click", () => {
+          const input = document.getElementById("questionInput");
+          if (input) input.value = button.dataset.fill || "";
+        });
+      });
+
+      Array.from(document.querySelectorAll(".filter-chip")).forEach((button) => {
+        button.addEventListener("click", () => button.classList.toggle("is-on"));
+      });
+
+      const range = document.getElementById("thresholdRange");
+      const label = document.getElementById("thresholdLabel");
+      if (range && label) {
+        range.addEventListener("input", () => {
+          label.textContent = Number(range.value).toFixed(2);
+        });
+      }
+
+      const askButton = document.getElementById("askButton");
+      const liveStatus = document.getElementById("liveStatus");
+      const stream = document.getElementById("messageStream");
+      if (askButton && liveStatus && stream) {
+        askButton.addEventListener("click", () => {
+          const input = document.getElementById("questionInput");
+          const question = input && input.value ? input.value.trim() : "当前问题";
+          liveStatus.textContent = "检索中 · 正在重排";
+          liveStatus.className = "status-pill status-warn";
+          const existing = document.getElementById("simulatedQuestion");
+          if (existing) existing.remove();
+          const row = document.createElement("div");
+          row.className = "message-row user";
+          row.id = "simulatedQuestion";
+          row.innerHTML = '<span class="message-role">你</span><div class="bubble"><p></p></div>';
+          const paragraph = row.querySelector("p");
+          if (paragraph) paragraph.textContent = question;
+          stream.prepend(row);
+          window.setTimeout(() => {
+            liveStatus.textContent = "检索完成 · 5 条引用";
+            liveStatus.className = "status-pill status-ok";
+          }, 700);
+        });
+      }
+
+      const searchInput = document.getElementById("globalSearch");
+      document.addEventListener("keydown", (event) => {
+        const isMac = /Mac|iPhone|iPad/i.test(navigator.userAgent);
+        const mod = isMac ? event.metaKey : event.ctrlKey;
+        if (mod && ["1", "2", "3", "4"].includes(event.key)) {
+          event.preventDefault();
+          const names = ["qa", "kb", "search", "ops"];
+          setScreen(names[Number(event.key) - 1]);
+        }
+        if (event.key === "/" && searchInput && document.activeElement !== searchInput) {
+          event.preventDefault();
+          searchInput.focus();
+        }
+      });
+    })();
+  </script>
+</body>
+</html>

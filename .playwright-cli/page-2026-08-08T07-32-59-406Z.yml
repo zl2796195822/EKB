@@ -1,0 +1,115 @@
+- generic [ref=f1e1]:
+  - generic [ref=f1e2]:
+    - banner [ref=f1e3]:
+      - navigation "主导航" [ref=f1e5]:
+        - button "问答助手" [ref=f1e332] [cursor=pointer]
+        - button "知识库" [ref=f1e333] [cursor=pointer]
+        - button "检索中心" [active] [ref=f1e334] [cursor=pointer]
+        - button "运营看板" [ref=f1e335] [cursor=pointer]
+    - main [ref=f1e19]:
+      - generic [ref=f1e20]:
+        - generic [ref=f1e22]:
+          - generic [ref=f1e23]: Enterprise Knowledge Base · Galaxy Motion v6
+          - strong [ref=f1e24]: 检索中心
+        - searchbox "全局搜索" [ref=f1e28]: 远程办公审批
+        - generic "当前用户" [ref=f1e30]: A
+      - region [ref=f1e453]:
+        - generic [ref=f1e455]:
+          - heading "检索中心" [level=1] [ref=f1e456]
+          - paragraph [ref=f1e457]: 搜索结果按相关性、权限、版本和来源可解释性排序。
+        - generic [ref=f1e458]:
+          - generic [ref=f1e459]:
+            - generic [ref=f1e460]:
+              - textbox "检索关键词" [ref=f1e461]: 远程办公 审批 3 天
+              - button "检索" [ref=f1e462] [cursor=pointer]
+            - generic [ref=f1e465]:
+              - button "全部" [ref=f1e466] [cursor=pointer]
+              - button "文档" [ref=f1e467] [cursor=pointer]
+              - button "会话" [ref=f1e468] [cursor=pointer]
+              - button "FAQ" [ref=f1e469] [cursor=pointer]
+              - button "30 天内" [ref=f1e470] [cursor=pointer]
+              - button "仅最新版" [ref=f1e471] [cursor=pointer]
+              - button "含低置信" [ref=f1e472] [cursor=pointer]
+            - generic [ref=f1e473]:
+              - article [ref=f1e474]:
+                - generic [ref=f1e475]:
+                  - heading "员工手册 2026 · 远程办公政策" [level=3] [ref=f1e476]
+                  - paragraph [ref=f1e477]:
+                    - text: 固定每周超过
+                    - mark [ref=f1e478]: 2 天
+                    - text: 的远程安排，需要主管、部门负责人审批并由 HRBP 备案。
+                  - generic [ref=f1e479]:
+                    - generic [ref=f1e480]: v42
+                    - generic [ref=f1e481]: 第 4.2 节
+                    - generic [ref=f1e482]: HR 政策与员工手册
+                - generic [ref=f1e483]:
+                  - strong [ref=f1e484]: "0.91"
+                  - generic [ref=f1e485]: 高相关
+              - article [ref=f1e486]:
+                - generic [ref=f1e487]:
+                  - heading "HRBP 操作指引 · 审批流" [level=3] [ref=f1e488]
+                  - paragraph [ref=f1e489]:
+                    - text: 审批完成后，HRBP 应记录
+                    - mark [ref=f1e490]: 远程办公周期
+                    - text: 、岗位类型和数据访问等级。
+                  - generic [ref=f1e491]:
+                    - generic [ref=f1e492]: v18
+                    - generic [ref=f1e493]: 流程图 A
+                - generic [ref=f1e494]:
+                  - strong [ref=f1e495]: "0.88"
+                  - generic [ref=f1e496]: 高相关
+              - article [ref=f1e497]:
+                - generic [ref=f1e498]:
+                  - heading "远程办公 FAQ · 例外审批" [level=3] [ref=f1e499]
+                  - paragraph [ref=f1e500]: 旧版 FAQ 提到“主管审批即可”，与当前制度存在冲突，系统建议进入治理队列。
+                  - generic [ref=f1e501]:
+                    - generic [ref=f1e502]: 旧版
+                    - generic [ref=f1e503]: FAQ
+                - generic [ref=f1e504]:
+                  - strong [ref=f1e505]: "0.77"
+                  - generic [ref=f1e506]: 需复核
+          - complementary [ref=f1e507]:
+            - generic [ref=f1e508]:
+              - heading "检索解释" [level=2] [ref=f1e509]
+              - generic [ref=f1e513]: Hybrid
+            - generic [ref=f1e515]:
+              - generic [ref=f1e516]:
+                - generic [ref=f1e517]: 向量召回
+                - strong [ref=f1e520]: "46"
+              - generic [ref=f1e521]:
+                - generic [ref=f1e522]: BM25 召回
+                - strong [ref=f1e525]: "31"
+              - generic [ref=f1e526]:
+                - generic [ref=f1e527]: 重排保留
+                - strong [ref=f1e530]: "8"
+              - generic [ref=f1e531]:
+                - generic [ref=f1e532]: 权限过滤
+                - strong [ref=f1e535]: "2"
+    - region [ref=f1e275]:
+      - heading "GitHub 对标转译" [level=2] [ref=f1e276]
+      - paragraph [ref=f1e277]: 这份 v5 设计稿吸收开源知识库/RAG 产品的可用模式，但落点保持在 EKB 现有的四页架构：问答、知识库、检索、运营。重点不是增加炫技入口，而是把“可信答案”拆成可检索、可审计、可治理的界面对象。
+      - generic [ref=f1e278]:
+        - article [ref=f1e279]:
+          - strong [ref=f1e280]: Dify
+          - generic [ref=f1e281]: 知识管道、数据源接入、测试与监控启发了检索设置、数据源连接和质量门禁。
+        - article [ref=f1e282]:
+          - strong [ref=f1e283]: RAGFlow
+          - generic [ref=f1e284]: 分块可视化、引用追踪和混合检索启发了右侧证据检查器与检索链路。
+        - article [ref=f1e285]:
+          - strong [ref=f1e286]: MaxKB
+          - generic [ref=f1e287]: 开箱即用的问答与嵌入场景启发了左侧 KB 选择、会话和快速问答。
+        - article [ref=f1e288]:
+          - strong [ref=f1e289]: AnythingLLM
+          - generic [ref=f1e290]: Workspace + 文档拖拽 + 来源引用启发了低摩擦提问区和文档清单。
+        - article [ref=f1e291]:
+          - strong [ref=f1e292]: Open WebUI
+          - generic [ref=f1e293]: 知识集合、检索模式、目录同步和 API/导出启发了检索过滤与资产同步状态。
+        - article [ref=f1e294]:
+          - strong [ref=f1e295]: WeKnora
+          - generic [ref=f1e296]: 企业文档理解、Wiki/图谱、向量库绑定和审计启发了治理队列与运营审计。
+    - paragraph [ref=f1e297]: EKB UI design draft v6 · Galaxy Motion benchmark prototype · no backend connection
+  - navigation "Dock 快捷导航" [ref=f1e298]:
+    - button "问答助手" [ref=f1e299] [cursor=pointer]
+    - button "知识库" [ref=f1e302] [cursor=pointer]
+    - button "检索中心" [ref=f1e305] [cursor=pointer]
+    - button "运营看板" [ref=f1e308] [cursor=pointer]
