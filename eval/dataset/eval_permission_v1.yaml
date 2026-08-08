@@ -1,0 +1,595 @@
+# EKB M4-5 Permission 评估集
+# 版本: v1（M4-5 扩充，Spec 要求 M2 起 ≥50 组越权测试）
+# 标注人: QA
+# 标注日期: 2026-08-08
+# 适用知识版本: seed-v2（5 篇脱敏运维 SOP，12 个 chunk）
+# 用途: 越权测试——不同租户/角色/ACL 组合下，系统是否正确隔离数据
+#
+# 测试维度:
+#   1. 跨租户隔离（P001-P012）：租户 A 用户不能看到租户 B 的知识库
+#   2. 角色权限矩阵（P013-P028）：OWNER/ADMIN/MEMBER/CUSTOMER 各角色能力边界
+#   3. 知识库可见性（P029-P040）：PRIVATE/TEAM/PUBLIC 知识库的可见范围
+#   4. 文档级权限（P041-P050）：特定文档/chunk 的访问控制
+#
+# 预期：每组测试的 expected_behavior 描述系统应返回的行为。
+#   - refuse_access: 拒绝访问（404 或 403）
+#   - allow_read: 允许只读访问
+#   - allow_write: 允许写入
+#   - empty_result: 检索返回空结果（授权范围内无匹配）
+#   - no_citation: 问答不返回越权引用
+
+version: "v1"
+knowledge_version: "seed-v2"
+annotator: "QA"
+annotated_at: "2026-08-08"
+category: "permission"
+
+# ---- 跨租户隔离测试（P001-P012）----
+permission:
+  # 跨租户知识库不可见
+  - id: P001
+    name: "跨租户知识库列表不可见"
+    scenario: "租户 A 的 OWNER 列出知识库，不应看到租户 B 的知识库"
+    actor:
+      tenant_role: "OWNER"
+      capabilities: ["*"]
+    action: "list_kb"
+    target_tenant: "other"
+    expected_behavior: "empty_result"
+    expected_code: 200
+    note: "store.list_knowledge_bases 已按 tenant_id 过滤"
+
+  - id: P002
+    name: "跨租户文档不可检索"
+    scenario: "租户 A 用户检索，不应命中租户 B 的 chunk"
+    actor:
+      tenant_role: "MEMBER"
+      capabilities: ["kb.read", "qa.ask"]
+    action: "search"
+    query: "Redis 内存溢出"
+    target_tenant: "other"
+    expected_behavior: "empty_result"
+    expected_code: 200
+    note: "store.search 已按 tenant_id 过滤"
+
+  - id: P003
+    name: "跨租户问答不引用越权证据"
+    scenario: "租户 A 用户提问，引用不应包含租户 B 的文档"
+    actor:
+      tenant_role: "MEMBER"
+      capabilities: ["kb.read", "qa.ask"]
+    action: "qa_ask"
+    query: "数据库连接池耗尽怎么排查"
+    target_tenant: "other"
+    expected_behavior: "no_citation_or_refusal"
+    expected_code: 200
+    note: "retrieve + generate 全程在授权 kb_ids 范围内"
+
+  - id: P004
+    name: "跨租户知识库详情 404"
+    scenario: "租户 A 用户直接访问租户 B 的 kb_id，应 404"
+    actor:
+      tenant_role: "OWNER"
+      capabilities: ["*"]
+    action: "get_kb"
+    target_tenant: "other"
+    expected_behavior: "refuse_access"
+    expected_code: 404
+    note: "store.get_knowledge_base 按 tenant_id 过滤，不存在则 404"
+
+  - id: P005
+    name: "跨租户文档上传到他人知识库"
+    scenario: "租户 A 用户向租户 B 的 kb_id 上传文档，应 404"
+    actor:
+      tenant_role: "OWNER"
+      capabilities: ["*"]
+    action: "upload_doc"
+    target_tenant: "other"
+    expected_behavior: "refuse_access"
+    expected_code: 404
+
+  - id: P006
+    name: "跨租户文档删除"
+    scenario: "租户 A 用户删除租户 B 的文档，应 404"
+    actor:
+      tenant_role: "OWNER"
+      capabilities: ["*"]
+    action: "delete_doc"
+    target_tenant: "other"
+    expected_behavior: "refuse_access"
+    expected_code: 404
+
+  - id: P007
+    name: "跨租户会话不可见"
+    scenario: "租户 A 用户查看租户 B 的 conversation_id，应 404"
+    actor:
+      tenant_role: "MEMBER"
+      capabilities: ["kb.read", "qa.ask"]
+    action: "get_conversation"
+    target_tenant: "other"
+    expected_behavior: "refuse_access"
+    expected_code: 404
+
+  - id: P008
+    name: "跨租户审计日志不可见"
+    scenario: "租户 A 管理员查看租户 B 的审计日志，应只看到本租户"
+    actor:
+      tenant_role: "ADMIN"
+      capabilities: ["audit.read", "kb.read"]
+    action: "list_audit"
+    target_tenant: "other"
+    expected_behavior: "empty_result"
+    expected_code: 200
+
+  - id: P009
+    name: "CUSTOMER 租户隔离"
+    scenario: "客户租户用户只能访问授权知识库，不能看到运维租户的内部 SOP"
+    actor:
+      tenant_role: "CUSTOMER"
+      capabilities: ["kb.read", "qa.ask"]
+    action: "list_kb"
+    target_tenant: "self"
+    expected_behavior: "limited_visibility"
+    expected_code: 200
+    note: "CUSTOMER 角色只能看到授权的 PUBLIC/TEAM 知识库"
+
+  - id: P010
+    name: "跨租户反馈不可写"
+    scenario: "租户 A 用户对租户 B 的消息写反馈，应 404"
+    actor:
+      tenant_role: "MEMBER"
+      capabilities: ["kb.read", "qa.ask"]
+    action: "feedback"
+    target_tenant: "other"
+    expected_behavior: "refuse_access"
+    expected_code: 404
+
+  - id: P011
+    name: "跨租户知识库成员管理"
+    scenario: "租户 A OWNER 尝试管理租户 B 的知识库成员，应 404"
+    actor:
+      tenant_role: "OWNER"
+      capabilities: ["*"]
+    action: "manage_kb_members"
+    target_tenant: "other"
+    expected_behavior: "refuse_access"
+    expected_code: 404
+
+  - id: P012
+    name: "向量检索跨租户隔离"
+    scenario: "向量检索阶段，租户 A 的 query 不应命中租户 B 的 chunk 向量"
+    actor:
+      tenant_role: "MEMBER"
+      capabilities: ["kb.read", "qa.ask"]
+    action: "vector_search"
+    query: "Redis 内存溢出"
+    target_tenant: "other"
+    expected_behavior: "empty_result"
+    expected_code: 200
+    note: "store._search_semantic 已按 tenant_id 过滤候选集"
+
+  # ---- 角色权限矩阵测试（P013-P028）----
+  - id: P013
+    name: "MEMBER 无知识库创建权限"
+    scenario: "MEMBER 角色尝试创建知识库，应 403"
+    actor:
+      tenant_role: "MEMBER"
+      capabilities: ["kb.read", "qa.ask"]
+    action: "create_kb"
+    expected_behavior: "refuse_access"
+    expected_code: 403
+
+  - id: P014
+    name: "MEMBER 无文档上传权限"
+    scenario: "MEMBER 角色尝试上传文档，应 403"
+    actor:
+      tenant_role: "MEMBER"
+      capabilities: ["kb.read", "qa.ask"]
+    action: "upload_doc"
+    expected_behavior: "refuse_access"
+    expected_code: 403
+
+  - id: P015
+    name: "MEMBER 无文档删除权限"
+    scenario: "MEMBER 角色尝试删除文档，应 403"
+    actor:
+      tenant_role: "MEMBER"
+      capabilities: ["kb.read", "qa.ask"]
+    action: "delete_doc"
+    expected_behavior: "refuse_access"
+    expected_code: 403
+
+  - id: P016
+    name: "MEMBER 可读知识库列表"
+    scenario: "MEMBER 角色列出知识库，应 200 且只返回可见的"
+    actor:
+      tenant_role: "MEMBER"
+      capabilities: ["kb.read", "qa.ask"]
+    action: "list_kb"
+    expected_behavior: "allow_read"
+    expected_code: 200
+
+  - id: P017
+    name: "MEMBER 可问答"
+    scenario: "MEMBER 角色发起问答，应 200"
+    actor:
+      tenant_role: "MEMBER"
+      capabilities: ["kb.read", "qa.ask"]
+    action: "qa_ask"
+    query: "Redis 内存溢出怎么排查"
+    expected_behavior: "allow_read"
+    expected_code: 200
+
+  - id: P018
+    name: "MEMBER 无审计日志读取权限"
+    scenario: "MEMBER 角色尝试读取审计日志，应 403"
+    actor:
+      tenant_role: "MEMBER"
+      capabilities: ["kb.read", "qa.ask"]
+    action: "list_audit"
+    expected_behavior: "refuse_access"
+    expected_code: 403
+
+  - id: P019
+    name: "CUSTOMER 无审计权限"
+    scenario: "CUSTOMER 角色尝试读取审计日志，应 403"
+    actor:
+      tenant_role: "CUSTOMER"
+      capabilities: ["kb.read", "qa.ask"]
+    action: "list_audit"
+    expected_behavior: "refuse_access"
+    expected_code: 403
+
+  - id: P020
+    name: "OWNER 可创建知识库"
+    scenario: "OWNER 角色创建知识库，应 200"
+    actor:
+      tenant_role: "OWNER"
+      capabilities: ["*"]
+    action: "create_kb"
+    expected_behavior: "allow_write"
+    expected_code: 200
+
+  - id: P021
+    name: "OWNER 可上传文档"
+    scenario: "OWNER 角色上传文档，应 200"
+    actor:
+      tenant_role: "OWNER"
+      capabilities: ["*"]
+    action: "upload_doc"
+    expected_behavior: "allow_write"
+    expected_code: 200
+
+  - id: P022
+    name: "OWNER 可删除文档"
+    scenario: "OWNER 角色删除文档，应 200"
+    actor:
+      tenant_role: "OWNER"
+      capabilities: ["*"]
+    action: "delete_doc"
+    expected_behavior: "allow_write"
+    expected_code: 200
+
+  - id: P023
+    name: "OWNER 可读审计日志"
+    scenario: "OWNER 角色读取审计日志，应 200"
+    actor:
+      tenant_role: "OWNER"
+      capabilities: ["*"]
+    action: "list_audit"
+    expected_behavior: "allow_read"
+    expected_code: 200
+
+  - id: P024
+    name: "ADMIN 可创建知识库"
+    scenario: "ADMIN 角色创建知识库，应 200"
+    actor:
+      tenant_role: "ADMIN"
+      capabilities: ["kb.write", "kb.read", "audit.read"]
+    action: "create_kb"
+    expected_behavior: "allow_write"
+    expected_code: 200
+
+  - id: P025
+    name: "ADMIN 可上传文档"
+    scenario: "ADMIN 角色上传文档，应 200"
+    actor:
+      tenant_role: "ADMIN"
+      capabilities: ["kb.write", "kb.read", "audit.read"]
+    action: "upload_doc"
+    expected_behavior: "allow_write"
+    expected_code: 200
+
+  - id: P026
+    name: "ADMIN 无平台级租户管理权限"
+    scenario: "ADMIN 角色尝试平台级租户管理（CAP_TENANT_PROVISION），应 403"
+    actor:
+      tenant_role: "ADMIN"
+      capabilities: ["kb.write", "kb.read", "audit.read"]
+    action: "tenant_provision"
+    expected_behavior: "refuse_access"
+    expected_code: 403
+    note: "CAP_TENANT_PROVISION 仅 PLATFORM_ADMIN"
+
+  - id: P027
+    name: "VIEWER 知识库角色无写入"
+    scenario: "KbRole=VIEWER 的用户尝试在知识库内上传文档，应 403"
+    actor:
+      tenant_role: "MEMBER"
+      kb_role: "VIEWER"
+      capabilities: ["kb.read", "qa.ask"]
+    action: "upload_doc"
+    expected_behavior: "refuse_access"
+    expected_code: 403
+
+  - id: P028
+    name: "EDITOR 知识库角色可上传"
+    scenario: "KbRole=EDITOR 的用户在知识库内上传文档，应 200"
+    actor:
+      tenant_role: "MEMBER"
+      kb_role: "EDITOR"
+      capabilities: ["kb.read", "kb.write", "qa.ask"]
+    action: "upload_doc"
+    expected_behavior: "allow_write"
+    expected_code: 200
+
+  # ---- 知识库可见性测试（P029-P040）----
+  - id: P029
+    name: "PRIVATE 知识库仅成员可见"
+    scenario: "非成员用户访问 PRIVATE 知识库，应 404"
+    actor:
+      tenant_role: "MEMBER"
+      capabilities: ["kb.read", "qa.ask"]
+    action: "get_kb"
+    kb_visibility: "PRIVATE"
+    is_member: false
+    expected_behavior: "refuse_access"
+    expected_code: 404
+
+  - id: P030
+    name: "TEAM 知识库同租户可见"
+    scenario: "同租户非成员用户访问 TEAM 知识库，应 200"
+    actor:
+      tenant_role: "MEMBER"
+      capabilities: ["kb.read", "qa.ask"]
+    action: "get_kb"
+    kb_visibility: "TEAM"
+    is_member: false
+    expected_behavior: "allow_read"
+    expected_code: 200
+
+  - id: P031
+    name: "PUBLIC 知识库全租户可见"
+    scenario: "任意租户用户访问 PUBLIC 知识库，应 200"
+    actor:
+      tenant_role: "MEMBER"
+      capabilities: ["kb.read", "qa.ask"]
+    action: "get_kb"
+    kb_visibility: "PUBLIC"
+    is_member: false
+    expected_behavior: "allow_read"
+    expected_code: 200
+
+  - id: P032
+    name: "PRIVATE 知识库检索不可见"
+    scenario: "非成员用户检索 PRIVATE 知识库的 chunk，不应命中"
+    actor:
+      tenant_role: "MEMBER"
+      capabilities: ["kb.read", "qa.ask"]
+    action: "search"
+    kb_visibility: "PRIVATE"
+    is_member: false
+    query: "Redis 内存溢出"
+    expected_behavior: "empty_result"
+    expected_code: 200
+
+  - id: P033
+    name: "PRIVATE 知识库问答不引用"
+    scenario: "非成员用户提问，引用不应包含 PRIVATE 知识库的文档"
+    actor:
+      tenant_role: "MEMBER"
+      capabilities: ["kb.read", "qa.ask"]
+    action: "qa_ask"
+    kb_visibility: "PRIVATE"
+    is_member: false
+    query: "Redis 内存溢出"
+    expected_behavior: "no_citation_or_refusal"
+    expected_code: 200
+
+  - id: P034
+    name: "TEAM 知识库检索可见"
+    scenario: "同租户非成员用户检索 TEAM 知识库，应命中"
+    actor:
+      tenant_role: "MEMBER"
+      capabilities: ["kb.read", "qa.ask"]
+    action: "search"
+    kb_visibility: "TEAM"
+    is_member: false
+    query: "Redis 内存溢出"
+    expected_behavior: "allow_read"
+    expected_code: 200
+
+  - id: P035
+    name: "指定 kb_ids 限制问答范围"
+    scenario: "用户指定 kb_ids，问答只在范围内检索"
+    actor:
+      tenant_role: "MEMBER"
+      capabilities: ["kb.read", "qa.ask"]
+    action: "qa_ask"
+    query: "Redis 内存溢出"
+    kb_ids: ["kb_with_no_redis"]
+    expected_behavior: "no_citation_or_refusal"
+    expected_code: 200
+    note: "qa/ask 校验 kb_ids ⊆ visible_ids"
+
+  - id: P036
+    name: "指定不存在的 kb_id 应 404"
+    scenario: "用户指定不存在的 kb_id，应 404"
+    actor:
+      tenant_role: "MEMBER"
+      capabilities: ["kb.read", "qa.ask"]
+    action: "qa_ask"
+    kb_ids: ["nonexistent_id"]
+    expected_behavior: "refuse_access"
+    expected_code: 404
+
+  - id: P037
+    name: "指定无权限的 kb_id 应 404"
+    scenario: "用户指定有权限范围外的 kb_id，应 404"
+    actor:
+      tenant_role: "MEMBER"
+      capabilities: ["kb.read", "qa.ask"]
+    action: "qa_ask"
+    kb_ids: ["other_tenant_kb_id"]
+    expected_behavior: "refuse_access"
+    expected_code: 404
+
+  - id: P038
+    name: "PUBLIC 知识库跨租户问答可引用"
+    scenario: "跨租户用户提问 PUBLIC 知识库内容，应可引用"
+    actor:
+      tenant_role: "CUSTOMER"
+      capabilities: ["kb.read", "qa.ask"]
+    action: "qa_ask"
+    kb_visibility: "PUBLIC"
+    query: "部署回滚判定标准"
+    expected_behavior: "allow_read"
+    expected_code: 200
+
+  - id: P039
+    name: "知识库可见性不影响文档级权限"
+    scenario: "TEAM 知识库中，无权限文档不应被检索命中"
+    actor:
+      tenant_role: "MEMBER"
+      capabilities: ["kb.read", "qa.ask"]
+    action: "search"
+    kb_visibility: "TEAM"
+    doc_acl: "restricted"
+    query: "敏感运维细节"
+    expected_behavior: "empty_result"
+    expected_code: 200
+
+  - id: P040
+    name: "知识库删除后不可检索"
+    scenario: "知识库被删除后，原 chunk 不应被检索命中"
+    actor:
+      tenant_role: "OWNER"
+      capabilities: ["*"]
+    action: "search"
+    kb_deleted: true
+    query: "Redis 内存溢出"
+    expected_behavior: "empty_result"
+    expected_code: 200
+
+  # ---- 文档级权限测试（P041-P050）----
+  - id: P041
+    name: "文档 ACL 限制检索"
+    scenario: "设置了 doc_acl=restricted 的文档，无权限用户不应检索命中"
+    actor:
+      tenant_role: "MEMBER"
+      capabilities: ["kb.read", "qa.ask"]
+    action: "search"
+    doc_acl: "restricted"
+    query: "受限文档内容"
+    expected_behavior: "empty_result"
+    expected_code: 200
+
+  - id: P042
+    name: "文档 ACL 限制问答引用"
+    scenario: "设置了 doc_acl=restricted 的文档，无权限用户问答不应引用"
+    actor:
+      tenant_role: "MEMBER"
+      capabilities: ["kb.read", "qa.ask"]
+    action: "qa_ask"
+    doc_acl: "restricted"
+    query: "受限文档内容"
+    expected_behavior: "no_citation_or_refusal"
+    expected_code: 200
+
+  - id: P043
+    name: "文档版本对齐权限"
+    scenario: "用户有 v1 权限但无 v2 权限，检索只应命中 v1 chunk"
+    actor:
+      tenant_role: "MEMBER"
+      capabilities: ["kb.read", "qa.ask"]
+    action: "search"
+    doc_version_acl: "v1_only"
+    query: "版本化内容"
+    expected_behavior: "limited_visibility"
+    expected_code: 200
+
+  - id: P044
+    name: "policy_version 变更后缓存失效"
+    scenario: "policy_version 升级后，旧权限缓存不应生效"
+    actor:
+      tenant_role: "MEMBER"
+      capabilities: ["kb.read", "qa.ask"]
+    action: "qa_ask"
+    policy_version_changed: true
+    query: "Redis 内存溢出"
+    expected_behavior: "respect_new_policy"
+    expected_code: 200
+    note: "FR-AC-03 权限变更失效缓存"
+
+  - id: P045
+    name: "无 capability 的用户拒绝访问"
+    scenario: "capabilities=[] 的用户任何操作都应 403"
+    actor:
+      tenant_role: "MEMBER"
+      capabilities: []
+    action: "list_kb"
+    expected_behavior: "refuse_access"
+    expected_code: 403
+
+  - id: P046
+    name: "无 qa.ask capability 拒绝问答"
+    scenario: "无 qa.ask capability 的用户发起问答，应 403"
+    actor:
+      tenant_role: "MEMBER"
+      capabilities: ["kb.read"]
+    action: "qa_ask"
+    query: "Redis 内存溢出"
+    expected_behavior: "refuse_access"
+    expected_code: 403
+
+  - id: P047
+    name: "无 kb.read capability 拒绝检索"
+    scenario: "无 kb.read capability 的用户发起检索，应 403"
+    actor:
+      tenant_role: "MEMBER"
+      capabilities: ["qa.ask"]
+    action: "search"
+    query: "Redis 内存溢出"
+    expected_behavior: "refuse_access"
+    expected_code: 403
+
+  - id: P048
+    name: "无 audit.read capability 拒绝审计"
+    scenario: "无 audit.read capability 的用户读取审计，应 403"
+    actor:
+      tenant_role: "MEMBER"
+      capabilities: ["kb.read", "qa.ask"]
+    action: "list_audit"
+    expected_behavior: "refuse_access"
+    expected_code: 403
+
+  - id: P049
+    name: "无 kb.write capability 拒绝上传"
+    scenario: "无 kb.write capability 的用户上传文档，应 403"
+    actor:
+      tenant_role: "MEMBER"
+      capabilities: ["kb.read", "qa.ask"]
+    action: "upload_doc"
+    expected_behavior: "refuse_access"
+    expected_code: 403
+
+  - id: P050
+    name: "capabilities 精确匹配"
+    scenario: "有 kb.read 但无 kb.write 的用户，检索 200 但上传 403"
+    actor:
+      tenant_role: "MEMBER"
+      capabilities: ["kb.read", "qa.ask"]
+    action: "mixed_operations"
+    expected_behavior: "partial_access"
+    expected_code: 200
+    note: "同一用户不同操作返回不同 code，验证 capability 精确匹配"

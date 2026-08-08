@@ -1,0 +1,356 @@
+# EKB M4-5 Freshness 评估集
+# 版本: v1（M4-5 扩充，Spec 要求 M3 起 ≥30 题版本/缓存失效）
+# 标注人: QA
+# 标注日期: 2026-08-08
+# 适用知识版本: seed-v2（5 篇脱敏运维 SOP，12 个 chunk）
+# 用途: 文档版本变化、过期知识和缓存失效测试
+#
+# 测试维度:
+#   1. 版本对齐（F001-F010）：问答引用的文档版本与最新版本一致
+#   2. 过期知识（F011-F020）：文档更新后，旧内容不应被引用
+#   3. 缓存失效（F021-F030）：文档更新/权限变更后，缓存结果应失效
+#
+# 预期行为:
+#   - cite_latest: 引用最新版本
+#   - not_cite_old: 不引用旧版本
+#   - cache_invalidated: 缓存失效后返回新结果
+#   - version_consistent: 引用版本号与文档当前版本一致
+
+version: "v1"
+knowledge_version: "seed-v2"
+annotator: "QA"
+annotated_at: "2026-08-08"
+category: "freshness"
+
+freshness:
+  # ---- 版本对齐测试（F001-F010）----
+  - id: F001
+    name: "问答引用最新文档版本"
+    scenario: "文档更新到 v2 后，问答引用应标注 version=2"
+    setup:
+      action: "update_doc"
+      doc_title: "Redis 内存溢出 SOP"
+      new_version: 2
+      new_content: "Redis 内存溢出时，先执行 memory usage 分析内存分布，再排查大 key。"
+    test:
+      action: "qa_ask"
+      query: "Redis 内存溢出先用什么命令排查？"
+    expected_behavior: "cite_latest"
+    expected_version: 2
+    expected_keywords: ["memory usage"]
+
+  - id: F002
+    name: "检索返回最新版本 chunk"
+    scenario: "文档更新后，检索应返回新版 chunk 而非旧版"
+    setup:
+      action: "update_doc"
+      doc_title: "数据库故障 SOP"
+      new_version: 2
+    test:
+      action: "search"
+      query: "连接池耗尽"
+    expected_behavior: "cite_latest"
+    expected_version: 2
+
+  - id: F003
+    name: "旧版本 chunk 不出现在引用中"
+    scenario: "文档更新到 v2 后，v1 的 chunk 不应被引用"
+    setup:
+      action: "update_doc"
+      new_version: 2
+    test:
+      action: "qa_ask"
+      query: "连接池耗尽恢复步骤"
+    expected_behavior: "not_cite_old"
+    not_expected_version: 1
+
+  - id: F004
+    name: "多版本文档并存时引用最新"
+    scenario: "文档同时有 v1 和 v2 chunk（历史保留），问答应引用 v2"
+    setup:
+      action: "keep_versions"
+      versions: [1, 2]
+    test:
+      action: "qa_ask"
+      query: "Redis 淘汰策略"
+    expected_behavior: "cite_latest"
+    expected_version: 2
+
+  - id: F005
+    name: "版本号在引用中正确展示"
+    scenario: "引用的 version 字段应等于文档当前版本号"
+    test:
+      action: "qa_ask"
+      query: "网络延迟排查用什么工具"
+    expected_behavior: "version_consistent"
+    expected_version: 1
+
+  - id: F006
+    name: "文档回滚后引用回退版本"
+    scenario: "文档从 v2 回滚到 v1，问答应引用 v1"
+    setup:
+      action: "rollback_doc"
+      from_version: 2
+      to_version: 1
+    test:
+      action: "qa_ask"
+      query: "Redis 内存溢出排查"
+    expected_behavior: "cite_latest"
+    expected_version: 1
+
+  - id: F007
+    name: "并发更新不产生版本错乱"
+    scenario: "两个文档同时更新，各自的版本号独立递增"
+    setup:
+      action: "concurrent_update"
+      docs: ["Redis 内存溢出 SOP", "数据库故障 SOP"]
+    test:
+      action: "qa_ask"
+      query: "Redis 淘汰策略"
+    expected_behavior: "version_consistent"
+    expected_version: 2
+
+  - id: F008
+    name: "chunk 的 doc_version 与文档版本一致"
+    scenario: "chunk.doc_version 应等于其所属文档的当前版本"
+    test:
+      action: "search"
+      query: "回滚判定"
+    expected_behavior: "version_consistent"
+    expected_version: 1
+
+  - id: F009
+    name: "更新后 updated_at 刷新"
+    scenario: "文档更新后，chunk 的 updated_at 应刷新"
+    setup:
+      action: "update_doc"
+    test:
+      action: "get_chunk_metadata"
+    expected_behavior: "updated_at_refreshed"
+
+  - id: F010
+    name: "版本对比可追溯"
+    scenario: "审计日志应记录文档版本变更"
+    setup:
+      action: "update_doc"
+    test:
+      action: "list_audit"
+      filter: "doc.update"
+    expected_behavior: "audit_logged"
+    expected_audit_action: "doc.update"
+
+  # ---- 过期知识测试（F011-F020）----
+  - id: F011
+    name: "删除文档后不引用"
+    scenario: "文档被删除后，问答不应引用该文档"
+    setup:
+      action: "delete_doc"
+      doc_title: "安全事件响应 SOP"
+    test:
+      action: "qa_ask"
+      query: "主机被入侵后第一步做什么"
+    expected_behavior: "no_citation_or_refusal"
+
+  - id: F012
+    name: "删除文档后检索为空"
+    scenario: "文档被删除后，检索不应命中该文档的 chunk"
+    setup:
+      action: "delete_doc"
+    test:
+      action: "search"
+      query: "入侵隔离"
+    expected_behavior: "empty_result"
+
+  - id: F013
+    name: "文档内容更新后旧关键词失效"
+    scenario: "文档内容更新，旧关键词被移除，问答不应基于旧内容回答"
+    setup:
+      action: "update_doc"
+      doc_title: "Redis 内存溢出 SOP"
+      new_content: "Redis 内存问题排查流程已更新为全新方案。"
+      removed_keywords: ["info memory", "used_memory_rss"]
+    test:
+      action: "qa_ask"
+      query: "Redis 内存溢出时用 info memory 命令吗"
+    expected_behavior: "not_cite_old"
+    note: "旧关键词已不存在于新版本文档"
+
+  - id: F014
+    name: "文档标题更新后旧标题不匹配"
+    scenario: "文档标题更新后，用旧标题检索不应命中"
+    setup:
+      action: "update_doc"
+      old_title: "部署回滚 SOP"
+      new_title: "发布回滚 SOP"
+    test:
+      action: "search"
+      query: "部署回滚"
+    expected_behavior: "empty_result_or_new_title"
+
+  - id: F015
+    name: "知识库清空后问答拒答"
+    scenario: "知识库所有文档被删除后，问答应拒答"
+    setup:
+      action: "delete_all_docs"
+    test:
+      action: "qa_ask"
+      query: "Redis 内存溢出"
+    expected_behavior: "no_citation_or_refusal"
+
+  - id: F016
+    name: "知识库清空后检索为空"
+    scenario: "知识库所有文档被删除后，检索应返回空"
+    setup:
+      action: "delete_all_docs"
+    test:
+      action: "search"
+      query: "Redis"
+    expected_behavior: "empty_result"
+
+  - id: F017
+    name: "过期文档标记不引用"
+    scenario: "文档标记为 expired 状态后，问答不应引用"
+    setup:
+      action: "mark_doc_expired"
+    test:
+      action: "qa_ask"
+      query: "该文档内容相关问题"
+    expected_behavior: "no_citation_or_refusal"
+
+  - id: F018
+    name: "过期文档标记不检索"
+    scenario: "文档标记为 expired 状态后，检索不应命中"
+    setup:
+      action: "mark_doc_expired"
+    test:
+      action: "search"
+      query: "该文档内容"
+    expected_behavior: "empty_result"
+
+  - id: F019
+    name: "重新发布文档后恢复引用"
+    scenario: "文档从 expired 重新发布为 ready 后，问答应恢复引用"
+    setup:
+      action: "republish_doc"
+    test:
+      action: "qa_ask"
+      query: "该文档内容问题"
+    expected_behavior: "cite_latest"
+
+  - id: F020
+    name: "文档更新触发 reindex"
+    scenario: "文档内容更新后，chunk 应重新切分和索引"
+    setup:
+      action: "update_doc"
+      new_content: "全新的内容，包含新关键词：快照恢复"
+    test:
+      action: "search"
+      query: "快照恢复"
+    expected_behavior: "allow_read"
+    note: "新关键词应能被检索命中"
+
+  # ---- 缓存失效测试（F021-F030）----
+  - id: F021
+    name: "query embedding 缓存在文档更新后不失效（纯函数）"
+    scenario: "文档更新不影响 query embedding 缓存（embedding 是纯函数，与文档无关）"
+    setup:
+      action: "update_doc"
+    test:
+      action: "qa_ask"
+      query: "Redis 内存溢出"
+      repeat: 2
+    expected_behavior: "cache_valid"
+    note: "M4-1：query embedding 缓存键不含文档版本，文档更新不影响"
+
+  - id: F022
+    name: "query 改写缓存在 LLM 模型变更后失效"
+    scenario: "切换 LLM 模型后，相同问题的改写结果应重新计算"
+    setup:
+      action: "change_llm_model"
+      from_model: "deepseek-chat"
+      to_model: "deepseek-reasoner"
+    test:
+      action: "qa_ask"
+      query: "Redis 内存溢出"
+    expected_behavior: "cache_invalidated"
+    note: "M4-1：改写缓存键含 llm_model，换模型自动失效"
+
+  - id: F023
+    name: "文档更新后答案不缓存（当前未启用答案缓存）"
+    scenario: "M4-1 未启用答案缓存，文档更新后问答自然返回新结果"
+    setup:
+      action: "update_doc"
+    test:
+      action: "qa_ask"
+      query: "Redis 内存溢出"
+    expected_behavior: "cache_invalidated"
+    note: "答案缓存默认关闭（Spec 5.4）"
+
+  - id: F024
+    name: "权限变更后缓存失效"
+    scenario: "policy_version 变更后，相关缓存应失效"
+    setup:
+      action: "change_policy_version"
+    test:
+      action: "qa_ask"
+      query: "Redis 内存溢出"
+    expected_behavior: "respect_new_policy"
+    note: "FR-AC-03 权限变更失效缓存"
+
+  - id: F025
+    name: "相同问题重复提问命中改写缓存"
+    scenario: "相同问题第二次提问，改写结果应命中缓存"
+    test:
+      action: "qa_ask"
+      query: "Redis 内存溢出如何排查"
+      repeat: 2
+    expected_behavior: "cache_hit"
+    expected_metric: "cache_hits_total{type=rewrite} >= 1"
+
+  - id: F026
+    name: "相似但不同的问题不命中改写缓存"
+    scenario: "两个不同问题，改写缓存不应命中"
+    test:
+      action: "qa_ask"
+      queries: ["Redis 内存溢出", "数据库连接池耗尽"]
+    expected_behavior: "cache_miss"
+    expected_metric: "cache_misses_total{type=rewrite} >= 2"
+
+  - id: F027
+    name: "相同 query embedding 第二次命中缓存"
+    scenario: "相同文本第二次 embedding，应命中缓存"
+    test:
+      action: "embed_one"
+      text: "Redis 内存溢出"
+      repeat: 2
+    expected_behavior: "cache_hit"
+    expected_metric: "cache_hits_total{type=embedding} >= 1"
+
+  - id: F028
+    name: "进程重启后缓存清空"
+    scenario: "API 进程重启后，所有进程内缓存应清空"
+    setup:
+      action: "restart_process"
+    test:
+      action: "qa_ask"
+      query: "Redis 内存溢出"
+    expected_behavior: "cache_miss"
+    note: "M4-1：进程内缓存重启即清空作为自然兜底失效"
+
+  - id: F029
+    name: "TTL 过期后缓存失效"
+    scenario: "缓存条目 TTL 过期后，get 返回 None"
+    test:
+      action: "cache_get_after_ttl"
+      ttl_seconds: 0.05
+    expected_behavior: "cache_expired"
+
+  - id: F030
+    name: "LRU 淘汰最久未使用"
+    scenario: "缓存满后，最久未使用的条目被淘汰"
+    test:
+      action: "cache_lru_eviction"
+      maxsize: 2
+      sequence: ["a", "b", "get_a", "c"]
+    expected_behavior: "b_evicted"
+    note: "访问 a 后，c 进入应淘汰 b 而非 a"

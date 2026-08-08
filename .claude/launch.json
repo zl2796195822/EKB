@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "EKB API (FastAPI)",
+      "runtimeExecutable": "/Users/alin/EKB/.venv/bin/uvicorn",
+      "runtimeArgs": ["ekb_api.main:app", "--host", "127.0.0.1", "--port", "8000", "--reload"],
+      "port": 8000
+    },
+    {
+      "name": "EKB Web (Vite)",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "port": 5173
+    }
+  ]
+}

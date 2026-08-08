@@ -8,13 +8,12 @@ sys.path.insert(0, "apps/api")
 
 os.environ.setdefault("EKB_ENV", "development")
 
+from ekb_api.core.auth import AuthContext
 from ekb_api.core.config import get_settings
 from ekb_api.core.db import init_db
-from ekb_api.core.auth import AuthContext
-from ekb_api.domain import TenantRole
-from ekb_api.store import SqlStore
 from ekb_api.llm import rewrite_query
 from ekb_api.retrieval import retrieve
+from ekb_api.store import SqlStore
 
 init_db()
 store = SqlStore()

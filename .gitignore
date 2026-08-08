@@ -21,3 +21,5 @@ MCP/*/.pytest_cache/
 MCP/*/.ruff_cache/
 MCP/*/dist/
 MCP/*/build/
+backups/
+drill_workspace/

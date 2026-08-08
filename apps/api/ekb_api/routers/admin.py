@@ -5,7 +5,7 @@ from typing import Annotated, Optional
 from fastapi import APIRouter, Depends, Query, Request
 from starlette import status
 
-from ekb_api.core.audit import RESULT_SUCCESS, extract_fingerprints, redact_metadata
+from ekb_api.core.audit import RESULT_FAILURE, RESULT_SUCCESS, extract_fingerprints, redact_metadata
 from ekb_api.core.auth import get_auth_context, get_store
 from ekb_api.core.authorization import (
     CAP_AUDIT_READ,
@@ -14,6 +14,7 @@ from ekb_api.core.authorization import (
     CAP_TENANT_PROVISION,
     assert_capability,
 )
+from ekb_api.core.config import get_settings
 from ekb_api.core.errors import ApiError
 from ekb_api.domain import AuthContext
 from ekb_api.schemas import (
@@ -427,3 +428,72 @@ def _to_sync_response(src) -> SyncSourceResponse:
         created_at=src.created_at,
         updated_at=src.updated_at,
     )
+
+
+# ---- M4-6 备份恢复 ----
+
+
+@router.post("/backup")
+def trigger_backup(
+    request: Request,
+    auth: Annotated[AuthContext, Depends(get_auth_context)],
+    store: Annotated[SqlStore, Depends(get_store)],
+) -> dict[str, object]:
+    """触发数据库一致性快照备份（平台管理员能力）。
+
+    用 VACUUM INTO 在线生成一致性快照，不阻塞写入。
+    返回备份元数据（路径/大小/sha256/表行数），用于审计和恢复校验。
+    """
+    assert_capability(auth, CAP_TENANT_PROVISION)
+
+    import sys
+    from pathlib import Path
+
+    # scripts/ 目录在 ekb_api 的上级，加入 path 以复用 backup.py。
+    scripts_dir = Path(__file__).resolve().parents[2] / "scripts"
+    if str(scripts_dir) not in sys.path:
+        sys.path.insert(0, str(scripts_dir))
+    from backup import backup as do_backup  # noqa: E402
+
+    settings = get_settings()
+    out_dir = Path("./backups")
+    ip_hash, ua_hash = extract_fingerprints(request)
+
+    try:
+        result = do_backup(settings.database_url, out_dir, keep=7)
+    except Exception as exc:
+        store.write_audit_log(
+            action="admin.backup",
+            target_type="database",
+            target_id="sqlite",
+            result=RESULT_FAILURE,
+            trace_id=auth.trace_id,
+            tenant_id=auth.tenant_id,
+            actor_id=auth.actor_id,
+            metadata_redacted=redact_metadata({"error": str(exc)[:200]}),
+            ip_hash=ip_hash,
+            user_agent_hash=ua_hash,
+        )
+        raise ApiError(500, "BACKUP_FAILED", f"备份失败: {exc}") from exc
+
+    store.write_audit_log(
+        action="admin.backup",
+        target_type="database",
+        target_id="sqlite",
+        result=RESULT_SUCCESS,
+        trace_id=auth.trace_id,
+        tenant_id=auth.tenant_id,
+        actor_id=auth.actor_id,
+        metadata_redacted=redact_metadata(
+            {
+                "backup_path": result.get("backup_path", ""),
+                "backup_size_bytes": result.get("backup_size_bytes", 0),
+                "backup_sha256": result.get("backup_sha256", "")[:16],
+                "elapsed_seconds": result.get("elapsed_seconds", 0),
+                "tables": len(result.get("tables", [])),
+            }
+        ),
+        ip_hash=ip_hash,
+        user_agent_hash=ua_hash,
+    )
+    return result

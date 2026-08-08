@@ -90,7 +90,7 @@ def main() -> None:
     chunks = _all_chunk_contents()
 
     nonsense = "zzz不存在的火星语问题qqq"
-    print(f"=== 拒答测试用例（必须低） ===")
+    print("=== 拒答测试用例（必须低） ===")
     print(f"  nonsense: max_ratio={max(_overlap_ratio(nonsense, c) for c in chunks):.4f}")
 
     print("\n=== Golden 题（应高，需被检索命中） ===")

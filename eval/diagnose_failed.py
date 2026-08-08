@@ -4,10 +4,8 @@
 """
 from __future__ import annotations
 
-import json
 import os
 import sys
-from pathlib import Path
 
 import httpx
 
@@ -97,13 +95,13 @@ def main() -> int:
                 expected_rank = idx
             print(f"  #{idx:2d} score={score:.2f} | {title} | {section}{marker}")
         if expected_rank is None:
-            print(f"  ✗ 期望文档未在 top 20 候选中（LLM Rerank 无法救回）")
+            print("  ✗ 期望文档未在 top 20 候选中（LLM Rerank 无法救回）")
             all_in_top = False
         else:
             print(f"  ✓ 期望文档在 top 20 候选中，排名 #{expected_rank}")
         print(f"  候选总数: {len(results)}")
 
-    print(f"\n=== 结论 ===")
+    print("\n=== 结论 ===")
     if all_in_top:
         print("所有失败题的正确文档都在 top 20 候选里 → LLM Rerank 可救")
     else:
