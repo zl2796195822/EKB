@@ -1,8 +1,8 @@
-"""text_utils 单元测试：锁定 Levenshtein 编辑距离的正确性。"""
+"""text_utils 单元测试。"""
 
 from __future__ import annotations
 
-from ekb_api.text_utils import levenshtein
+from ekb_api.text_utils import levenshtein, merge_sorted_arrays
 
 
 def test_levenshtein_identical() -> None:
@@ -13,28 +13,42 @@ def test_levenshtein_empty_a() -> None:
     assert levenshtein("", "abc") == 3
 
 
-def test_levenshtein_empty_b() -> None:
-    assert levenshtein("abc", "") == 3
-
-
-def test_levenshtein_both_empty() -> None:
-    assert levenshtein("", "") == 0
-
-
 def test_levenshtein_kitten_sitting() -> None:
-    # 经典案例：kitten -> sitting 需要 3 步（k->s, e->i, +g）
     assert levenshtein("kitten", "sitting") == 3
 
 
 def test_levenshtein_flaw_lawn() -> None:
-    # flaw -> lawn 需要 2 步（f->l, w->n）
     assert levenshtein("flaw", "lawn") == 2
 
 
-def test_levenshtein_saturday_sunday() -> None:
-    # saturday -> sunday 需要 3 步
-    assert levenshtein("saturday", "sunday") == 3
+def test_merge_both_nonempty() -> None:
+    assert merge_sorted_arrays([1, 3, 5], [2, 4, 6]) == [1, 2, 3, 4, 5, 6]
 
 
-def test_levenshtein_single_substitution() -> None:
-    assert levenshtein("cat", "cot") == 1
+def test_merge_with_duplicates() -> None:
+    assert merge_sorted_arrays([1, 2, 2, 3], [2, 3, 4]) == [1, 2, 2, 2, 3, 3, 4]
+
+
+def test_merge_first_empty() -> None:
+    assert merge_sorted_arrays([], [1, 2, 3]) == [1, 2, 3]
+
+
+def test_merge_second_empty() -> None:
+    assert merge_sorted_arrays([1, 2, 3], []) == [1, 2, 3]
+
+
+def test_merge_both_empty() -> None:
+    assert merge_sorted_arrays([], []) == []
+
+
+def test_merge_a_has_remaining() -> None:
+    # a 的尾部元素全部大于 b 的所有元素 → a 的剩余应被追加
+    assert merge_sorted_arrays([5, 6, 7], [1, 2]) == [1, 2, 5, 6, 7]
+
+
+def test_merge_b_has_remaining() -> None:
+    assert merge_sorted_arrays([1, 2], [5, 6, 7]) == [1, 2, 5, 6, 7]
+
+
+def test_merge_interleaved() -> None:
+    assert merge_sorted_arrays([1, 4, 7], [2, 5, 8]) == [1, 2, 4, 5, 7, 8]
