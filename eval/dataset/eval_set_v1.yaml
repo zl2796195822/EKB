@@ -1,0 +1,642 @@
+# EKB M1 脱敏评估集
+# 版本: v1（首版基线）
+# 标注人: QA
+# 标注日期: 2026-08-07
+# 适用知识版本: seed-v1（5 篇脱敏运维 SOP，12 个 chunk）
+# 用途: 准确率、引用正确率、拒答率、幻觉率基线测量
+#
+# 规模说明:
+#   Spec 建议 M1 Golden ≥100 题、No-answer ≥30 题。
+#   本版评估集为 Golden 100 题、No-answer 30 题，覆盖 seed-v1 全部 12 个 chunk
+#   及主要拒答场景。问题类型包含单文档事实题、多角度追问题和跨 SOP 综合题。
+#
+# 评估口径（与 RAG评估与数据治理方案 §7 一致）:
+#   首答准确率 = 正确且有证据的首轮回答数 / 有答案题总数
+#   引用正确率 = 支持结论的引用数 / 展示引用总数
+#   拒答率 = 正确拒答数 / 应拒答题总数
+#   幻觉率 = 编造或引用不支持结论的回答数 / 总回答数
+
+version: "v2"
+knowledge_version: "seed-v2"
+annotator: "QA"
+annotated_at: "2026-08-07"
+
+# ---- Golden QA：有标准答案和预期引用的问题 ----
+golden:
+  # 数据库故障 SOP（2 chunk）
+  - id: G001
+    question: "数据库连接池耗尽时应该先检查哪些指标？"
+    expected_keywords: ["连接池使用率", "等待队列", "慢查询", "应用实例数"]
+    expected_citation_title: "数据库故障 SOP"
+    expected_section_contains: "连接池耗尽"
+  - id: G002
+    question: "连接池持续耗尽时如何恢复？"
+    expected_keywords: ["限流", "扩容", "trace_id"]
+    expected_citation_title: "数据库故障 SOP"
+    expected_section_contains: "恢复步骤"
+  - id: G003
+    question: "连接池耗尽的恢复步骤里要保留什么供复盘？"
+    expected_keywords: ["trace_id"]
+    expected_citation_title: "数据库故障 SOP"
+    expected_section_contains: "恢复步骤"
+
+  # Redis 内存溢出 SOP（3 chunk）
+  - id: G004
+    question: "Redis 内存溢出时先用什么命令排查？"
+    expected_keywords: ["info memory", "used_memory_rss", "fragmentation"]
+    expected_citation_title: "Redis 内存溢出 SOP"
+    expected_section_contains: "内存诊断"
+  - id: G005
+    question: "Redis 内存溢出要排查什么类型的 key？"
+    expected_keywords: ["大 key"]
+    expected_citation_title: "Redis 内存溢出 SOP"
+    expected_section_contains: "内存诊断"
+  - id: G006
+    question: "Redis 淘汰策略 allkeys-lru 能起什么作用？"
+    expected_keywords: ["allkeys-lru", "短期缓解"]
+    expected_citation_title: "Redis 内存溢出 SOP"
+    expected_section_contains: "淘汰策略"
+  - id: G007
+    question: "Redis 内存溢出长期如何解决？"
+    expected_keywords: ["拆分大 key", "扩容"]
+    expected_citation_title: "Redis 内存溢出 SOP"
+    expected_section_contains: "淘汰策略"
+  - id: G008
+    question: "Redis 开启 RDB 或 AOF 时内存溢出可能触发什么问题？"
+    expected_keywords: ["fork", "失败"]
+    expected_citation_title: "Redis 内存溢出 SOP"
+    expected_section_contains: "持久化影响"
+  - id: G009
+    question: "Redis 持久化内存溢出需评估哪些参数？"
+    expected_keywords: ["repl-backlog-size", "aof-rewrite-incremental-fsync"]
+    expected_citation_title: "Redis 内存溢出 SOP"
+    expected_section_contains: "持久化影响"
+
+  # 网络延迟排查 SOP（3 chunk）
+  - id: G010
+    question: "网络延迟突增时用什么工具分段定位？"
+    expected_keywords: ["mtr"]
+    expected_citation_title: "网络延迟排查 SOP"
+    expected_section_contains: "延迟定位"
+  - id: G011
+    question: "网络延迟定位时要检查交换机的什么指标？"
+    expected_keywords: ["队列深度", "丢包"]
+    expected_citation_title: "网络延迟排查 SOP"
+    expected_section_contains: "延迟定位"
+  - id: G012
+    question: "延迟只在首次请求出现应排查什么？"
+    expected_keywords: ["DNS", "resolver", "缓存命中"]
+    expected_citation_title: "网络延迟排查 SOP"
+    expected_section_contains: "DNS 排查"
+  - id: G013
+    question: "网络延迟恢复时要保留什么供复盘？"
+    expected_keywords: ["pcap"]
+    expected_citation_title: "网络延迟排查 SOP"
+    expected_section_contains: "恢复步骤"
+  - id: G014
+    question: "确认网络问题范围后要做什么？"
+    expected_keywords: ["切换备用链路", "限流"]
+    expected_citation_title: "网络延迟排查 SOP"
+    expected_section_contains: "恢复步骤"
+
+  # 部署回滚 SOP（2 chunk）
+  - id: G015
+    question: "发布后什么情况下应立即触发回滚？"
+    expected_keywords: ["错误率", "延迟", "可用性", "5 分钟", "阈值"]
+    expected_citation_title: "部署回滚 SOP"
+    expected_section_contains: "回滚判定"
+  - id: G016
+    question: "回滚判定时是否要等根因定位？"
+    expected_keywords: ["不等", "根因定位"]
+    expected_citation_title: "部署回滚 SOP"
+    expected_section_contains: "回滚判定"
+  - id: G017
+    question: "回滚执行时先做什么再做什么？"
+    expected_keywords: ["切上一版本镜像", "迁移数据库变更"]
+    expected_citation_title: "部署回滚 SOP"
+    expected_section_contains: "回滚执行"
+  - id: G018
+    question: "破坏性数据库迁移回滚时要先评估什么？"
+    expected_keywords: ["forward-compatibility"]
+    expected_citation_title: "部署回滚 SOP"
+    expected_section_contains: "回滚执行"
+
+  # 安全事件响应 SOP（3 chunk）
+  - id: G019
+    question: "确认主机被入侵后第一步做什么？"
+    expected_keywords: ["断网", "隔离"]
+    expected_citation_title: "安全事件响应 SOP"
+    expected_section_contains: "入侵隔离"
+  - id: G020
+    question: "主机被入侵后为什么不能直接重启？"
+    expected_keywords: ["内存证据"]
+    expected_citation_title: "安全事件响应 SOP"
+    expected_section_contains: "入侵隔离"
+  - id: G021
+    question: "安全事件取证的采集顺序是什么？"
+    expected_keywords: ["内存镜像", "磁盘镜像", "网络连接"]
+    expected_citation_title: "安全事件响应 SOP"
+    expected_section_contains: "取证流程"
+  - id: G022
+    question: "取证过程要记录什么？"
+    expected_keywords: ["操作时间", "操作人"]
+    expected_citation_title: "安全事件响应 SOP"
+    expected_section_contains: "取证流程"
+  - id: G023
+    question: "安全事件闭环后多久内输出复盘报告？"
+    expected_keywords: ["48 小时"]
+    expected_citation_title: "安全事件响应 SOP"
+    expected_section_contains: "复盘改进"
+  - id: G024
+    question: "安全事件复盘后要更新什么？"
+    expected_keywords: ["检测规则", "访问策略"]
+    expected_citation_title: "安全事件响应 SOP"
+    expected_section_contains: "复盘改进"
+  - id: G025
+    question: "安全事件复盘后要通知谁？"
+    expected_keywords: ["受影响用户"]
+    expected_citation_title: "安全事件响应 SOP"
+    expected_section_contains: "复盘改进"
+
+  # 跨 SOP 综合题（验证检索能命中正确文档）
+  - id: G026
+    question: "Redis 内存溢出和数据库连接池耗尽的共同恢复手段是什么？"
+    expected_keywords: ["扩容"]
+    expected_citation_title: "数据库故障 SOP"
+    expected_section_contains: "恢复步骤"
+  - id: G027
+    question: "哪些故障恢复时都需要保留证据供复盘？"
+    expected_keywords: ["trace_id"]
+    expected_citation_title: "数据库故障 SOP"
+    expected_section_contains: "恢复步骤"
+  - id: G028
+    question: "网络延迟恢复要保留 pcap，安全事件要保留什么？"
+    expected_keywords: ["内存镜像", "磁盘镜像"]
+    expected_citation_title: "安全事件响应 SOP"
+    expected_section_contains: "取证流程"
+  - id: G029
+    question: "部署回滚和安全事件响应都强调不要做什么？"
+    expected_keywords: ["不等根因"]
+    expected_citation_title: "部署回滚 SOP"
+    expected_section_contains: "回滚判定"
+  - id: G030
+    question: "Redis 淘汰策略和回滚判定分别用于什么场景？"
+    expected_keywords: ["allkeys-lru", "短期缓解"]
+    expected_citation_title: "Redis 内存溢出 SOP"
+    expected_section_contains: "淘汰策略"
+
+  # ---- 数据库故障 SOP 扩充（单文档多角度追问题）----
+  - id: G031
+    question: "数据库连接池耗尽时应该检查哪四个指标？"
+    expected_keywords: ["连接池使用率", "等待队列", "慢查询", "应用实例数"]
+    expected_citation_title: "数据库故障 SOP"
+    expected_section_contains: "连接池耗尽"
+  - id: G032
+    question: "连接池使用率在数据库故障排查中反映什么？"
+    expected_keywords: ["连接池使用率"]
+    expected_citation_title: "数据库故障 SOP"
+    expected_section_contains: "连接池耗尽"
+  - id: G033
+    question: "数据库慢查询和连接池耗尽有什么关系？"
+    expected_keywords: ["慢查询"]
+    expected_citation_title: "数据库故障 SOP"
+    expected_section_contains: "连接池耗尽"
+  - id: G034
+    question: "连接池耗尽时等待队列长度异常说明什么？"
+    expected_keywords: ["等待队列"]
+    expected_citation_title: "数据库故障 SOP"
+    expected_section_contains: "连接池耗尽"
+  - id: G035
+    question: "应用实例数在连接池耗尽排查中的作用？"
+    expected_keywords: ["应用实例数"]
+    expected_citation_title: "数据库故障 SOP"
+    expected_section_contains: "连接池耗尽"
+  - id: G036
+    question: "连接池持续耗尽时非关键流量如何处理？"
+    expected_keywords: ["限流", "非关键流量"]
+    expected_citation_title: "数据库故障 SOP"
+    expected_section_contains: "恢复步骤"
+  - id: G037
+    question: "连接池恢复时扩容的目标是什么？"
+    expected_keywords: ["扩容", "应用实例"]
+    expected_citation_title: "数据库故障 SOP"
+    expected_section_contains: "恢复步骤"
+  - id: G038
+    question: "数据库故障恢复后 trace_id 用于什么？"
+    expected_keywords: ["trace_id", "复盘"]
+    expected_citation_title: "数据库故障 SOP"
+    expected_section_contains: "恢复步骤"
+  - id: G039
+    question: "连接池恢复步骤中限流和扩容的顺序？"
+    expected_keywords: ["限流", "扩容"]
+    expected_citation_title: "数据库故障 SOP"
+    expected_section_contains: "恢复步骤"
+  - id: G040
+    question: "连接池持续耗尽先做什么再做什么？"
+    expected_keywords: ["限流", "扩容"]
+    expected_citation_title: "数据库故障 SOP"
+    expected_section_contains: "恢复步骤"
+
+  # ---- Redis 内存溢出 SOP 扩充（单文档多角度追问题）----
+  - id: G041
+    question: "Redis 内存溢出时 info memory 查看哪些指标？"
+    expected_keywords: ["info memory", "used_memory_rss", "fragmentation"]
+    expected_citation_title: "Redis 内存溢出 SOP"
+    expected_section_contains: "内存诊断"
+  - id: G042
+    question: "Redis used_memory_rss 指标反映什么？"
+    expected_keywords: ["used_memory_rss"]
+    expected_citation_title: "Redis 内存溢出 SOP"
+    expected_section_contains: "内存诊断"
+  - id: G043
+    question: "Redis fragmentation ratio 高说明什么问题？"
+    expected_keywords: ["fragmentation"]
+    expected_citation_title: "Redis 内存溢出 SOP"
+    expected_section_contains: "内存诊断"
+  - id: G044
+    question: "Redis 内存溢出时排查什么类型的 key？"
+    expected_keywords: ["大 key"]
+    expected_citation_title: "Redis 内存溢出 SOP"
+    expected_section_contains: "内存诊断"
+  - id: G045
+    question: "Redis 内存溢出时先用什么命令诊断？"
+    expected_keywords: ["info memory"]
+    expected_citation_title: "Redis 内存溢出 SOP"
+    expected_section_contains: "内存诊断"
+  - id: G046
+    question: "Redis maxmemory-policy 配置确认什么？"
+    expected_keywords: ["maxmemory-policy"]
+    expected_citation_title: "Redis 内存溢出 SOP"
+    expected_section_contains: "淘汰策略"
+  - id: G047
+    question: "Redis allkeys-lru 策略能短期缓解什么？"
+    expected_keywords: ["allkeys-lru", "短期缓解"]
+    expected_citation_title: "Redis 内存溢出 SOP"
+    expected_section_contains: "淘汰策略"
+  - id: G048
+    question: "Redis 内存溢出长期解决方案是什么？"
+    expected_keywords: ["拆分大 key", "扩容"]
+    expected_citation_title: "Redis 内存溢出 SOP"
+    expected_section_contains: "淘汰策略"
+  - id: G049
+    question: "Redis 淘汰策略 allkeys-lru 是短期还是长期方案？"
+    expected_keywords: ["allkeys-lru", "短期缓解"]
+    expected_citation_title: "Redis 内存溢出 SOP"
+    expected_section_contains: "淘汰策略"
+  - id: G050
+    question: "Redis 内存溢出长期解决要拆分什么？"
+    expected_keywords: ["拆分大 key"]
+    expected_citation_title: "Redis 内存溢出 SOP"
+    expected_section_contains: "淘汰策略"
+  - id: G051
+    question: "Redis RDB 或 AOF 内存溢出触发什么失败？"
+    expected_keywords: ["fork", "失败"]
+    expected_citation_title: "Redis 内存溢出 SOP"
+    expected_section_contains: "持久化影响"
+  - id: G052
+    question: "Redis 持久化内存溢出需评估哪些参数？"
+    expected_keywords: ["repl-backlog-size", "aof-rewrite-incremental-fsync"]
+    expected_citation_title: "Redis 内存溢出 SOP"
+    expected_section_contains: "持久化影响"
+  - id: G053
+    question: "Redis fork 失败和什么持久化有关？"
+    expected_keywords: ["fork", "失败"]
+    expected_citation_title: "Redis 内存溢出 SOP"
+    expected_section_contains: "持久化影响"
+  - id: G054
+    question: "Redis repl-backlog-size 在什么场景评估？"
+    expected_keywords: ["repl-backlog-size"]
+    expected_citation_title: "Redis 内存溢出 SOP"
+    expected_section_contains: "持久化影响"
+  - id: G055
+    question: "Redis aof-rewrite-incremental-fsync 评估什么场景？"
+    expected_keywords: ["aof-rewrite-incremental-fsync"]
+    expected_citation_title: "Redis 内存溢出 SOP"
+    expected_section_contains: "持久化影响"
+
+  # ---- 网络延迟排查 SOP 扩充（单文档多角度追问题）----
+  - id: G056
+    question: "网络延迟突增时 mtr 定位什么节点？"
+    expected_keywords: ["mtr", "拥塞"]
+    expected_citation_title: "网络延迟排查 SOP"
+    expected_section_contains: "延迟定位"
+  - id: G057
+    question: "网络延迟排查时交换机检查什么？"
+    expected_keywords: ["交换机", "队列深度"]
+    expected_citation_title: "网络延迟排查 SOP"
+    expected_section_contains: "延迟定位"
+  - id: G058
+    question: "网络延迟排查时网卡丢包计数说明什么？"
+    expected_keywords: ["丢包"]
+    expected_citation_title: "网络延迟排查 SOP"
+    expected_section_contains: "延迟定位"
+  - id: G059
+    question: "mtr 分段定位网络延迟的步骤？"
+    expected_keywords: ["mtr"]
+    expected_citation_title: "网络延迟排查 SOP"
+    expected_section_contains: "延迟定位"
+  - id: G060
+    question: "网络延迟定位时检查交换机和网卡什么指标？"
+    expected_keywords: ["队列深度", "丢包"]
+    expected_citation_title: "网络延迟排查 SOP"
+    expected_section_contains: "延迟定位"
+  - id: G061
+    question: "首请求延迟出现应排查什么？"
+    expected_keywords: ["DNS", "resolver", "缓存命中"]
+    expected_citation_title: "网络延迟排查 SOP"
+    expected_section_contains: "DNS 排查"
+  - id: G062
+    question: "DNS 解析耗时高说明什么问题？"
+    expected_keywords: ["DNS"]
+    expected_citation_title: "网络延迟排查 SOP"
+    expected_section_contains: "DNS 排查"
+  - id: G063
+    question: "本地 resolver 缓存命中率低的影响？"
+    expected_keywords: ["resolver", "缓存命中"]
+    expected_citation_title: "网络延迟排查 SOP"
+    expected_section_contains: "DNS 排查"
+  - id: G064
+    question: "延迟仅在首次请求出现排查 DNS 什么？"
+    expected_keywords: ["DNS", "resolver"]
+    expected_citation_title: "网络延迟排查 SOP"
+    expected_section_contains: "DNS 排查"
+  - id: G065
+    question: "网络延迟恢复时切换什么链路？"
+    expected_keywords: ["切换备用链路"]
+    expected_citation_title: "网络延迟排查 SOP"
+    expected_section_contains: "恢复步骤"
+  - id: G066
+    question: "网络问题确认后通知上游做什么？"
+    expected_keywords: ["通知上游", "限流"]
+    expected_citation_title: "网络延迟排查 SOP"
+    expected_section_contains: "恢复步骤"
+  - id: G067
+    question: "网络延迟恢复时保留什么文件供复盘？"
+    expected_keywords: ["pcap"]
+    expected_citation_title: "网络延迟排查 SOP"
+    expected_section_contains: "恢复步骤"
+  - id: G068
+    question: "单链路问题和全网卡问题如何区分？"
+    expected_keywords: ["单链路", "全网卡"]
+    expected_citation_title: "网络延迟排查 SOP"
+    expected_section_contains: "恢复步骤"
+  - id: G069
+    question: "网络延迟恢复步骤的顺序是什么？"
+    expected_keywords: ["切换备用链路", "限流"]
+    expected_citation_title: "网络延迟排查 SOP"
+    expected_section_contains: "恢复步骤"
+  - id: G070
+    question: "网络延迟恢复时先确认什么再操作？"
+    expected_keywords: ["单链路", "全网卡"]
+    expected_citation_title: "网络延迟排查 SOP"
+    expected_section_contains: "恢复步骤"
+
+  # ---- 部署回滚 SOP 扩充（单文档多角度追问题）----
+  - id: G071
+    question: "发布后哪些核心指标超阈值触发回滚？"
+    expected_keywords: ["错误率", "延迟", "可用性"]
+    expected_citation_title: "部署回滚 SOP"
+    expected_section_contains: "回滚判定"
+  - id: G072
+    question: "回滚判定的 5 分钟阈值是什么意思？"
+    expected_keywords: ["5 分钟"]
+    expected_citation_title: "部署回滚 SOP"
+    expected_section_contains: "回滚判定"
+  - id: G073
+    question: "回滚判定时为什么不等待根因定位？"
+    expected_keywords: ["不等", "根因定位"]
+    expected_citation_title: "部署回滚 SOP"
+    expected_section_contains: "回滚判定"
+  - id: G074
+    question: "发布后核心指标超阈值多久触发回滚？"
+    expected_keywords: ["5 分钟"]
+    expected_citation_title: "部署回滚 SOP"
+    expected_section_contains: "回滚判定"
+  - id: G075
+    question: "回滚执行时先切什么？"
+    expected_keywords: ["切上一版本镜像"]
+    expected_citation_title: "部署回滚 SOP"
+    expected_section_contains: "回滚执行"
+  - id: G076
+    question: "回滚执行时再迁移什么？"
+    expected_keywords: ["迁移数据库变更"]
+    expected_citation_title: "部署回滚 SOP"
+    expected_section_contains: "回滚执行"
+  - id: G077
+    question: "回滚执行步骤的顺序是什么？"
+    expected_keywords: ["切上一版本镜像", "迁移数据库变更"]
+    expected_citation_title: "部署回滚 SOP"
+    expected_section_contains: "回滚执行"
+  - id: G078
+    question: "破坏性数据库迁移回滚评估什么？"
+    expected_keywords: ["forward-compatibility"]
+    expected_citation_title: "部署回滚 SOP"
+    expected_section_contains: "回滚执行"
+  - id: G079
+    question: "回滚时数据库迁移变更评估什么兼容性？"
+    expected_keywords: ["forward-compatibility"]
+    expected_citation_title: "部署回滚 SOP"
+    expected_section_contains: "回滚执行"
+  - id: G080
+    question: "发布后可用性超阈值多久未恢复触发回滚？"
+    expected_keywords: ["可用性", "5 分钟"]
+    expected_citation_title: "部署回滚 SOP"
+    expected_section_contains: "回滚判定"
+
+  # ---- 安全事件响应 SOP 扩充（单文档多角度追问题）----
+  - id: G081
+    question: "主机被入侵后第一步断网隔离的目的是什么？"
+    expected_keywords: ["断网", "隔离"]
+    expected_citation_title: "安全事件响应 SOP"
+    expected_section_contains: "入侵隔离"
+  - id: G082
+    question: "主机被入侵后保留现场保留什么？"
+    expected_keywords: ["保留现场"]
+    expected_citation_title: "安全事件响应 SOP"
+    expected_section_contains: "入侵隔离"
+  - id: G083
+    question: "主机被入侵后为什么禁止直接重启？"
+    expected_keywords: ["重启", "内存证据"]
+    expected_citation_title: "安全事件响应 SOP"
+    expected_section_contains: "入侵隔离"
+  - id: G084
+    question: "内存证据在安全事件中的作用？"
+    expected_keywords: ["内存证据"]
+    expected_citation_title: "安全事件响应 SOP"
+    expected_section_contains: "入侵隔离"
+  - id: G085
+    question: "安全事件入侵隔离的步骤是什么？"
+    expected_keywords: ["断网", "隔离"]
+    expected_citation_title: "安全事件响应 SOP"
+    expected_section_contains: "入侵隔离"
+  - id: G086
+    question: "安全取证采集内存镜像的顺序？"
+    expected_keywords: ["内存镜像"]
+    expected_citation_title: "安全事件响应 SOP"
+    expected_section_contains: "取证流程"
+  - id: G087
+    question: "安全取证采集磁盘镜像的顺序？"
+    expected_keywords: ["磁盘镜像"]
+    expected_citation_title: "安全事件响应 SOP"
+    expected_section_contains: "取证流程"
+  - id: G088
+    question: "安全取证采集进程网络连接的顺序？"
+    expected_keywords: ["网络连接"]
+    expected_citation_title: "安全事件响应 SOP"
+    expected_section_contains: "取证流程"
+  - id: G089
+    question: "安全取证全程记录什么？"
+    expected_keywords: ["操作时间", "操作人"]
+    expected_citation_title: "安全事件响应 SOP"
+    expected_section_contains: "取证流程"
+  - id: G090
+    question: "安全取证交接给谁？"
+    expected_keywords: ["安全团队"]
+    expected_citation_title: "安全事件响应 SOP"
+    expected_section_contains: "取证流程"
+  - id: G091
+    question: "安全事件闭环后多久输出复盘报告？"
+    expected_keywords: ["48 小时"]
+    expected_citation_title: "安全事件响应 SOP"
+    expected_section_contains: "复盘改进"
+  - id: G092
+    question: "安全事件复盘后更新什么规则？"
+    expected_keywords: ["检测规则"]
+    expected_citation_title: "安全事件响应 SOP"
+    expected_section_contains: "复盘改进"
+  - id: G093
+    question: "安全事件复盘后更新什么策略？"
+    expected_keywords: ["访问策略"]
+    expected_citation_title: "安全事件响应 SOP"
+    expected_section_contains: "复盘改进"
+  - id: G094
+    question: "安全事件复盘后通知谁？"
+    expected_keywords: ["受影响用户"]
+    expected_citation_title: "安全事件响应 SOP"
+    expected_section_contains: "复盘改进"
+  - id: G095
+    question: "安全事件复盘报告包含什么更新？"
+    expected_keywords: ["检测规则", "访问策略"]
+    expected_citation_title: "安全事件响应 SOP"
+    expected_section_contains: "复盘改进"
+
+  # ---- 跨 SOP 综合题扩充 ----
+  - id: G096
+    question: "哪些故障恢复时都提到限流？"
+    expected_keywords: ["限流"]
+    expected_citation_title: "数据库故障 SOP"
+    expected_section_contains: "恢复步骤"
+  - id: G097
+    question: "哪些故障恢复时都提到扩容？"
+    expected_keywords: ["扩容"]
+    expected_citation_title: "数据库故障 SOP"
+    expected_section_contains: "恢复步骤"
+  - id: G098
+    question: "数据库故障和网络延迟恢复都涉及什么操作？"
+    expected_keywords: ["限流"]
+    expected_citation_title: "数据库故障 SOP"
+    expected_section_contains: "恢复步骤"
+  - id: G099
+    question: "安全事件取证要采集内存镜像，Redis 内存诊断要排查什么？"
+    expected_keywords: ["大 key"]
+    expected_citation_title: "Redis 内存溢出 SOP"
+    expected_section_contains: "内存诊断"
+  - id: G100
+    question: "部署回滚和安全事件响应都强调不要做什么？"
+    expected_keywords: ["不等", "根因定位"]
+    expected_citation_title: "部署回滚 SOP"
+    expected_section_contains: "回滚判定"
+
+# ---- No-answer：知识库无依据，应拒答 ----
+no_answer:
+  - id: N001
+    question: "如何配置 Kubernetes 的 Ingress 控制器？"
+    reason: "知识库无 K8s 相关内容"
+  - id: N002
+    question: "公司的年假政策是什么？"
+    reason: "非运维 SOP 范畴"
+  - id: N003
+    question: "如何用 Python 写一个 web 爬虫？"
+    reason: "非运维 SOP 范畴"
+  - id: N004
+    question: "MySQL 主从复制的 GTID 配置步骤？"
+    reason: "知识库仅含连接池耗尽，无复制配置"
+  - id: N005
+    question: "Kafka 消费者组的 rebalance 策略怎么调？"
+    reason: "知识库无 Kafka 内容"
+  - id: N006
+    question: "公司报销流程是怎样的？"
+    reason: "非运维 SOP 范畴"
+  - id: N007
+    question: "如何给 iPhone 越狱？"
+    reason: "非运维 SOP 范畴"
+  - id: N008
+    question: "Elasticsearch 集群脑裂怎么处理？"
+    reason: "知识库无 ES 内容"
+  - id: N009
+    question: "Jenkins pipeline 怎么写共享库？"
+    reason: "知识库无 CI/CD 工具配置"
+  - id: N010
+    question: "公司团建活动有哪些？"
+    reason: "非运维 SOP 范畴"
+  - id: N011
+    question: "怎么用 TensorFlow 训练图像分类模型？"
+    reason: "非运维 SOP 范畴"
+  - id: N012
+    question: "PostgreSQL 的 vacuum 调优参数有哪些？"
+    reason: "知识库仅含连接池，无 vacuum 内容"
+  - id: N013
+    question: "Nginx 的 worker_processes 怎么设置？"
+    reason: "知识库无 Nginx 配置"
+  - id: N014
+    question: "公司食堂今天的菜单是什么？"
+    reason: "非运维 SOP 范畴"
+  - id: N015
+    question: "怎么在 AWS 上配置 VPC peering？"
+    reason: "知识库无云平台配置内容"
+  # ---- No-answer 扩充：同领域近义词干扰 + 非运维范畴 ----
+  - id: N016
+    question: "如何配置 Cassandra 的一致性哈希？"
+    reason: "知识库无 Cassandra 内容"
+  - id: N017
+    question: "MongoDB 的副本集怎么配置？"
+    reason: "知识库无 MongoDB 内容"
+  - id: N018
+    question: "Docker 容器怎么设置资源配额？"
+    reason: "知识库无容器配置内容"
+  - id: N019
+    question: "如何编写 Terraform 模块？"
+    reason: "知识库无 IaC 工具内容"
+  - id: N020
+    question: "Zabbix 监控模板怎么导入？"
+    reason: "知识库无监控告警配置"
+  - id: N021
+    question: "Gitlab CI/CD 怎么配置自动部署？"
+    reason: "知识库无 CI/CD 工具配置"
+  - id: N022
+    question: "如何优化 Vue.js 的首屏加载性能？"
+    reason: "非运维 SOP 范畴"
+  - id: N023
+    question: "Spring Boot 怎么集成 HikariCP？"
+    reason: "知识库无框架配置内容"
+  - id: N024
+    question: "如何诊断 Linux 内核崩溃？"
+    reason: "知识库无内核调试内容"
+  - id: N025
+    question: "Hadoop YARN 怎么调度任务？"
+    reason: "知识库无大数据平台内容"
+  - id: N026
+    question: "公司 VPN 怎么配置客户端？"
+    reason: "非运维 SOP 范畴"
+  - id: N027
+    question: "如何申请服务器 root 权限？"
+    reason: "非运维 SOP 范畴"
+  - id: N028
+    question: "RabbitMQ 消息积压怎么处理？"
+    reason: "知识库无消息队列内容"
+  - id: N029
+    question: "Consul 服务注册怎么配置？"
+    reason: "知识库无服务发现配置"
+  - id: N030
+    question: "如何编写 GraphQL schema？"
+    reason: "非运维 SOP 范畴"

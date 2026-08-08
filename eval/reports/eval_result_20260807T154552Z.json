@@ -1,0 +1,281 @@
+{
+  "dataset_version": "v2",
+  "knowledge_version": "seed-v2",
+  "annotator": "QA",
+  "annotated_at": "2026-08-07",
+  "counts": {
+    "golden": 7,
+    "no_answer": 5,
+    "total": 12
+  },
+  "metrics": {
+    "首答准确率": 0.5714,
+    "引用正确率": 1.0,
+    "拒答率": 1.0,
+    "幻觉率": 0.0,
+    "检索召回率": 0.5714,
+    "首事件延迟_P50_ms": 19.403750000000386,
+    "首事件延迟_P95_ms": 24.614208000000026,
+    "完整回答延迟_P50_ms": 2371.771625,
+    "完整回答延迟_P95_ms": 3059.6397919999986
+  },
+  "golden_details": [
+    {
+      "id": "G026",
+      "question": "Redis 内存溢出和数据库连接池耗尽的共同恢复手段是什么？",
+      "answer_correct": false,
+      "citation_correct": false,
+      "retrieval_hit": false,
+      "finish_reason": "refusal",
+      "error": null,
+      "answer_preview": "证据不足，无法确认。  \n（证据中分别描述了Redis内存溢出和数据库连接池耗尽的恢复步骤，但未提及两者共同的恢复手段。）",
+      "citations": []
+    },
+    {
+      "id": "G028",
+      "question": "网络延迟恢复要保留 pcap，安全事件要保留什么？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "安全事件要保留**内存镜像、磁盘镜像和进程网络连接**，并全程记录**操作时间和操作人**，交接安全团队。  \n（依据证据2：按顺序采集内存镜像、磁盘镜像和进程网络连接，全程记录操作时间和操作人，交接安全团队。）",
+      "citations": [
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "故障处理",
+            "入侵隔离"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "恢复步骤",
+            "取证流程"
+          ]
+        },
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "恢复步骤",
+            "复盘改进"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G037",
+      "question": "连接池恢复时扩容的目标是什么？",
+      "answer_correct": false,
+      "citation_correct": false,
+      "retrieval_hit": false,
+      "finish_reason": "refusal",
+      "error": null,
+      "answer_preview": "证据不足，无法确认。",
+      "citations": []
+    },
+    {
+      "id": "G043",
+      "question": "Redis fragmentation ratio 高说明什么问题？",
+      "answer_correct": false,
+      "citation_correct": false,
+      "retrieval_hit": false,
+      "finish_reason": "refusal",
+      "error": null,
+      "answer_preview": "证据不足，无法确认。",
+      "citations": []
+    },
+    {
+      "id": "G070",
+      "question": "网络延迟恢复时先确认什么再操作？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "根据证据，网络延迟恢复时**先确认是单链路问题还是全网卡问题**，再决定后续操作。\n\n具体步骤：  \n- 通过**多目标探测**判断：若仅特定目标不可达、其余链路正常，则为**单链路问题**；若全部目标连通性普遍下降，则为**全网卡问题**",
+      "citations": [
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "淘汰策略"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "延迟定位"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "故障处理",
+            "连接池耗尽"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G096",
+      "question": "哪些故障恢复时都提到限流？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "根据证据，以下故障恢复时提到限流：\n\n1. **数据库连接池耗尽**（证据1）：恢复步骤为“先限流非关键流量，再扩容应用实例”。\n2. **网络延迟排查**（证据5）：恢复步骤为“切换备用链路并通知上游限流”。\n\n关键术语：限流、非关键流量",
+      "citations": [
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "故障处理",
+            "连接池耗尽"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "故障处理",
+            "内存诊断"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "延迟定位"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G100",
+      "question": "部署回滚和安全事件响应都强调不要做什么？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "根据证据，部署回滚和安全事件响应都强调**不要立即重启**和**不要不等根因定位就盲目操作**，具体如下：\n\n- **安全事件响应**（证据1）：确认主机被入侵后，**禁止直接重启**，以免丢失内存证据，应先断网隔离保留现场。\n- **部署",
+      "citations": [
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "故障处理",
+            "入侵隔离"
+          ]
+        },
+        {
+          "title": "部署回滚 SOP",
+          "section_path": [
+            "故障处理",
+            "回滚判定"
+          ]
+        },
+        {
+          "title": "部署回滚 SOP",
+          "section_path": [
+            "恢复步骤",
+            "回滚执行"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "恢复步骤",
+            "取证流程"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "恢复步骤",
+            "复盘改进"
+          ]
+        }
+      ]
+    }
+  ],
+  "no_answer_details": [
+    {
+      "id": "N001",
+      "question": "如何配置 Kubernetes 的 Ingress 控制器？",
+      "refused": true,
+      "finish_reason": "refusal",
+      "error": null,
+      "answer_preview": "证据不足，无法确认。"
+    },
+    {
+      "id": "N002",
+      "question": "公司的年假政策是什么？",
+      "refused": true,
+      "finish_reason": "refusal",
+      "error": null,
+      "answer_preview": "当前授权知识库中没有足够证据，我无法确认这个问题。请补充文档范围或换一种问法。"
+    },
+    {
+      "id": "N003",
+      "question": "如何用 Python 写一个 web 爬虫？",
+      "refused": true,
+      "finish_reason": "refusal",
+      "error": null,
+      "answer_preview": "证据不足，无法确认。"
+    },
+    {
+      "id": "N004",
+      "question": "MySQL 主从复制的 GTID 配置步骤？",
+      "refused": true,
+      "finish_reason": "refusal",
+      "error": null,
+      "answer_preview": "证据不足，无法确认。"
+    },
+    {
+      "id": "N005",
+      "question": "Kafka 消费者组的 rebalance 策略怎么调？",
+      "refused": true,
+      "finish_reason": "refusal",
+      "error": null,
+      "answer_preview": "证据不足，无法确认。"
+    }
+  ]
+}

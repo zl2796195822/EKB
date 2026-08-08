@@ -1,0 +1,182 @@
+{
+  "dataset_version": "v2-mini-fail",
+  "knowledge_version": "seed-v2",
+  "annotator": "QA",
+  "annotated_at": "2026-08-07",
+  "counts": {
+    "golden": 8,
+    "no_answer": 0,
+    "total": 8
+  },
+  "metrics": {
+    "首答准确率": 0.5,
+    "引用正确率": 1.0,
+    "拒答率": null,
+    "幻觉率": 0.0,
+    "检索召回率": 0.25,
+    "首事件延迟_P50_ms": 19.25554099999971,
+    "首事件延迟_P95_ms": 25.90345799999838,
+    "完整回答延迟_P50_ms": 3124.1065,
+    "完整回答延迟_P95_ms": 3415.9808750000007
+  },
+  "golden_details": [
+    {
+      "id": "G017",
+      "question": "回滚执行时先做什么再做什么？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "回滚执行时，先切上一版本镜像，再迁移数据库变更；破坏性迁移需先评估 forward-compatibility。",
+      "citations": [
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "故障处理",
+            "内存诊断"
+          ]
+        },
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "故障处理",
+            "连接池耗尽"
+          ]
+        },
+        {
+          "title": "部署回滚 SOP",
+          "section_path": [
+            "恢复步骤",
+            "回滚执行"
+          ]
+        },
+        {
+          "title": "部署回滚 SOP",
+          "section_path": [
+            "故障处理",
+            "回滚判定"
+          ]
+        },
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G026",
+      "question": "Redis 内存溢出和数据库连接池耗尽的共同恢复手段是什么？",
+      "answer_correct": false,
+      "citation_correct": false,
+      "retrieval_hit": false,
+      "finish_reason": "refusal",
+      "error": null,
+      "answer_preview": "证据不足，无法确认。  \n（证据中分别描述了Redis内存溢出和数据库连接池耗尽的恢复步骤，但未提及两者共同的恢复手段。）",
+      "citations": []
+    },
+    {
+      "id": "G033",
+      "question": "数据库慢查询和连接池耗尽有什么关系？",
+      "answer_correct": true,
+      "citation_correct": false,
+      "retrieval_hit": false,
+      "finish_reason": "refusal",
+      "error": null,
+      "answer_preview": "证据不足，无法确认。现有证据仅分别提及“连接池耗尽时检查慢查询”（证据1）和“连接池持续耗尽时限流、扩容”（证据2），但未说明慢查询与连接池耗尽之间的因果关系或具体关联机制。",
+      "citations": []
+    },
+    {
+      "id": "G034",
+      "question": "连接池耗尽时等待队列长度异常说明什么？",
+      "answer_correct": false,
+      "citation_correct": false,
+      "retrieval_hit": false,
+      "finish_reason": "refusal",
+      "error": null,
+      "answer_preview": "证据不足，无法确认。",
+      "citations": []
+    },
+    {
+      "id": "G037",
+      "question": "连接池恢复时扩容的目标是什么？",
+      "answer_correct": false,
+      "citation_correct": false,
+      "retrieval_hit": false,
+      "finish_reason": "refusal",
+      "error": null,
+      "answer_preview": "证据不足，无法确认。",
+      "citations": []
+    },
+    {
+      "id": "G043",
+      "question": "Redis fragmentation ratio 高说明什么问题？",
+      "answer_correct": true,
+      "citation_correct": false,
+      "retrieval_hit": false,
+      "finish_reason": "refusal",
+      "error": null,
+      "answer_preview": "证据不足，无法确认。证据1仅提到“执行 info memory 查看 used_memory_rss 和 fragmentation ratio”，但未说明 fragmentation ratio 高的具体含义或问题。",
+      "citations": []
+    },
+    {
+      "id": "G055",
+      "question": "Redis aof-rewrite-incremental-fsync 评估什么场景？",
+      "answer_correct": false,
+      "citation_correct": false,
+      "retrieval_hit": false,
+      "finish_reason": "refusal",
+      "error": null,
+      "answer_preview": "证据不足，无法确认。",
+      "citations": []
+    },
+    {
+      "id": "G069",
+      "question": "网络延迟恢复步骤的顺序是什么？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "根据证据，网络延迟恢复步骤的顺序为：\n\n1. **确认问题类型**：区分是单链路问题还是全网卡问题（单链路仅特定目标不可达，全网卡则全部目标连通性普遍下降，需结合多目标探测判断）。\n2. **切换备用链路**：确认问题后，切换备用链路。\n3",
+      "citations": [
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "延迟定位"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "DNS 排查"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "恢复步骤",
+            "取证流程"
+          ]
+        }
+      ]
+    }
+  ],
+  "no_answer_details": []
+}

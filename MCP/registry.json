@@ -1,0 +1,64 @@
+{
+  "schema_version": "1.0",
+  "generated_at": "2026-08-07",
+  "project_root": "/Users/alin/EKB",
+  "selection_policy": "高热度、持续维护、许可证可核验、能直接覆盖 EKB 的浏览器验收、研发协作和 PostgreSQL 开发检查场景",
+  "runtime_policy": "MCP 仅用于本地研发和受控测试，不是 EKB 产品运行时依赖",
+  "servers": [
+    {
+      "name": "playwright-mcp",
+      "repo": "microsoft/playwright-mcp",
+      "source": "https://github.com/microsoft/playwright-mcp",
+      "archive": "GitHub codeload tarball of main",
+      "default_branch": "main",
+      "commit": "4c5077651542f68525a0b51e97bab2a32abc9290",
+      "commit_url": "https://github.com/microsoft/playwright-mcp/commit/4c5077651542f68525a0b51e97bab2a32abc9290",
+      "stars_at_snapshot": 35887,
+      "upstream_updated_at": "2026-08-07T08:45:48Z",
+      "license": "Apache-2.0",
+      "local_path": "MCP/playwright-mcp",
+      "purpose": "浏览器自动化、端到端验收、响应式截图和 UI 回归",
+      "status": "approved-for-development",
+      "default_mode": "local-dev-only; headless; isolated; loopback hosts"
+    },
+    {
+      "name": "github-mcp-server",
+      "repo": "github/github-mcp-server",
+      "source": "https://github.com/github/github-mcp-server",
+      "archive": "GitHub codeload tarball of main",
+      "default_branch": "main",
+      "commit": "1b3f89a90af6cad490384b8fdbf7fd3f057670c1",
+      "commit_url": "https://github.com/github/github-mcp-server/commit/1b3f89a90af6cad490384b8fdbf7fd3f057670c1",
+      "stars_at_snapshot": 32022,
+      "upstream_updated_at": "2026-08-07T08:47:49Z",
+      "license": "MIT",
+      "local_path": "MCP/github-mcp-server",
+      "purpose": "项目仓库、Issue、PR、Actions 和发布协作的受控读写接口",
+      "status": "approved-for-development",
+      "default_mode": "local-dev-only; read-only; fine-grained token or OAuth"
+    },
+    {
+      "name": "postgres-mcp",
+      "repo": "crystaldba/postgres-mcp",
+      "source": "https://github.com/crystaldba/postgres-mcp",
+      "archive": "GitHub codeload tarball of main",
+      "default_branch": "main",
+      "commit": "07eb329c8c48e49640e0d1b5b35465d4d024c3ee",
+      "commit_url": "https://github.com/crystaldba/postgres-mcp/commit/07eb329c8c48e49640e0d1b5b35465d4d024c3ee",
+      "stars_at_snapshot": 3167,
+      "upstream_updated_at": "2026-08-07T07:00:11Z",
+      "license": "MIT",
+      "local_path": "MCP/postgres-mcp",
+      "purpose": "PostgreSQL schema、健康度、EXPLAIN、索引和 pgvector 开发检查",
+      "status": "approved-for-development",
+      "default_mode": "local-dev-only; restricted/read-only; non-production database"
+    }
+  ],
+  "reference_only": [
+    {
+      "repo": "modelcontextprotocol/servers",
+      "source": "https://github.com/modelcontextprotocol/servers",
+      "reason": "仓库聚合多个服务器，GitHub API 未给出可直接适用的单一许可证边界；暂不下载或纳入批准清单"
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+- main [ref=e3]:
+  - generic [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]: E
+      - generic [ref=e7]:
+        - strong [ref=e8]: EKB
+        - generic [ref=e9]: 企业知识库
+    - paragraph [ref=e10]: M1 tracer bullet
+    - heading "让每个答案都能回到证据" [level=1] [ref=e11]
+    - paragraph [ref=e12]: 登录后访问授权知识库。当前版本用于验证租户上下文、检索过滤、SSE 问答和引用链路。
+    - generic [ref=e13]:
+      - generic [ref=e14]:
+        - text: 邮箱
+        - textbox "邮箱" [ref=e15]:
+          - /placeholder: admin@example.com
+      - generic [ref=e16]:
+        - text: 密码
+        - textbox "密码" [ref=e17]:
+          - /placeholder: 输入本地开发密码
+      - button "进入知识库" [ref=e18] [cursor=pointer]
+    - paragraph [ref=e19]: "开发环境凭据由 `EKB_DEV_USER_EMAIL` 和 `EKB_DEV_PASSWORD` 注入。"

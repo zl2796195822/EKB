@@ -1,0 +1,391 @@
+{
+  "dataset_version": "v2-mini-fail",
+  "knowledge_version": "seed-v2",
+  "annotator": "QA",
+  "annotated_at": "2026-08-07",
+  "counts": {
+    "golden": 8,
+    "no_answer": 0,
+    "total": 8
+  },
+  "metrics": {
+    "首答准确率": 1.0,
+    "引用正确率": 1.0,
+    "拒答率": null,
+    "幻觉率": 0.0,
+    "检索召回率": 1.0,
+    "首事件延迟_P50_ms": 18.224000000000018,
+    "首事件延迟_P95_ms": 24.57104199999982,
+    "完整回答延迟_P50_ms": 2698.946666999998,
+    "完整回答延迟_P95_ms": 3382.813584000001
+  },
+  "golden_details": [
+    {
+      "id": "G017",
+      "question": "回滚执行时先做什么再做什么？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "回滚执行时，先切上一版本镜像，再迁移数据库变更；若涉及破坏性迁移，需先评估 forward-compatibility。",
+      "citations": [
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "故障处理",
+            "内存诊断"
+          ]
+        },
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "故障处理",
+            "连接池耗尽"
+          ]
+        },
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "部署回滚 SOP",
+          "section_path": [
+            "故障处理",
+            "回滚判定"
+          ]
+        },
+        {
+          "title": "部署回滚 SOP",
+          "section_path": [
+            "恢复步骤",
+            "回滚执行"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G026",
+      "question": "Redis 内存溢出和数据库连接池耗尽的共同恢复手段是什么？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "结论：**扩容应用实例**是两者的共同恢复手段。\n\n- 对于**数据库连接池耗尽**，证据1明确要求“先限流非关键流量，再扩容应用实例”，并保留 trace_id 供复盘，目标是将连接池使用率降至安全水位、恢复等待队列可控。\n- 对于**R",
+      "citations": [
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "故障处理",
+            "连接池耗尽"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "淘汰策略"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "故障处理",
+            "内存诊断"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "持久化影响"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G033",
+      "question": "数据库慢查询和连接池耗尽有什么关系？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "数据库慢查询是连接池耗尽的主要诱因。慢查询会长期占用连接不释放，导致连接池中的连接被占满，新请求拿不到空闲连接，从而出现连接池耗尽。此时等待队列长度会持续增长，说明连接请求已超出连接池上限。处理时先检查连接池使用率、等待队列长度、慢查询和应",
+      "citations": [
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "故障处理",
+            "连接池耗尽"
+          ]
+        },
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "部署回滚 SOP",
+          "section_path": [
+            "恢复步骤",
+            "回滚执行"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "恢复步骤",
+            "取证流程"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "DNS 排查"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G034",
+      "question": "连接池耗尽时等待队列长度异常说明什么？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "连接池耗尽时，等待队列长度持续增长说明连接请求已超出连接池上限，应用拿不到空闲连接而开始排队。\n\n依据证据1，等待队列长度是连接池耗尽的判断指标之一：其持续增长意味着连接请求量已超过连接池可分配上限，应用无法获取空闲连接，只能进入排队状态。",
+      "citations": [
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "故障处理",
+            "连接池耗尽"
+          ]
+        },
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "延迟定位"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "故障处理",
+            "内存诊断"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "恢复步骤",
+            "取证流程"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G037",
+      "question": "连接池恢复时扩容的目标是什么？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "连接池恢复时扩容的目标是：**将连接池使用率降至安全水位、恢复等待队列可控**。\n\n具体步骤为：先限流非关键流量，再扩容应用实例，并保留 trace_id 供复盘。扩容应用实例是通用的恢复手段，与 Redis 内存溢出时拆分大 key 或扩",
+      "citations": [
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "故障处理",
+            "连接池耗尽"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "淘汰策略"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "持久化影响"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G043",
+      "question": "Redis fragmentation ratio 高说明什么问题？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "结论：Redis fragmentation ratio（内存碎片率）过高说明存在明显的内存碎片，实际可用内存被碎片挤占。\n\n依据证据1，当Redis内存溢出时，应先执行 `info memory` 查看 `used_memory_rss`",
+      "citations": [
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "故障处理",
+            "内存诊断"
+          ]
+        },
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "故障处理",
+            "连接池耗尽"
+          ]
+        },
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "淘汰策略"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "持久化影响"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G055",
+      "question": "Redis aof-rewrite-incremental-fsync 评估什么场景？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "根据证据1，`aof-rewrite-incremental-fsync` 用于评估 **fork 阻塞/磁盘 IO 抖动场景**。开启后可将 AOF 重写期间的磁盘写入峰值摊薄，降低对主线程的阻塞。",
+      "citations": [
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "持久化影响"
+          ]
+        },
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "淘汰策略"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "故障处理",
+            "内存诊断"
+          ]
+        },
+        {
+          "title": "部署回滚 SOP",
+          "section_path": [
+            "恢复步骤",
+            "回滚执行"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G069",
+      "question": "网络延迟恢复步骤的顺序是什么？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "结论：网络延迟恢复步骤的顺序为：先确认是单链路或全网卡问题，再切换备用链路，然后通知上游限流，最后保留 pcap 供复盘。\n\n具体细节：\n- 第一步：区分问题类型。单链路问题指仅特定目标不可达、其余链路正常；全网卡问题指全部目标连通性普遍下",
+      "citations": [
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "延迟定位"
+          ]
+        },
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "DNS 排查"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "淘汰策略"
+          ]
+        }
+      ]
+    }
+  ],
+  "no_answer_details": []
+}

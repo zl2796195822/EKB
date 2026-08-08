@@ -1,0 +1,12 @@
+Metadata-Version: 2.4
+Name: ekb-api
+Version: 0.1.0
+Summary: EKB FastAPI tracer bullet
+Requires-Python: >=3.9
+Requires-Dist: fastapi<0.129,>=0.115
+Requires-Dist: python-multipart>=0.0.18
+Requires-Dist: uvicorn[standard]<0.40,>=0.30
+Provides-Extra: dev
+Requires-Dist: httpx<1,>=0.27; extra == "dev"
+Requires-Dist: pytest<9,>=8; extra == "dev"
+Requires-Dist: ruff<1,>=0.8; extra == "dev"

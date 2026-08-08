@@ -1,0 +1,46 @@
+version: "v2-mini-fail"
+knowledge_version: "seed-v2"
+annotator: "QA"
+annotated_at: "2026-08-07"
+
+golden:
+  - id: G017
+    question: "回滚执行时先做什么再做什么？"
+    expected_keywords: ["切上一版本镜像", "迁移数据库变更"]
+    expected_citation_title: "部署回滚 SOP"
+    expected_section_contains: "回滚执行"
+  - id: G026
+    question: "Redis 内存溢出和数据库连接池耗尽的共同恢复手段是什么？"
+    expected_keywords: ["扩容"]
+    expected_citation_title: "数据库故障 SOP"
+    expected_section_contains: "恢复步骤"
+  - id: G033
+    question: "数据库慢查询和连接池耗尽有什么关系？"
+    expected_keywords: ["慢查询"]
+    expected_citation_title: "数据库故障 SOP"
+    expected_section_contains: "连接池耗尽"
+  - id: G034
+    question: "连接池耗尽时等待队列长度异常说明什么？"
+    expected_keywords: ["等待队列"]
+    expected_citation_title: "数据库故障 SOP"
+    expected_section_contains: "连接池耗尽"
+  - id: G037
+    question: "连接池恢复时扩容的目标是什么？"
+    expected_keywords: ["扩容", "应用实例"]
+    expected_citation_title: "数据库故障 SOP"
+    expected_section_contains: "恢复步骤"
+  - id: G043
+    question: "Redis fragmentation ratio 高说明什么问题？"
+    expected_keywords: ["fragmentation"]
+    expected_citation_title: "Redis 内存溢出 SOP"
+    expected_section_contains: "内存诊断"
+  - id: G055
+    question: "Redis aof-rewrite-incremental-fsync 评估什么场景？"
+    expected_keywords: ["aof-rewrite-incremental-fsync"]
+    expected_citation_title: "Redis 内存溢出 SOP"
+    expected_section_contains: "持久化影响"
+  - id: G069
+    question: "网络延迟恢复步骤的顺序是什么？"
+    expected_keywords: ["切换备用链路", "限流"]
+    expected_citation_title: "网络延迟排查 SOP"
+    expected_section_contains: "恢复步骤"

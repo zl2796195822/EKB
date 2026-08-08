@@ -1,0 +1,4623 @@
+{
+  "dataset_version": "v2",
+  "knowledge_version": "seed-v2",
+  "annotator": "QA",
+  "annotated_at": "2026-08-07",
+  "counts": {
+    "golden": 100,
+    "no_answer": 30,
+    "total": 130
+  },
+  "metrics": {
+    "首答准确率": 0.94,
+    "引用正确率": 0.9895,
+    "拒答率": 1.0,
+    "幻觉率": 0.0,
+    "检索召回率": 0.94,
+    "首事件延迟_P50_ms": 20.116584000021476,
+    "首事件延迟_P95_ms": 31.18249999999989,
+    "完整回答延迟_P50_ms": 2439.484540999999,
+    "完整回答延迟_P95_ms": 3540.953707999989
+  },
+  "golden_details": [
+    {
+      "id": "G001",
+      "question": "数据库连接池耗尽时应该先检查哪些指标？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "根据证据，数据库连接池耗尽时应先检查以下指标：**连接池使用率、等待队列长度、慢查询和应用实例数**。  \n具体步骤为：先检查连接池使用率、等待队列长度、慢查询和应用实例数，若持续耗尽，再限流非关键流量、扩容应用实例，并保留 trace_i",
+      "citations": [
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "故障处理",
+            "连接池耗尽"
+          ]
+        },
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "延迟定位"
+          ]
+        },
+        {
+          "title": "部署回滚 SOP",
+          "section_path": [
+            "恢复步骤",
+            "回滚执行"
+          ]
+        },
+        {
+          "title": "部署回滚 SOP",
+          "section_path": [
+            "故障处理",
+            "回滚判定"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G002",
+      "question": "连接池持续耗尽时如何恢复？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "连接池持续耗尽时，恢复步骤为：**先限流非关键流量，再扩容应用实例，并保留 trace_id 供复盘**。\n\n具体操作前需先检查以下指标：连接池使用率、等待队列长度、慢查询和应用实例数。",
+      "citations": [
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "故障处理",
+            "连接池耗尽"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "持久化影响"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "淘汰策略"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G003",
+      "question": "连接池耗尽的恢复步骤里要保留什么供复盘？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "连接池耗尽的恢复步骤中，需保留 **trace_id** 供复盘。  \n具体步骤：先限流非关键流量，再扩容应用实例，同时保留 trace_id。",
+      "citations": [
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "故障处理",
+            "连接池耗尽"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "淘汰策略"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "持久化影响"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G004",
+      "question": "Redis 内存溢出时先用什么命令排查？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "根据证据，Redis 内存溢出时，**先执行 `info memory` 命令**，查看 `used_memory_rss` 和 `fragmentation ratio`，再排查大 key。",
+      "citations": [
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "故障处理",
+            "内存诊断"
+          ]
+        },
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "故障处理",
+            "连接池耗尽"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "淘汰策略"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "持久化影响"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "延迟定位"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G005",
+      "question": "Redis 内存溢出要排查什么类型的 key？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "根据证据，Redis 内存溢出时需要排查**大 key**。\n\n具体步骤：先执行 `info memory` 查看 `used_memory_rss` 和 `fragmentation ratio`，再排查大 key。若 `maxmemor",
+      "citations": [
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "故障处理",
+            "内存诊断"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "淘汰策略"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "持久化影响"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "延迟定位"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "DNS 排查"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G006",
+      "question": "Redis 淘汰策略 allkeys-lru 能起什么作用？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "根据证据，Redis 淘汰策略 **allkeys-lru** 的作用是：**短期缓解内存溢出**。  \n具体步骤：确认 `maxmemory-policy` 配置为 `allkeys-lru` 后，可短期缓解内存压力，但**长期需拆分大 ",
+      "citations": [
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "淘汰策略"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "故障处理",
+            "内存诊断"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "持久化影响"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "故障处理",
+            "入侵隔离"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "恢复步骤",
+            "取证流程"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G007",
+      "question": "Redis 内存溢出长期如何解决？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "结论：长期解决需拆分大 key 或扩容，并评估持久化相关参数。\n\n- 根据[证据2]，确认 `maxmemory-policy` 配置；`allkeys-lru` 仅短期缓解，长期需**拆分大 key**或**扩容**。\n- 根据[证据1]",
+      "citations": [
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "故障处理",
+            "内存诊断"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "淘汰策略"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "持久化影响"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "故障处理",
+            "入侵隔离"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G008",
+      "question": "Redis 开启 RDB 或 AOF 时内存溢出可能触发什么问题？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "根据证据2，Redis 开启 RDB 或 AOF 时，内存溢出可能触发 **fork 失败**。  \n具体需评估 **repl-backlog-size** 和 **aof-rewrite-incremental-fsync** 配置，以降",
+      "citations": [
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "故障处理",
+            "内存诊断"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "持久化影响"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "淘汰策略"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "部署回滚 SOP",
+          "section_path": [
+            "故障处理",
+            "回滚判定"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G009",
+      "question": "Redis 持久化内存溢出需评估哪些参数？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "根据证据，Redis 持久化内存溢出需评估以下参数：\n\n- **repl-backlog-size**：评估复制积压缓冲区大小，避免内存溢出影响主从同步。\n- **aof-rewrite-incremental-fsync**：评估 AOF",
+      "citations": [
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "故障处理",
+            "内存诊断"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "持久化影响"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "淘汰策略"
+          ]
+        },
+        {
+          "title": "部署回滚 SOP",
+          "section_path": [
+            "恢复步骤",
+            "回滚执行"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "故障处理",
+            "入侵隔离"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G010",
+      "question": "网络延迟突增时用什么工具分段定位？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "根据证据，网络延迟突增时使用 **mtr** 工具分段定位拥塞节点。\n\n具体步骤：先按 **mtr** 分段定位拥塞节点，再检查交换机队列深度和网卡丢包计数。",
+      "citations": [
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "延迟定位"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "DNS 排查"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "部署回滚 SOP",
+          "section_path": [
+            "故障处理",
+            "回滚判定"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "恢复步骤",
+            "取证流程"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G011",
+      "question": "网络延迟定位时要检查交换机的什么指标？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "网络延迟定位时，需要检查**交换机队列深度**和**网卡丢包计数**。  \n具体步骤：先按 **mtr** 分段定位拥塞节点，再检查上述两个指标，以确认是否存在队列堆积或丢包导致的延迟。",
+      "citations": [
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "延迟定位"
+          ]
+        },
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "故障处理",
+            "连接池耗尽"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "DNS 排查"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "部署回滚 SOP",
+          "section_path": [
+            "故障处理",
+            "回滚判定"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G012",
+      "question": "延迟只在首次请求出现应排查什么？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "结论：应排查 DNS 解析耗时和本地 resolver 缓存命中率。\n\n具体步骤：\n1. 检查本地 resolver 缓存命中率。\n2. 若命中率低，首请求仍需向上游递归解析，导致 DNS 解析耗时升高，表现为延迟仅在首次请求出现。\n\n（依",
+      "citations": [
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "DNS 排查"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "故障处理",
+            "内存诊断"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "延迟定位"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "部署回滚 SOP",
+          "section_path": [
+            "故障处理",
+            "回滚判定"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G013",
+      "question": "网络延迟恢复时要保留什么供复盘？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "根据证据，网络延迟恢复时要保留 **pcap** 供复盘（证据3）。具体步骤为：确认是单链路或全网卡问题后，切换备用链路并通知上游限流，同时保留 pcap 数据包用于后续分析。",
+      "citations": [
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "延迟定位"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "淘汰策略"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "DNS 排查"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G014",
+      "question": "确认网络问题范围后要做什么？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "确认网络问题范围后，需区分是单链路还是全网卡问题，并采取对应措施：  \n- **单链路问题**：切换备用链路，并通知上游限流。  \n- **全网卡问题**：结合多目标探测判断，保留 pcap 供复盘。  \n\n（依据证据3：单链路仅特定目标不",
+      "citations": [
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "淘汰策略"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "延迟定位"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "DNS 排查"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "故障处理",
+            "入侵隔离"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G015",
+      "question": "发布后什么情况下应立即触发回滚？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "根据证据1，发布后核心指标（错误率、延迟、可用性）超阈值 **5分钟未恢复** 时，应立即触发回滚，不等根因定位。",
+      "citations": [
+        {
+          "title": "部署回滚 SOP",
+          "section_path": [
+            "故障处理",
+            "回滚判定"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "持久化影响"
+          ]
+        },
+        {
+          "title": "部署回滚 SOP",
+          "section_path": [
+            "恢复步骤",
+            "回滚执行"
+          ]
+        },
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "故障处理",
+            "连接池耗尽"
+          ]
+        },
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G016",
+      "question": "回滚判定时是否要等根因定位？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "结论：不需要等根因定位。\n\n根据[证据1]，发布后核心指标（错误率、延迟、可用性）超阈值 **5 分钟未恢复**时，**立即触发回滚**，不等根因定位。",
+      "citations": [
+        {
+          "title": "部署回滚 SOP",
+          "section_path": [
+            "故障处理",
+            "回滚判定"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "延迟定位"
+          ]
+        },
+        {
+          "title": "部署回滚 SOP",
+          "section_path": [
+            "恢复步骤",
+            "回滚执行"
+          ]
+        },
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "故障处理",
+            "连接池耗尽"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "故障处理",
+            "内存诊断"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G017",
+      "question": "回滚执行时先做什么再做什么？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "回滚执行时，先切上一版本镜像，再迁移数据库变更；破坏性迁移需先评估 forward-compatibility。",
+      "citations": [
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "故障处理",
+            "内存诊断"
+          ]
+        },
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "故障处理",
+            "连接池耗尽"
+          ]
+        },
+        {
+          "title": "部署回滚 SOP",
+          "section_path": [
+            "恢复步骤",
+            "回滚执行"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "延迟定位"
+          ]
+        },
+        {
+          "title": "部署回滚 SOP",
+          "section_path": [
+            "故障处理",
+            "回滚判定"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G018",
+      "question": "破坏性数据库迁移回滚时要先评估什么？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "根据证据2，破坏性数据库迁移回滚时需**先评估 forward-compatibility**。具体步骤为：回滚时先切上一版本镜像，再迁移数据库变更；若为破坏性迁移，必须提前评估该兼容性，否则可能影响回滚安全。",
+      "citations": [
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "故障处理",
+            "连接池耗尽"
+          ]
+        },
+        {
+          "title": "部署回滚 SOP",
+          "section_path": [
+            "恢复步骤",
+            "回滚执行"
+          ]
+        },
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "持久化影响"
+          ]
+        },
+        {
+          "title": "部署回滚 SOP",
+          "section_path": [
+            "故障处理",
+            "回滚判定"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G019",
+      "question": "确认主机被入侵后第一步做什么？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "确认主机被入侵后，第一步是**断网隔离保留现场**，**禁止直接重启**，以免丢失内存证据。  \n具体操作依据[证据2]：先断网隔离，保留现场，避免重启导致内存中的攻击痕迹丢失。",
+      "citations": [
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "淘汰策略"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "故障处理",
+            "入侵隔离"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "恢复步骤",
+            "取证流程"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "恢复步骤",
+            "复盘改进"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G020",
+      "question": "主机被入侵后为什么不能直接重启？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "主机被入侵后不能直接重启，因为**重启会丢失内存证据**。\n\n根据[证据1]，正确做法是**先断网隔离保留现场**，禁止直接重启，目的是**保留内存中的攻击痕迹**，以便后续取证分析。",
+      "citations": [
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "故障处理",
+            "入侵隔离"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "持久化影响"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "DNS 排查"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "恢复步骤",
+            "复盘改进"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "恢复步骤",
+            "取证流程"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G021",
+      "question": "安全事件取证的采集顺序是什么？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "安全事件取证的采集顺序是：**先采集内存镜像，再采集磁盘镜像，最后采集进程网络连接**。全程需记录操作时间和操作人，并交接给安全团队。",
+      "citations": [
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "恢复步骤",
+            "取证流程"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "故障处理",
+            "入侵隔离"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "恢复步骤",
+            "复盘改进"
+          ]
+        },
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "淘汰策略"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G022",
+      "question": "取证过程要记录什么？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "结论：取证过程要记录操作时间和操作人。\n\n依据证据1，取证流程要求“全程记录操作时间和操作人”，并按顺序采集内存镜像、磁盘镜像和进程网络连接，完成后交接安全团队。",
+      "citations": [
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "恢复步骤",
+            "取证流程"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G023",
+      "question": "安全事件闭环后多久内输出复盘报告？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "根据证据1，安全事件闭环后 **48小时内** 输出复盘报告。  \n具体步骤包括：更新检测规则、更新访问策略，并通知受影响用户。",
+      "citations": [
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "恢复步骤",
+            "复盘改进"
+          ]
+        },
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "故障处理",
+            "入侵隔离"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "恢复步骤",
+            "取证流程"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G024",
+      "question": "安全事件复盘后要更新什么？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "根据证据4，安全事件复盘后需在事件闭环后48小时内输出复盘报告，并**更新检测规则和访问策略**，同时通知受影响用户。",
+      "citations": [
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "故障处理",
+            "入侵隔离"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "恢复步骤",
+            "复盘改进"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "恢复步骤",
+            "取证流程"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G025",
+      "question": "安全事件复盘后要通知谁？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "根据证据4，安全事件复盘后需**通知受影响用户**。具体步骤为：事件闭环后48小时内输出复盘报告，更新检测规则和访问策略，并通知受影响用户。",
+      "citations": [
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "故障处理",
+            "入侵隔离"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "恢复步骤",
+            "复盘改进"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "恢复步骤",
+            "取证流程"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G026",
+      "question": "Redis 内存溢出和数据库连接池耗尽的共同恢复手段是什么？",
+      "answer_correct": false,
+      "citation_correct": false,
+      "retrieval_hit": false,
+      "finish_reason": "refusal",
+      "error": null,
+      "answer_preview": "证据不足，无法确认。  \n（证据中分别描述了Redis内存溢出和数据库连接池耗尽的恢复步骤，但未提及两者共同的恢复手段。）",
+      "citations": []
+    },
+    {
+      "id": "G027",
+      "question": "哪些故障恢复时都需要保留证据供复盘？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "根据证据，以下故障恢复时都需要保留证据供复盘：\n\n1. **数据库连接池耗尽**（证据1）：恢复步骤中明确要求“保留 trace_id 供复盘”。\n2. **网络延迟故障**（证据5）：恢复步骤中明确要求“保留 pcap 供复盘”。\n\n**",
+      "citations": [
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "故障处理",
+            "连接池耗尽"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "故障处理",
+            "内存诊断"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "淘汰策略"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G028",
+      "question": "网络延迟恢复要保留 pcap，安全事件要保留什么？",
+      "answer_correct": false,
+      "citation_correct": false,
+      "retrieval_hit": false,
+      "finish_reason": "refusal",
+      "error": null,
+      "answer_preview": "证据不足，无法确认。现有证据仅提及网络延迟恢复需保留 pcap，未涉及安全事件需保留的内容。",
+      "citations": []
+    },
+    {
+      "id": "G029",
+      "question": "部署回滚和安全事件响应都强调不要做什么？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "根据证据，部署回滚和安全事件响应都强调**不要等待或拖延**，具体如下：\n\n- **部署回滚**：不要等根因定位。证据1明确“超阈值5分钟未恢复时，立即触发回滚，不等根因定位”。\n- **安全事件响应**：不要直接重启主机。证据3指出“禁止",
+      "citations": [
+        {
+          "title": "部署回滚 SOP",
+          "section_path": [
+            "故障处理",
+            "回滚判定"
+          ]
+        },
+        {
+          "title": "部署回滚 SOP",
+          "section_path": [
+            "恢复步骤",
+            "回滚执行"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "故障处理",
+            "入侵隔离"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "恢复步骤",
+            "取证流程"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "恢复步骤",
+            "复盘改进"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G030",
+      "question": "Redis 淘汰策略和回滚判定分别用于什么场景？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "Redis 淘汰策略用于 **Redis 内存溢出场景**，回滚判定用于 **部署发布后的故障场景**。\n\n- **Redis 淘汰策略**：在内存溢出时，先确认 `maxmemory-policy` 配置；若为 `allkeys-lru`",
+      "citations": [
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "淘汰策略"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "故障处理",
+            "内存诊断"
+          ]
+        },
+        {
+          "title": "部署回滚 SOP",
+          "section_path": [
+            "故障处理",
+            "回滚判定"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "持久化影响"
+          ]
+        },
+        {
+          "title": "部署回滚 SOP",
+          "section_path": [
+            "恢复步骤",
+            "回滚执行"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G031",
+      "question": "数据库连接池耗尽时应该检查哪四个指标？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "根据证据1，数据库连接池耗尽时应检查以下四个指标：**连接池使用率、等待队列长度、慢查询、应用实例数**。",
+      "citations": [
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "故障处理",
+            "连接池耗尽"
+          ]
+        },
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "延迟定位"
+          ]
+        },
+        {
+          "title": "部署回滚 SOP",
+          "section_path": [
+            "故障处理",
+            "回滚判定"
+          ]
+        },
+        {
+          "title": "部署回滚 SOP",
+          "section_path": [
+            "恢复步骤",
+            "回滚执行"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G032",
+      "question": "连接池使用率在数据库故障排查中反映什么？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "连接池使用率反映数据库连接是否接近耗尽，是判断连接池耗尽风险的关键指标。\n\n具体来说，根据证据1，当连接池使用率升高时，需同步检查等待队列长度、慢查询和应用实例数，以定位是连接被慢查询长期占用，还是应用实例数不足导致连接竞争。若连接池持续耗",
+      "citations": [
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "故障处理",
+            "连接池耗尽"
+          ]
+        },
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "故障处理",
+            "内存诊断"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "延迟定位"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "DNS 排查"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G033",
+      "question": "数据库慢查询和连接池耗尽有什么关系？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "结论：数据库慢查询是导致连接池耗尽的重要原因之一。\n\n根据证据1，当连接池耗尽时，需要检查“慢查询”这一关键指标。慢查询会长时间占用数据库连接，导致连接无法及时释放，进而使连接池中的可用连接数量下降，最终引发连接池耗尽。证据1中明确将“慢查",
+      "citations": [
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "故障处理",
+            "连接池耗尽"
+          ]
+        },
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "部署回滚 SOP",
+          "section_path": [
+            "恢复步骤",
+            "回滚执行"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "恢复步骤",
+            "取证流程"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "持久化影响"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G034",
+      "question": "连接池耗尽时等待队列长度异常说明什么？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "连接池耗尽时等待队列长度异常，说明**当前数据库连接请求已超出连接池可分配上限，大量请求在排队等待获取连接**，系统可能面临连接资源瓶颈或请求积压风险。\n\n具体细节：\n- 根据[证据1]，连接池耗尽时需**先检查连接池使用率、等待队列长度、",
+      "citations": [
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "故障处理",
+            "连接池耗尽"
+          ]
+        },
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "延迟定位"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "恢复步骤",
+            "取证流程"
+          ]
+        },
+        {
+          "title": "部署回滚 SOP",
+          "section_path": [
+            "恢复步骤",
+            "回滚执行"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G035",
+      "question": "应用实例数在连接池耗尽排查中的作用？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "根据证据1和证据2，应用实例数在连接池耗尽排查中的作用是：**作为排查连接池耗尽的关键检查项之一，并在恢复阶段通过扩容应用实例来缓解耗尽问题**。\n\n具体步骤：\n1. **排查阶段**（证据1）：先检查连接池使用率、等待队列长度、慢查询和*",
+      "citations": [
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "故障处理",
+            "连接池耗尽"
+          ]
+        },
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "故障处理",
+            "内存诊断"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "DNS 排查"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "延迟定位"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G036",
+      "question": "连接池持续耗尽时非关键流量如何处理？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "根据证据1，连接池持续耗尽时，应先**限流非关键流量**，再**扩容应用实例**，并**保留 trace_id 供复盘**。具体步骤为：先限制非关键流量以缓解连接池压力，随后扩容应用实例增加可用连接，同时保留 trace_id 用于后续问题",
+      "citations": [
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "故障处理",
+            "连接池耗尽"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "故障处理",
+            "内存诊断"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "DNS 排查"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "延迟定位"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G037",
+      "question": "连接池恢复时扩容的目标是什么？",
+      "answer_correct": false,
+      "citation_correct": false,
+      "retrieval_hit": false,
+      "finish_reason": "refusal",
+      "error": null,
+      "answer_preview": "证据不足，无法确认。",
+      "citations": []
+    },
+    {
+      "id": "G038",
+      "question": "数据库故障恢复后 trace_id 用于什么？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "根据证据，数据库连接池耗尽恢复时，需**保留 trace_id 供复盘**。具体步骤为：先限流非关键流量，再扩容应用实例，同时保留 trace_id 用于后续故障复盘分析。",
+      "citations": [
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "故障处理",
+            "连接池耗尽"
+          ]
+        },
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "故障处理",
+            "内存诊断"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "淘汰策略"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "延迟定位"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G039",
+      "question": "连接池恢复步骤中限流和扩容的顺序？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "根据证据1，连接池恢复步骤中，**先限流非关键流量，再扩容应用实例**，并保留 trace_id 供复盘。",
+      "citations": [
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "故障处理",
+            "连接池耗尽"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "淘汰策略"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "持久化影响"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G040",
+      "question": "连接池持续耗尽先做什么再做什么？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "连接池持续耗尽时，先限流非关键流量，再扩容应用实例，并保留 trace_id 供复盘。  \n具体步骤：先检查连接池使用率、等待队列长度、慢查询和应用实例数，然后执行上述恢复操作。",
+      "citations": [
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "故障处理",
+            "连接池耗尽"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "恢复步骤",
+            "取证流程"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "故障处理",
+            "内存诊断"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "淘汰策略"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G041",
+      "question": "Redis 内存溢出时 info memory 查看哪些指标？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "根据证据1，Redis 内存溢出时，执行 `info memory` 查看 **used_memory_rss** 和 **fragmentation ratio** 两个指标。",
+      "citations": [
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "故障处理",
+            "内存诊断"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "淘汰策略"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "持久化影响"
+          ]
+        },
+        {
+          "title": "部署回滚 SOP",
+          "section_path": [
+            "故障处理",
+            "回滚判定"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "故障处理",
+            "入侵隔离"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G042",
+      "question": "Redis used_memory_rss 指标反映什么？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "根据证据，Redis 的 `used_memory_rss` 指标反映的是**实际占用的物理内存大小**（即 RSS，Resident Set Size）。在内存溢出诊断中，需结合 `info memory` 查看该指标与 `fragmen",
+      "citations": [
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "故障处理",
+            "内存诊断"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "淘汰策略"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "持久化影响"
+          ]
+        },
+        {
+          "title": "部署回滚 SOP",
+          "section_path": [
+            "故障处理",
+            "回滚判定"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "故障处理",
+            "入侵隔离"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G043",
+      "question": "Redis fragmentation ratio 高说明什么问题？",
+      "answer_correct": false,
+      "citation_correct": false,
+      "retrieval_hit": false,
+      "finish_reason": "refusal",
+      "error": null,
+      "answer_preview": "证据不足，无法确认。",
+      "citations": []
+    },
+    {
+      "id": "G044",
+      "question": "Redis 内存溢出时排查什么类型的 key？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "根据证据，Redis 内存溢出时排查**大 key**。具体步骤：先执行 `info memory` 查看 `used_memory_rss` 和 `fragmentation ratio`，再排查大 key。",
+      "citations": [
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "故障处理",
+            "内存诊断"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "淘汰策略"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "持久化影响"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "延迟定位"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "DNS 排查"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G045",
+      "question": "Redis 内存溢出时先用什么命令诊断？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "根据证据1，Redis 内存溢出时，先执行 **info memory** 命令，查看 **used_memory_rss** 和 **fragmentation ratio**，再排查大 key。",
+      "citations": [
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "故障处理",
+            "内存诊断"
+          ]
+        },
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "故障处理",
+            "连接池耗尽"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "淘汰策略"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "持久化影响"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "延迟定位"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G046",
+      "question": "Redis maxmemory-policy 配置确认什么？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "根据证据1，Redis maxmemory-policy 配置需确认是否为 `allkeys-lru`。若为该策略，可短期缓解内存溢出，但长期需拆分大 key 或扩容。",
+      "citations": [
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "淘汰策略"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "故障处理",
+            "内存诊断"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "持久化影响"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "故障处理",
+            "入侵隔离"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G047",
+      "question": "Redis allkeys-lru 策略能短期缓解什么？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "根据证据1，Redis 的 `allkeys-lru` 策略可以**短期缓解内存溢出问题**。具体来说，当 `maxmemory-policy` 配置为 `allkeys-lru` 时，Redis 会通过 LRU（最近最少使用）算法淘汰部分",
+      "citations": [
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "淘汰策略"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "故障处理",
+            "内存诊断"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "持久化影响"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "故障处理",
+            "入侵隔离"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "恢复步骤",
+            "取证流程"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G048",
+      "question": "Redis 内存溢出长期解决方案是什么？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "结论：Redis 内存溢出的长期解决方案是**拆分大 key 或扩容**，同时需评估持久化相关参数。\n\n依据证据2，确认 `maxmemory-policy` 配置后，`allkeys-lru` 仅能短期缓解，长期需**拆分大 key**或",
+      "citations": [
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "故障处理",
+            "内存诊断"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "淘汰策略"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "持久化影响"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "故障处理",
+            "入侵隔离"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "恢复步骤",
+            "取证流程"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G049",
+      "question": "Redis 淘汰策略 allkeys-lru 是短期还是长期方案？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "根据证据1，Redis 淘汰策略 allkeys-lru 是**短期缓解**方案，**长期需拆分大 key 或扩容**。",
+      "citations": [
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "淘汰策略"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "故障处理",
+            "内存诊断"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "持久化影响"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "故障处理",
+            "入侵隔离"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "恢复步骤",
+            "取证流程"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G050",
+      "question": "Redis 内存溢出长期解决要拆分什么？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "根据证据，Redis 内存溢出长期解决需**拆分大 key 或扩容**。\n\n具体步骤：确认 `maxmemory-policy` 配置，若为 `allkeys-lru` 可短期缓解，但长期需**拆分大 key** 或**扩容**（证据1）。",
+      "citations": [
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "淘汰策略"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "故障处理",
+            "内存诊断"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "持久化影响"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "故障处理",
+            "入侵隔离"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "恢复步骤",
+            "取证流程"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G051",
+      "question": "Redis RDB 或 AOF 内存溢出触发什么失败？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "根据证据，Redis 内存溢出若开启 RDB/AOF，可能触发 **fork 失败**。具体需评估 `repl-backlog-size` 和 `aof-rewrite-incremental-fsync` 配置。",
+      "citations": [
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "故障处理",
+            "内存诊断"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "持久化影响"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "淘汰策略"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "部署回滚 SOP",
+          "section_path": [
+            "故障处理",
+            "回滚判定"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G052",
+      "question": "Redis 持久化内存溢出需评估哪些参数？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "根据证据，Redis 持久化内存溢出需评估以下参数：\n\n- **repl-backlog-size**：评估复制积压缓冲区大小，避免内存溢出影响复制。\n- **aof-rewrite-incremental-fsync**：评估 AOF 重",
+      "citations": [
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "故障处理",
+            "内存诊断"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "持久化影响"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "淘汰策略"
+          ]
+        },
+        {
+          "title": "部署回滚 SOP",
+          "section_path": [
+            "恢复步骤",
+            "回滚执行"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "故障处理",
+            "入侵隔离"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G053",
+      "question": "Redis fork 失败和什么持久化有关？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "结论：Redis fork 失败与持久化配置中的 RDB/AOF 有关。\n\n细节：根据证据2，若开启 RDB/AOF，内存溢出可能触发 fork 失败。处理时需评估 `repl-backlog-size` 和 `aof-rewrite-in",
+      "citations": [
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "故障处理",
+            "内存诊断"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "持久化影响"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "淘汰策略"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "恢复步骤",
+            "取证流程"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G054",
+      "question": "Redis repl-backlog-size 在什么场景评估？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "根据证据，Redis `repl-backlog-size` 在**内存溢出且开启 RDB/AOF 时**评估，因为此时内存溢出可能触发 fork 失败，需评估 `repl-backlog-size` 和 `aof-rewrite-incr",
+      "citations": [
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "故障处理",
+            "内存诊断"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "持久化影响"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "淘汰策略"
+          ]
+        },
+        {
+          "title": "部署回滚 SOP",
+          "section_path": [
+            "恢复步骤",
+            "回滚执行"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G055",
+      "question": "Redis aof-rewrite-incremental-fsync 评估什么场景？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "根据证据2，Redis 内存溢出时，若开启 RDB/AOF，内存溢出可能触发 fork 失败，此时需评估 `repl-backlog-size` 和 `aof-rewrite-incremental-fsync`。  \n具体场景为：**在内",
+      "citations": [
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "故障处理",
+            "内存诊断"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "持久化影响"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "淘汰策略"
+          ]
+        },
+        {
+          "title": "部署回滚 SOP",
+          "section_path": [
+            "恢复步骤",
+            "回滚执行"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "恢复步骤",
+            "复盘改进"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G056",
+      "question": "网络延迟突增时 mtr 定位什么节点？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "根据证据1，网络延迟突增时，使用 **mtr** 分段定位 **拥塞节点**。具体步骤为：先按 mtr 分段定位拥塞节点，再检查交换机队列深度和网卡丢包计数。",
+      "citations": [
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "延迟定位"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "DNS 排查"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "部署回滚 SOP",
+          "section_path": [
+            "故障处理",
+            "回滚判定"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "恢复步骤",
+            "取证流程"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G057",
+      "question": "网络延迟排查时交换机检查什么？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "网络延迟排查时，交换机检查**队列深度**和**网卡丢包计数**。  \n具体步骤：先按 **mtr** 分段定位拥塞节点，再检查交换机队列深度和网卡丢包计数，以确认是否存在拥塞或丢包导致的延迟。",
+      "citations": [
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "延迟定位"
+          ]
+        },
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "故障处理",
+            "连接池耗尽"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "DNS 排查"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "故障处理",
+            "内存诊断"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G058",
+      "question": "网络延迟排查时网卡丢包计数说明什么？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "结论：网卡丢包计数是网络延迟排查中用于判断是否存在网卡层丢包的关键指标，需结合交换机队列深度一起检查。\n\n细节：根据证据1，网络延迟突增时，先按 mtr 分段定位拥塞节点，再检查交换机队列深度和网卡丢包计数。网卡丢包计数高，说明数据包在网卡",
+      "citations": [
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "延迟定位"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "故障处理",
+            "内存诊断"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "DNS 排查"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "部署回滚 SOP",
+          "section_path": [
+            "故障处理",
+            "回滚判定"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G059",
+      "question": "mtr 分段定位网络延迟的步骤？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "根据证据1，网络延迟突增时，先按 **mtr 分段定位拥塞节点**，再检查 **交换机队列深度** 和 **网卡丢包计数**。具体步骤为：使用 mtr 工具对路径各跳进行分段检测，识别延迟或丢包异常的节点，随后检查对应交换机的队列深度及网卡",
+      "citations": [
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "延迟定位"
+          ]
+        },
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "淘汰策略"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "DNS 排查"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "持久化影响"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G060",
+      "question": "网络延迟定位时检查交换机和网卡什么指标？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "网络延迟定位时，检查**交换机队列深度**和**网卡丢包计数**。  \n具体步骤：先按 mtr 分段定位拥塞节点，再检查这两个指标。",
+      "citations": [
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "延迟定位"
+          ]
+        },
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "故障处理",
+            "连接池耗尽"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "DNS 排查"
+          ]
+        },
+        {
+          "title": "部署回滚 SOP",
+          "section_path": [
+            "故障处理",
+            "回滚判定"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G061",
+      "question": "首请求延迟出现应排查什么？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "首请求延迟出现应排查 **DNS 解析耗时** 和 **本地 resolver 缓存命中率**。\n\n具体步骤：  \n- 检查本地 resolver 缓存命中率是否偏低。  \n- 若命中率低，首请求仍需向上游递归解析，导致 DNS 解析耗时升",
+      "citations": [
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "故障处理",
+            "内存诊断"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "DNS 排查"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "延迟定位"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "部署回滚 SOP",
+          "section_path": [
+            "故障处理",
+            "回滚判定"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G062",
+      "question": "DNS 解析耗时高说明什么问题？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "DNS 解析耗时高说明本地 resolver 缓存命中率低，导致首请求仍需向上游递归解析，从而表现为延迟仅在首次请求出现。具体排查步骤：检查 DNS 解析耗时和本地 resolver 缓存命中率。",
+      "citations": [
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "DNS 排查"
+          ]
+        },
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "故障处理",
+            "连接池耗尽"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "故障处理",
+            "内存诊断"
+          ]
+        },
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "延迟定位"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G063",
+      "question": "本地 resolver 缓存命中率低的影响？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "本地 resolver 缓存命中率低的影响是：首请求仍需向上游递归解析，导致 DNS 解析耗时升高，表现为延迟仅在首次请求出现。",
+      "citations": [
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "DNS 排查"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "持久化影响"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "恢复步骤",
+            "复盘改进"
+          ]
+        },
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "故障处理",
+            "连接池耗尽"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "故障处理",
+            "内存诊断"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G064",
+      "question": "延迟仅在首次请求出现排查 DNS 什么？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "结论：延迟仅在首次请求出现时，应排查 DNS 解析耗时和本地 resolver 缓存命中率。\n\n具体步骤：  \n- 检查本地 resolver 缓存命中率。  \n- 若命中率低，首请求仍需向上游递归解析，导致 DNS 解析耗时升高，从而表现",
+      "citations": [
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "DNS 排查"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "故障处理",
+            "内存诊断"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "延迟定位"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "部署回滚 SOP",
+          "section_path": [
+            "故障处理",
+            "回滚判定"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G065",
+      "question": "网络延迟恢复时切换什么链路？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "根据证据，网络延迟恢复时切换**备用链路**。\n\n具体步骤为：确认是单链路或全网卡问题后，切换备用链路，并通知上游限流，同时保留 pcap 供复盘。",
+      "citations": [
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "延迟定位"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "淘汰策略"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "DNS 排查"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G066",
+      "question": "网络问题确认后通知上游做什么？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "根据证据1，网络问题确认后应**通知上游限流**，同时**切换备用链路**并**保留 pcap 供复盘**。",
+      "citations": [
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "淘汰策略"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "DNS 排查"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "延迟定位"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "故障处理",
+            "入侵隔离"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G067",
+      "question": "网络延迟恢复时保留什么文件供复盘？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "根据证据，网络延迟恢复时应保留 **pcap** 文件供复盘。具体步骤为：确认是单链路或全网卡问题后，切换备用链路并通知上游限流，同时保留 pcap 供复盘。",
+      "citations": [
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "延迟定位"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "淘汰策略"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "DNS 排查"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G068",
+      "question": "单链路问题和全网卡问题如何区分？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "单链路问题与全网卡问题的区分方法：单链路仅特定目标不可达、其余链路正常；全网卡则全部目标连通性普遍下降，需结合多目标探测判断。",
+      "citations": [
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "延迟定位"
+          ]
+        },
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "故障处理",
+            "连接池耗尽"
+          ]
+        },
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "故障处理",
+            "内存诊断"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G069",
+      "question": "网络延迟恢复步骤的顺序是什么？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "根据证据，网络延迟恢复步骤的顺序为：\n\n1. **确认问题类型**：先区分是单链路问题还是全网卡问题（单链路仅特定目标不可达、其余链路正常；全网卡则全部目标连通性普遍下降，需结合多目标探测判断）。\n2. **切换备用链路**：确认是单链路或",
+      "citations": [
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "淘汰策略"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "延迟定位"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "持久化影响"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G070",
+      "question": "网络延迟恢复时先确认什么再操作？",
+      "answer_correct": false,
+      "citation_correct": false,
+      "retrieval_hit": false,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "根据证据3，网络延迟恢复时先按 **mtr 分段定位拥塞节点**，再检查 **交换机队列深度** 和 **网卡丢包计数**。",
+      "citations": [
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "故障处理",
+            "连接池耗尽"
+          ]
+        },
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "延迟定位"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "淘汰策略"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "故障处理",
+            "内存诊断"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G071",
+      "question": "发布后哪些核心指标超阈值触发回滚？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "根据证据1，发布后**错误率、延迟、可用性**三项核心指标超阈值**5分钟未恢复**时，立即触发回滚，不等根因定位。",
+      "citations": [
+        {
+          "title": "部署回滚 SOP",
+          "section_path": [
+            "故障处理",
+            "回滚判定"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "持久化影响"
+          ]
+        },
+        {
+          "title": "部署回滚 SOP",
+          "section_path": [
+            "恢复步骤",
+            "回滚执行"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "恢复步骤",
+            "复盘改进"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G072",
+      "question": "回滚判定的 5 分钟阈值是什么意思？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "根据证据1，回滚判定的5分钟阈值是指：发布后核心指标（错误率、延迟、可用性）超阈值持续5分钟未恢复时，立即触发回滚，不等根因定位。即给系统5分钟的观察窗口，若指标未自动恢复则直接回滚。",
+      "citations": [
+        {
+          "title": "部署回滚 SOP",
+          "section_path": [
+            "故障处理",
+            "回滚判定"
+          ]
+        },
+        {
+          "title": "部署回滚 SOP",
+          "section_path": [
+            "恢复步骤",
+            "回滚执行"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "恢复步骤",
+            "取证流程"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "恢复步骤",
+            "复盘改进"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G073",
+      "question": "回滚判定时为什么不等待根因定位？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "根据证据1，回滚判定时不等待根因定位，是因为**发布后核心指标（错误率、延迟、可用性）超阈值 5 分钟未恢复时，立即触发回滚**。该步骤明确要求“不等根因定位”，目的是优先恢复服务，避免故障持续影响用户。",
+      "citations": [
+        {
+          "title": "部署回滚 SOP",
+          "section_path": [
+            "故障处理",
+            "回滚判定"
+          ]
+        },
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "故障处理",
+            "连接池耗尽"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "延迟定位"
+          ]
+        },
+        {
+          "title": "部署回滚 SOP",
+          "section_path": [
+            "恢复步骤",
+            "回滚执行"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "故障处理",
+            "内存诊断"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G074",
+      "question": "发布后核心指标超阈值多久触发回滚？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "根据证据1，发布后核心指标（错误率、延迟、可用性）超阈值 **5分钟** 未恢复时，立即触发回滚，不等根因定位。",
+      "citations": [
+        {
+          "title": "部署回滚 SOP",
+          "section_path": [
+            "故障处理",
+            "回滚判定"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "持久化影响"
+          ]
+        },
+        {
+          "title": "部署回滚 SOP",
+          "section_path": [
+            "恢复步骤",
+            "回滚执行"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "恢复步骤",
+            "取证流程"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "延迟定位"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G075",
+      "question": "回滚执行时先切什么？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "回滚执行时先切上一版本镜像，再迁移数据库变更；破坏性迁移需先评估 forward-compatibility。",
+      "citations": [
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "故障处理",
+            "连接池耗尽"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "故障处理",
+            "内存诊断"
+          ]
+        },
+        {
+          "title": "部署回滚 SOP",
+          "section_path": [
+            "恢复步骤",
+            "回滚执行"
+          ]
+        },
+        {
+          "title": "部署回滚 SOP",
+          "section_path": [
+            "故障处理",
+            "回滚判定"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "延迟定位"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G076",
+      "question": "回滚执行时再迁移什么？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "根据证据2，回滚执行时先切上一版本镜像，再迁移数据库变更；破坏性迁移需先评估 forward-compatibility。",
+      "citations": [
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "故障处理",
+            "内存诊断"
+          ]
+        },
+        {
+          "title": "部署回滚 SOP",
+          "section_path": [
+            "恢复步骤",
+            "回滚执行"
+          ]
+        },
+        {
+          "title": "部署回滚 SOP",
+          "section_path": [
+            "故障处理",
+            "回滚判定"
+          ]
+        },
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "故障处理",
+            "连接池耗尽"
+          ]
+        },
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G077",
+      "question": "回滚执行步骤的顺序是什么？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "根据证据5，回滚执行步骤的顺序是：**先切上一版本镜像，再迁移数据库变更**。若涉及破坏性迁移，需先评估 forward-compatibility。",
+      "citations": [
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "故障处理",
+            "内存诊断"
+          ]
+        },
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "淘汰策略"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "持久化影响"
+          ]
+        },
+        {
+          "title": "部署回滚 SOP",
+          "section_path": [
+            "恢复步骤",
+            "回滚执行"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G078",
+      "question": "破坏性数据库迁移回滚评估什么？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "根据证据3，破坏性数据库迁移回滚需评估 **forward-compatibility**（前向兼容性）。具体步骤为：回滚时先切上一版本镜像，再迁移数据库变更；若为破坏性迁移，必须先评估前向兼容性，确认旧版本代码能否兼容新数据库结构，否则回",
+      "citations": [
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "故障处理",
+            "连接池耗尽"
+          ]
+        },
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "部署回滚 SOP",
+          "section_path": [
+            "恢复步骤",
+            "回滚执行"
+          ]
+        },
+        {
+          "title": "部署回滚 SOP",
+          "section_path": [
+            "故障处理",
+            "回滚判定"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "持久化影响"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G079",
+      "question": "回滚时数据库迁移变更评估什么兼容性？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "回滚时数据库迁移变更需评估 **forward-compatibility**（前向兼容性）。\n\n具体步骤：先切上一版本镜像，再迁移数据库变更；若为破坏性迁移，必须提前评估该兼容性，以避免回滚后新旧版本数据不匹配。",
+      "citations": [
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "故障处理",
+            "连接池耗尽"
+          ]
+        },
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "部署回滚 SOP",
+          "section_path": [
+            "恢复步骤",
+            "回滚执行"
+          ]
+        },
+        {
+          "title": "部署回滚 SOP",
+          "section_path": [
+            "故障处理",
+            "回滚判定"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "持久化影响"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G080",
+      "question": "发布后可用性超阈值多久未恢复触发回滚？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "根据证据1，发布后核心指标（错误率、延迟、可用性）超阈值 **5分钟** 未恢复时，立即触发回滚，不等根因定位。",
+      "citations": [
+        {
+          "title": "部署回滚 SOP",
+          "section_path": [
+            "故障处理",
+            "回滚判定"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "持久化影响"
+          ]
+        },
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "淘汰策略"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G081",
+      "question": "主机被入侵后第一步断网隔离的目的是什么？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "根据证据1，主机被入侵后第一步断网隔离的目的是**保留现场**，并**禁止直接重启以免丢失内存证据**。",
+      "citations": [
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "故障处理",
+            "入侵隔离"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "恢复步骤",
+            "取证流程"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "恢复步骤",
+            "复盘改进"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "延迟定位"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "DNS 排查"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G082",
+      "question": "主机被入侵后保留现场保留什么？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "主机被入侵后，保留现场的核心是**保留内存证据**，具体操作是**先断网隔离**，**禁止直接重启**，以免丢失内存中的关键证据。",
+      "citations": [
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "故障处理",
+            "入侵隔离"
+          ]
+        },
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "恢复步骤",
+            "取证流程"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "恢复步骤",
+            "复盘改进"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G083",
+      "question": "主机被入侵后为什么禁止直接重启？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "主机被入侵后禁止直接重启，是为了**保留现场内存证据**。根据证据1，直接重启会导致内存中的数据丢失，从而破坏取证所需的原始状态。正确做法是**先断网隔离**，再按证据3的流程采集**内存镜像、磁盘镜像和进程网络连接**，并全程记录操作时间",
+      "citations": [
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "故障处理",
+            "入侵隔离"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "持久化影响"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "恢复步骤",
+            "取证流程"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "DNS 排查"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "恢复步骤",
+            "复盘改进"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G084",
+      "question": "内存证据在安全事件中的作用？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "结论：内存证据在安全事件中用于保留入侵现场、支撑取证分析，是定位攻击行为和追溯来源的关键依据。\n\n- **保留现场**：确认主机被入侵后，先断网隔离并保留现场，禁止直接重启，以免丢失内存证据（证据2）。\n- **取证流程**：按顺序采集内存",
+      "citations": [
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "故障处理",
+            "内存诊断"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "故障处理",
+            "入侵隔离"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "淘汰策略"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "恢复步骤",
+            "取证流程"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "持久化影响"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G085",
+      "question": "安全事件入侵隔离的步骤是什么？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "安全事件入侵隔离的步骤是：先断网隔离保留现场，禁止直接重启以免丢失内存证据。",
+      "citations": [
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "淘汰策略"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "持久化影响"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "故障处理",
+            "入侵隔离"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G086",
+      "question": "安全取证采集内存镜像的顺序？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "根据证据2，安全取证采集内存镜像的顺序是：**先采集内存镜像，再采集磁盘镜像，最后采集进程网络连接**。全程需记录操作时间和操作人，并交接安全团队。",
+      "citations": [
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "故障处理",
+            "内存诊断"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "恢复步骤",
+            "取证流程"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "淘汰策略"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "持久化影响"
+          ]
+        },
+        {
+          "title": "部署回滚 SOP",
+          "section_path": [
+            "恢复步骤",
+            "回滚执行"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G087",
+      "question": "安全取证采集磁盘镜像的顺序？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "根据证据1，安全取证采集磁盘镜像的顺序为：**先采集内存镜像，再采集磁盘镜像，最后采集进程网络连接**。全程需记录操作时间和操作人，并交接安全团队。",
+      "citations": [
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "恢复步骤",
+            "取证流程"
+          ]
+        },
+        {
+          "title": "部署回滚 SOP",
+          "section_path": [
+            "恢复步骤",
+            "回滚执行"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "故障处理",
+            "入侵隔离"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "恢复步骤",
+            "复盘改进"
+          ]
+        },
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G088",
+      "question": "安全取证采集进程网络连接的顺序？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "根据证据，安全取证采集进程网络连接的顺序为：先采集内存镜像，再采集磁盘镜像，最后采集进程网络连接。全程需记录操作时间和操作人，并交接安全团队。",
+      "citations": [
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "故障处理",
+            "连接池耗尽"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "恢复步骤",
+            "取证流程"
+          ]
+        },
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "延迟定位"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "DNS 排查"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G089",
+      "question": "安全取证全程记录什么？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "安全取证全程记录**操作时间和操作人**，并在采集内存镜像、磁盘镜像和进程网络连接后，交接安全团队。",
+      "citations": [
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "恢复步骤",
+            "取证流程"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "故障处理",
+            "入侵隔离"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "恢复步骤",
+            "复盘改进"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G090",
+      "question": "安全取证交接给谁？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "安全取证交接给**安全团队**。\n\n具体步骤：按顺序采集**内存镜像**、**磁盘镜像**和**进程网络连接**，全程记录**操作时间**和**操作人**，然后交接给安全团队。",
+      "citations": [
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "故障处理",
+            "入侵隔离"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "恢复步骤",
+            "取证流程"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "恢复步骤",
+            "复盘改进"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G091",
+      "question": "安全事件闭环后多久输出复盘报告？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "根据证据1，安全事件闭环后 **48小时内** 输出复盘报告。  \n具体步骤包括：更新检测规则、更新访问策略，并通知受影响用户。",
+      "citations": [
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "恢复步骤",
+            "复盘改进"
+          ]
+        },
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "故障处理",
+            "入侵隔离"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "恢复步骤",
+            "取证流程"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G092",
+      "question": "安全事件复盘后更新什么规则？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "根据证据4，安全事件复盘后需更新**检测规则**和**访问策略**，并在事件闭环后48小时内输出复盘报告，同时通知受影响用户。",
+      "citations": [
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "故障处理",
+            "入侵隔离"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "恢复步骤",
+            "复盘改进"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "恢复步骤",
+            "取证流程"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G093",
+      "question": "安全事件复盘后更新什么策略？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "根据证据4，安全事件复盘后需更新**检测规则**和**访问策略**，并在事件闭环后**48小时内**输出复盘报告，同时通知受影响用户。",
+      "citations": [
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "故障处理",
+            "入侵隔离"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "恢复步骤",
+            "复盘改进"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "恢复步骤",
+            "取证流程"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G094",
+      "question": "安全事件复盘后通知谁？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "根据证据4，安全事件复盘后需**通知受影响用户**。具体步骤为：事件闭环后48小时内输出复盘报告，更新检测规则和访问策略，并通知受影响用户。",
+      "citations": [
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "故障处理",
+            "入侵隔离"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "恢复步骤",
+            "复盘改进"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "恢复步骤",
+            "取证流程"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G095",
+      "question": "安全事件复盘报告包含什么更新？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "根据证据，安全事件复盘报告包含：更新检测规则和访问策略，并通知受影响用户。具体步骤为事件闭环后48小时内输出复盘报告。",
+      "citations": [
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "恢复步骤",
+            "复盘改进"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "故障处理",
+            "入侵隔离"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "恢复步骤",
+            "取证流程"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G096",
+      "question": "哪些故障恢复时都提到限流？",
+      "answer_correct": true,
+      "citation_correct": false,
+      "retrieval_hit": false,
+      "finish_reason": "refusal",
+      "error": null,
+      "answer_preview": "证据不足，无法确认。  \n证据中仅[证据1]提到“限流非关键流量”作为连接池耗尽时的恢复步骤，其他证据（Redis、网络延迟）均未提及限流。",
+      "citations": []
+    },
+    {
+      "id": "G097",
+      "question": "哪些故障恢复时都提到扩容？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "根据证据，以下故障恢复步骤中提到了“扩容”：\n\n1. **数据库连接池耗尽**（证据1）：恢复步骤为“先限流非关键流量，再扩容应用实例”。\n2. **Redis 内存溢出**（证据3）：恢复步骤中提到“长期需拆分大 key 或扩容”。\n\n因",
+      "citations": [
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "故障处理",
+            "连接池耗尽"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "淘汰策略"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "故障处理",
+            "内存诊断"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "延迟定位"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G098",
+      "question": "数据库故障和网络延迟恢复都涉及什么操作？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "根据证据，数据库故障和网络延迟恢复涉及的操作如下：\n\n- **数据库故障（连接池耗尽）**：先检查连接池使用率、等待队列长度、慢查询和应用实例数；若持续耗尽，先限流非关键流量，再扩容应用实例，并保留 trace_id 供复盘。\n- **网络",
+      "citations": [
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "故障处理",
+            "连接池耗尽"
+          ]
+        },
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "延迟定位"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "故障处理",
+            "内存诊断"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "DNS 排查"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G099",
+      "question": "安全事件取证要采集内存镜像，Redis 内存诊断要排查什么？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "安全事件取证要采集内存镜像；Redis 内存诊断要排查 **used_memory_rss** 和 **fragmentation ratio**（内存碎片率），并进一步排查 **大 key**。",
+      "citations": [
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "故障处理",
+            "内存诊断"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "淘汰策略"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "持久化影响"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "恢复步骤",
+            "取证流程"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "DNS 排查"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G100",
+      "question": "部署回滚和安全事件响应都强调不要做什么？",
+      "answer_correct": false,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "根据证据，部署回滚和安全事件响应都强调**不要直接进行恢复操作，而要先执行特定前置步骤**。\n\n- **部署回滚**（证据1、2）：**不要**在核心指标超阈值后等待根因定位，应立即触发回滚；回滚时**不要**先迁移数据库，而应先切换上一版",
+      "citations": [
+        {
+          "title": "部署回滚 SOP",
+          "section_path": [
+            "故障处理",
+            "回滚判定"
+          ]
+        },
+        {
+          "title": "部署回滚 SOP",
+          "section_path": [
+            "恢复步骤",
+            "回滚执行"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "故障处理",
+            "入侵隔离"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "恢复步骤",
+            "取证流程"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "恢复步骤",
+            "复盘改进"
+          ]
+        }
+      ]
+    }
+  ],
+  "no_answer_details": [
+    {
+      "id": "N001",
+      "question": "如何配置 Kubernetes 的 Ingress 控制器？",
+      "refused": true,
+      "finish_reason": "refusal",
+      "error": null,
+      "answer_preview": "证据不足，无法确认。"
+    },
+    {
+      "id": "N002",
+      "question": "公司的年假政策是什么？",
+      "refused": true,
+      "finish_reason": "refusal",
+      "error": null,
+      "answer_preview": "当前授权知识库中没有足够证据，我无法确认这个问题。请补充文档范围或换一种问法。"
+    },
+    {
+      "id": "N003",
+      "question": "如何用 Python 写一个 web 爬虫？",
+      "refused": true,
+      "finish_reason": "refusal",
+      "error": null,
+      "answer_preview": "证据不足，无法确认。"
+    },
+    {
+      "id": "N004",
+      "question": "MySQL 主从复制的 GTID 配置步骤？",
+      "refused": true,
+      "finish_reason": "refusal",
+      "error": null,
+      "answer_preview": "证据不足，无法确认。"
+    },
+    {
+      "id": "N005",
+      "question": "Kafka 消费者组的 rebalance 策略怎么调？",
+      "refused": true,
+      "finish_reason": "refusal",
+      "error": null,
+      "answer_preview": "证据不足，无法确认。"
+    },
+    {
+      "id": "N006",
+      "question": "公司报销流程是怎样的？",
+      "refused": true,
+      "finish_reason": "refusal",
+      "error": null,
+      "answer_preview": "证据不足，无法确认。"
+    },
+    {
+      "id": "N007",
+      "question": "如何给 iPhone 越狱？",
+      "refused": true,
+      "finish_reason": "refusal",
+      "error": null,
+      "answer_preview": "证据不足，无法确认。"
+    },
+    {
+      "id": "N008",
+      "question": "Elasticsearch 集群脑裂怎么处理？",
+      "refused": true,
+      "finish_reason": "refusal",
+      "error": null,
+      "answer_preview": "证据不足，无法确认。"
+    },
+    {
+      "id": "N009",
+      "question": "Jenkins pipeline 怎么写共享库？",
+      "refused": true,
+      "finish_reason": "refusal",
+      "error": null,
+      "answer_preview": "证据不足，无法确认。"
+    },
+    {
+      "id": "N010",
+      "question": "公司团建活动有哪些？",
+      "refused": true,
+      "finish_reason": "refusal",
+      "error": null,
+      "answer_preview": "证据不足，无法确认。"
+    },
+    {
+      "id": "N011",
+      "question": "怎么用 TensorFlow 训练图像分类模型？",
+      "refused": true,
+      "finish_reason": "refusal",
+      "error": null,
+      "answer_preview": "证据不足，无法确认。"
+    },
+    {
+      "id": "N012",
+      "question": "PostgreSQL 的 vacuum 调优参数有哪些？",
+      "refused": true,
+      "finish_reason": "refusal",
+      "error": null,
+      "answer_preview": "证据不足，无法确认。"
+    },
+    {
+      "id": "N013",
+      "question": "Nginx 的 worker_processes 怎么设置？",
+      "refused": true,
+      "finish_reason": "refusal",
+      "error": null,
+      "answer_preview": "证据不足，无法确认。"
+    },
+    {
+      "id": "N014",
+      "question": "公司食堂今天的菜单是什么？",
+      "refused": true,
+      "finish_reason": "refusal",
+      "error": null,
+      "answer_preview": "证据不足，无法确认。"
+    },
+    {
+      "id": "N015",
+      "question": "怎么在 AWS 上配置 VPC peering？",
+      "refused": true,
+      "finish_reason": "refusal",
+      "error": null,
+      "answer_preview": "证据不足，无法确认。"
+    },
+    {
+      "id": "N016",
+      "question": "如何配置 Cassandra 的一致性哈希？",
+      "refused": true,
+      "finish_reason": "refusal",
+      "error": null,
+      "answer_preview": "证据不足，无法确认。"
+    },
+    {
+      "id": "N017",
+      "question": "MongoDB 的副本集怎么配置？",
+      "refused": true,
+      "finish_reason": "refusal",
+      "error": null,
+      "answer_preview": "证据不足，无法确认。"
+    },
+    {
+      "id": "N018",
+      "question": "Docker 容器怎么设置资源配额？",
+      "refused": true,
+      "finish_reason": "refusal",
+      "error": null,
+      "answer_preview": "证据不足，无法确认。"
+    },
+    {
+      "id": "N019",
+      "question": "如何编写 Terraform 模块？",
+      "refused": true,
+      "finish_reason": "refusal",
+      "error": null,
+      "answer_preview": "证据不足，无法确认。"
+    },
+    {
+      "id": "N020",
+      "question": "Zabbix 监控模板怎么导入？",
+      "refused": true,
+      "finish_reason": "refusal",
+      "error": null,
+      "answer_preview": "证据不足，无法确认。"
+    },
+    {
+      "id": "N021",
+      "question": "Gitlab CI/CD 怎么配置自动部署？",
+      "refused": true,
+      "finish_reason": "refusal",
+      "error": null,
+      "answer_preview": "证据不足，无法确认。"
+    },
+    {
+      "id": "N022",
+      "question": "如何优化 Vue.js 的首屏加载性能？",
+      "refused": true,
+      "finish_reason": "refusal",
+      "error": null,
+      "answer_preview": "证据不足，无法确认。"
+    },
+    {
+      "id": "N023",
+      "question": "Spring Boot 怎么集成 HikariCP？",
+      "refused": true,
+      "finish_reason": "refusal",
+      "error": null,
+      "answer_preview": "证据不足，无法确认。"
+    },
+    {
+      "id": "N024",
+      "question": "如何诊断 Linux 内核崩溃？",
+      "refused": true,
+      "finish_reason": "refusal",
+      "error": null,
+      "answer_preview": "证据不足，无法确认。"
+    },
+    {
+      "id": "N025",
+      "question": "Hadoop YARN 怎么调度任务？",
+      "refused": true,
+      "finish_reason": "refusal",
+      "error": null,
+      "answer_preview": "证据不足，无法确认。"
+    },
+    {
+      "id": "N026",
+      "question": "公司 VPN 怎么配置客户端？",
+      "refused": true,
+      "finish_reason": "refusal",
+      "error": null,
+      "answer_preview": "证据不足，无法确认。"
+    },
+    {
+      "id": "N027",
+      "question": "如何申请服务器 root 权限？",
+      "refused": true,
+      "finish_reason": "refusal",
+      "error": null,
+      "answer_preview": "证据不足，无法确认。"
+    },
+    {
+      "id": "N028",
+      "question": "RabbitMQ 消息积压怎么处理？",
+      "refused": true,
+      "finish_reason": "refusal",
+      "error": null,
+      "answer_preview": "证据不足，无法确认。"
+    },
+    {
+      "id": "N029",
+      "question": "Consul 服务注册怎么配置？",
+      "refused": true,
+      "finish_reason": "refusal",
+      "error": null,
+      "answer_preview": "证据不足，无法确认。"
+    },
+    {
+      "id": "N030",
+      "question": "如何编写 GraphQL schema？",
+      "refused": true,
+      "finish_reason": "refusal",
+      "error": null,
+      "answer_preview": "证据不足，无法确认。"
+    }
+  ]
+}

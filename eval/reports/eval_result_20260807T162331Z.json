@@ -1,0 +1,127 @@
+{
+  "dataset_version": "v2-mini-regress",
+  "knowledge_version": "seed-v2",
+  "annotator": "QA",
+  "annotated_at": "2026-08-07",
+  "counts": {
+    "golden": 3,
+    "no_answer": 0,
+    "total": 3
+  },
+  "metrics": {
+    "首答准确率": 1.0,
+    "引用正确率": 1.0,
+    "拒答率": null,
+    "幻觉率": 0.0,
+    "检索召回率": 0.6667,
+    "首事件延迟_P50_ms": 16.415917000000224,
+    "首事件延迟_P95_ms": 16.554083999999996,
+    "完整回答延迟_P50_ms": 2404.0519590000004,
+    "完整回答延迟_P95_ms": 2722.394333
+  },
+  "golden_details": [
+    {
+      "id": "G030",
+      "question": "Redis 淘汰策略和回滚判定分别用于什么场景？",
+      "answer_correct": true,
+      "citation_correct": false,
+      "retrieval_hit": false,
+      "finish_reason": "refusal",
+      "error": null,
+      "answer_preview": "证据不足，无法确认。  \n证据中仅提及 Redis 淘汰策略（如 allkeys-lru）用于内存溢出时的短期缓解，但未说明“回滚判定”的概念、场景或具体步骤。",
+      "citations": []
+    },
+    {
+      "id": "G059",
+      "question": "mtr 分段定位网络延迟的步骤？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "结论：网络延迟突增时，先使用 mtr 分段定位拥塞节点，再检查交换机队列深度和网卡丢包计数。\n\n具体步骤：\n1. 执行 mtr 进行分段探测，定位延迟突增的拥塞节点。\n2. 检查对应节点的交换机队列深度，确认是否存在队列积压。\n3. 检查网",
+      "citations": [
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "延迟定位"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "故障处理",
+            "DNS 排查"
+          ]
+        },
+        {
+          "title": "网络延迟排查 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "故障处理",
+            "内存诊断"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G084",
+      "question": "内存证据在安全事件中的作用？",
+      "answer_correct": true,
+      "citation_correct": true,
+      "retrieval_hit": true,
+      "finish_reason": "stop",
+      "error": null,
+      "answer_preview": "结论：内存证据在安全事件中用于保留入侵现场、支撑取证分析，是判断攻击行为和恢复系统的关键依据。\n\n细节：\n- 根据[证据2]，确认主机被入侵后，**先断网隔离保留现场**，**禁止直接重启**，以免丢失内存证据。\n- 根据[证据4]，取证流",
+      "citations": [
+        {
+          "title": "数据库故障 SOP",
+          "section_path": [
+            "恢复步骤"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "故障处理",
+            "入侵隔离"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "故障处理",
+            "内存诊断"
+          ]
+        },
+        {
+          "title": "安全事件响应 SOP",
+          "section_path": [
+            "恢复步骤",
+            "取证流程"
+          ]
+        },
+        {
+          "title": "Redis 内存溢出 SOP",
+          "section_path": [
+            "恢复步骤",
+            "淘汰策略"
+          ]
+        }
+      ]
+    }
+  ],
+  "no_answer_details": []
+}
