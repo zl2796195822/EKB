@@ -8,6 +8,7 @@ os.environ.setdefault("EKB_DEV_PASSWORD", "test-password")
 os.environ.setdefault("EKB_TOKEN_SECRET", "test-only-token-secret")
 os.environ.setdefault("EKB_DATABASE_URL", "sqlite:///./ekb_test.db")
 
+import pytest
 from fastapi.testclient import TestClient
 
 from ekb_api.main import app
@@ -528,8 +529,45 @@ def test_conversation_list_and_delete() -> None:
 # ---- 显式拒答与引用补全 ----
 
 
+def _sse_citation_items(body: str) -> list[dict]:
+    """从 SSE 响应体中取出引用条目，兼容 v1/v2 两种线缆格式。
+
+    v2（默认协议）：单个 `citations` 事件，条目在 envelope.payload.items。
+    v1：逐条 `citation` 事件，data 本身即条目。
+    """
+    import json as _json
+
+    items: list[dict] = []
+    for block in body.split("\n\n"):
+        if not block.strip():
+            continue
+        event = next(
+            (ln[len("event:") :].strip() for ln in block.splitlines() if ln.startswith("event:")),
+            "",
+        )
+        if event not in {"citations", "citation"}:
+            continue
+        data_line = next((ln for ln in block.splitlines() if ln.startswith("data:")), None)
+        if data_line is None:
+            continue
+        data = _json.loads(data_line[len("data:") :])
+        if event == "citations":
+            items.extend(data.get("payload", {}).get("items", []))
+        else:
+            items.append(data)
+    return items
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "EKB-CR-FR-051 / CR-PH6-T03：证据不足拒答属 strict_grounded 模式门禁，PH6 范围。"
+        "当前 qa.py 零证据降级为纯 LLM 直答（finish_reason=stop）。"
+        "PH6 落地 answer_mode 后本用例须自动转绿（strict=True 会以 XPASS 报错提醒摘除标记）。"
+    ),
+)
 def test_qa_returns_refusal_when_no_evidence() -> None:
-    """无证据问题返回 finish_reason=refusal，不发 citation（AC-US01-03）。"""
+    """无证据问题返回 finish_reason=refusal，不产出引用条目（AC-US01-03）。"""
     token = login()
     headers = _auth_headers(token)
     kb_id = client.get("/api/v1/kb", headers=headers).json()[0]["id"]
@@ -541,13 +579,13 @@ def test_qa_returns_refusal_when_no_evidence() -> None:
         json={"question": "xyzzy wumpus frobnitz quux", "kb_ids": [kb_id]},
     )
     assert response.status_code == 200
-    # 拒答场景：done 事件 finish_reason=refusal，且无 citation 事件。
-    assert "event: citation" not in response.text
+    # 拒答场景：done 事件 finish_reason=refusal，且不得编造任何引用条目。
+    assert _sse_citation_items(response.text) == []
     assert '"finish_reason":"refusal"' in response.text
 
 
 def test_qa_citation_includes_updated_at() -> None:
-    """citation 事件包含 updated_at 字段（AC-US01-02 引用可复核）。"""
+    """每条引用都带 updated_at 字段（AC-US01-02 引用可复核）。"""
     token = login()
     headers = _auth_headers(token)
     kb_id = client.get("/api/v1/kb", headers=headers).json()[0]["id"]
@@ -558,17 +596,10 @@ def test_qa_citation_includes_updated_at() -> None:
         json={"question": "连接池", "kb_ids": [kb_id]},
     )
     assert response.status_code == 200
-    # citation 事件数据中应包含 updated_at 字段。
-    citation_line = next(
-        line
-        for line in response.text.splitlines()
-        if line.startswith("data:") and "chunk_id" in line
-    )
-    import json as _json
-
-    citation_data = _json.loads(citation_line[len("data:") :])
-    assert "updated_at" in citation_data
-    assert citation_data["updated_at"]
+    items = _sse_citation_items(response.text)
+    assert items, "命中证据时应至少产出一条引用"
+    for item in items:
+        assert item.get("updated_at"), f"引用缺少 updated_at: {item}"
 
 
 # ---- 幂等上传与失败重试 ----

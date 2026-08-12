@@ -112,7 +112,7 @@ def create_batch(
     try:
         result = service.create_batch(
             tenant_id=auth.tenant_id,
-            created_by=auth.user_id,
+            created_by=auth.actor_id,
             kb_id=kb_id,
             mode=payload.mode,
             client_request_id=payload.client_request_id,

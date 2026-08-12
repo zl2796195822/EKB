@@ -72,6 +72,8 @@ class _FakeSettings:
     def __init__(self, *, chat: list | None = None, embedding: list | None = None):
         self._chat = chat if chat is not None else []
         self._embedding = embedding if embedding is not None else []
+        self.environment = "test"
+        # 基础生成 / 检索
         self.llm_enabled = True
         self.llm_temperature = 0.0
         self.llm_max_tokens = 128
@@ -79,6 +81,37 @@ class _FakeSettings:
         self.embedding_batch_size = 32
         self.search_timeout_seconds = 10
         self.qa_timeout_seconds = 30
+        self.retrieval_cosine_threshold = 0.5
+        self.retrieval_rrf_k = 60
+        self.retrieval_rerank_pool = 30
+        self.retrieval_bm25_enabled = False
+        # M4-7 熔断告警
+        self.circuit_breaker_failure_threshold = 3
+        self.circuit_breaker_recovery_timeout = 30.0
+        self.alert_qa_p95_threshold_seconds = 3.0
+        self.alert_search_p95_threshold_seconds = 0.5
+        self.alert_error_rate_threshold = 0.05
+        self.alert_llm_failure_rate_threshold = 0.1
+        # SSE v2 参数（完整补齐）
+        self.sse_v2_enabled = True
+        self.sse_v2_retrieval_idle_timeout = 15.0
+        self.sse_v2_generation_idle_timeout = 30.0
+        self.sse_v2_heartbeat_interval = 10.0
+        self.sse_v2_delta_max_tokens = 8
+        self.sse_v2_delta_max_bytes = 1024
+        self.sse_v2_delta_flush_ms = 200
+        # M4-6 多轮移植配置（保守默认）
+        self.multi_turn_enabled = True
+        self.llm_context_window = 65536
+        self.llm_compaction_ratio = 0.75
+        self.compaction_recent_rounds_keep = 3
+        self.compaction_summary_ratio_target = 0.35
+        # 杂项
+        self.max_upload_bytes = 0
+
+    @property
+    def is_production(self) -> bool:
+        return self.environment.lower() == "production"
 
     @property
     def chat_providers(self) -> list:
@@ -87,6 +120,39 @@ class _FakeSettings:
     @property
     def embedding_providers(self) -> list:
         return self._embedding
+
+    # ---- 向后兼容便捷属性 ----
+    @property
+    def llm_api_url(self) -> str:
+        return self._chat[0].base_url if self._chat else ""
+
+    @property
+    def llm_api_key(self) -> str:
+        return self._chat[0].api_key if self._chat else ""
+
+    @property
+    def llm_model(self) -> str:
+        return self._chat[0].model if self._chat else ""
+
+    @property
+    def llm_timeout_seconds(self) -> float:
+        return self._chat[0].timeout_seconds if self._chat else 30.0
+
+    @property
+    def embedding_api_url(self) -> str:
+        return self._embedding[0].base_url if self._embedding else ""
+
+    @property
+    def embedding_api_key(self) -> str:
+        return self._embedding[0].api_key if self._embedding else ""
+
+    @property
+    def embedding_model(self) -> str:
+        return self._embedding[0].model if self._embedding else "bge-large-zh-v1.5"
+
+    @property
+    def embedding_timeout_seconds(self) -> float:
+        return self._embedding[0].timeout_seconds if self._embedding else 30.0
 
 
 # ---- 1. LLM 熔断器：连续失败开闸 → 短路 → 降级 → 半开恢复 ----
@@ -100,9 +166,15 @@ def test_circuit_breaker_opens_on_consecutive_llm_failures():
 
     fake_settings = _FakeSettings(chat=[_fake_chat_provider()])
     # 模拟 LLM provider 全部失败（patch _call_provider 抛 LlmError + 注入假 provider）。
+    # 注意：provider 列表来自 get_runtime_chat_providers（配置中心优先），必须一并注入，
+    # 否则 chat() 会在 breaker.track_failure() 之前就以「未配置 provider」提前返回，熔断器不计数。
     with (
         patch("ekb_api.llm._call_provider", side_effect=LlmError("simulated timeout")),
         patch("ekb_api.llm.get_settings", return_value=fake_settings),
+        patch(
+            "ekb_api.llm.get_runtime_chat_providers",
+            return_value=fake_settings.chat_providers,
+        ),
     ):
         for i in range(breaker.failure_threshold):
             with pytest.raises(LlmError):
@@ -123,6 +195,10 @@ def test_circuit_breaker_opens_on_consecutive_llm_failures():
     with (
         patch("ekb_api.llm._call_provider", side_effect=_count_call),
         patch("ekb_api.llm.get_settings", return_value=fake_settings),
+        patch(
+            "ekb_api.llm.get_runtime_chat_providers",
+            return_value=fake_settings.chat_providers,
+        ),
     ):
         with pytest.raises(LlmError, match="熔断器开闸"):
             chat([{"role": "user", "content": "should be short-circuited"}])
@@ -380,9 +456,22 @@ def test_qa_timeout_emits_timeout_event(client, dev_token):
         time.sleep(0.5)
         return []
 
+    # 超时接缝：qa.py 已从 _qa_timeout() 迁移到 settings 的分段空闲超时
+    # （SSE v2 用 sse_v2_retrieval_idle_timeout，v1 用 qa_timeout_seconds）。
+    # 用 dataclasses.replace 复制真实 Settings 并只压低这两个字段，避免假对象缺字段。
+    import dataclasses as _dc
+
+    from ekb_api.core.config import get_settings as _get_settings
+
+    _fast_settings = _dc.replace(
+        _get_settings(),
+        sse_v2_retrieval_idle_timeout=0.1,
+        qa_timeout_seconds=0.1,
+    )
+
     with (
         patch("ekb_api.routers.qa.retrieve", _slow_retrieve),
-        patch("ekb_api.routers.qa._qa_timeout", return_value=0.1),
+        patch("ekb_api.routers.qa.get_settings", return_value=_fast_settings),
     ):
         resp = client.post(
             f"{API}/qa/ask",

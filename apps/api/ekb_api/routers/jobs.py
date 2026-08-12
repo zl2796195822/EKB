@@ -183,7 +183,7 @@ def cancel_job(
     _job_or_404(service, auth.tenant_id, job_id)
     try:
         view = service.cancel(
-            tenant_id=auth.tenant_id, job_id=job_id, actor_id=auth.user_id
+            tenant_id=auth.tenant_id, job_id=job_id, actor_id=auth.actor_id
         )
     except JobStateConflict as exc:
         raise HTTPException(
