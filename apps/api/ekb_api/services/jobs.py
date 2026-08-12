@@ -76,6 +76,26 @@ class OutboxEvent:
     created_at: str
 
 
+@dataclass(frozen=True)
+class CleanupProjection:
+    """Read-only aggregate view of a tenant's cleanup/purge jobs (PH2 · T05).
+
+    Powers the Jobs Center "cleanup projection": how many ``retention_purge``
+    jobs sit in each state, plus the most recent ones for quick inspection.
+    Counts are computed over the whole tenant+job_type window, not just the
+    ``recent`` slice, so the dashboard totals are exact.
+    """
+
+    job_type: str
+    total: int
+    by_state: dict[str, int]
+    recent: list[JobView]
+
+
+# Job types the Jobs Center surfaces as "cleanup" operations.
+CLEANUP_JOB_TYPES = ("retention_purge",)
+
+
 def _json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
@@ -718,6 +738,48 @@ class JobService:
         with self.engine.connect() as connection:
             rows = connection.execute(text(statement), params).all()
             return [_row_to_job(row) for row in rows]
+
+    def cleanup_projection(
+        self,
+        *,
+        tenant_id: str,
+        job_type: str = "retention_purge",
+        recent_limit: int = 10,
+    ) -> CleanupProjection:
+        """Tenant-scoped read-only projection of cleanup jobs for the Jobs Center.
+
+        Counts the tenant's jobs of ``job_type`` grouped by state (exact totals,
+        not truncated by ``recent_limit``) and returns the most recent ones as
+        :class:`JobView` for inline inspection.  The ``tenant_id`` predicate is
+        mandatory — this can never observe another tenant's jobs.
+        """
+        with self.engine.connect() as connection:
+            counts = connection.execute(
+                text(
+                    "SELECT state, COUNT(*) AS n FROM background_jobs "
+                    "WHERE tenant_id=:tenant AND job_type=:jt GROUP BY state"
+                ),
+                {"tenant": tenant_id, "jt": job_type},
+            ).all()
+            by_state = {str(row.state): int(row.n) for row in counts}
+            recent_rows = connection.execute(
+                text(
+                    "SELECT * FROM background_jobs WHERE tenant_id=:tenant "
+                    "AND job_type=:jt ORDER BY created_at DESC LIMIT :lim"
+                ),
+                {
+                    "tenant": tenant_id,
+                    "jt": job_type,
+                    "lim": max(1, min(recent_limit, 100)),
+                },
+            ).all()
+        recent = [_row_to_job(row) for row in recent_rows]
+        return CleanupProjection(
+            job_type=job_type,
+            total=sum(by_state.values()),
+            by_state=by_state,
+            recent=recent,
+        )
 
     def cancel(
         self,

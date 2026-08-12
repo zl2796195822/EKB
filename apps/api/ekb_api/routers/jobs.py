@@ -106,6 +106,30 @@ def list_jobs(
     return {"items": items, "count": len(items)}
 
 
+@router.get("/cleanup")
+def cleanup_projection(
+    auth: Annotated[AuthContext, Depends(get_live_auth_context)],
+    recent_limit: int = Query(default=10, ge=1, le=100),
+) -> dict:
+    """Read-only Jobs Center projection of cleanup/purge jobs (PH2 · T05).
+
+    Aggregates the caller's ``retention_purge`` jobs by state and returns the
+    most recent ones.  Strictly tenant-scoped; cross-tenant jobs are invisible
+    by construction (the service binds ``tenant_id`` on every query).
+    """
+    assert_capability(auth, CAP_AUDIT_READ)
+    service = _service()
+    proj = service.cleanup_projection(
+        tenant_id=auth.tenant_id, recent_limit=recent_limit
+    )
+    return {
+        "job_type": proj.job_type,
+        "total": proj.total,
+        "by_state": proj.by_state,
+        "recent": [JobViewResponse.from_view(v).model_dump() for v in proj.recent],
+    }
+
+
 @router.get("/{job_id}")
 def read_job(
     job_id: str,
