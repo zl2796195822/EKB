@@ -26,6 +26,8 @@ from ekb_api.migrations import (
     v4_004_postgres_cutover,
     v4_005_retention_governance,
     v4_006_storage_ingestion,
+    v4_007_chat_graph,
+    v4_008_attachments,
 )
 
 
@@ -252,6 +254,20 @@ CHAIN = (
         apply_name="apply_v4_006",
         verify_name="verify_v4_006",
         rollback_name="rollback_v4_006_dry_run",
+    ),
+    _step(
+        v4_007_chat_graph.VERSION,
+        v4_007_chat_graph,
+        apply_name="apply_v4_007",
+        verify_name="verify_v4_007",
+        rollback_name="rollback_v4_007_dry_run",
+    ),
+    _step(
+        v4_008_attachments.VERSION,
+        v4_008_attachments,
+        apply_name="apply_v4_008",
+        verify_name="verify_v4_008",
+        rollback_name="rollback_v4_008_dry_run",
     ),
 )
 

@@ -20,6 +20,7 @@ from ekb_api.routers import (
     admin,
     analytics,
     apps,
+    attachments,
     auth,
     chat_graph,
     content_governance,
@@ -146,6 +147,7 @@ app.include_router(kb_upload.router, prefix="/api/v1")
 app.include_router(content_governance.router, prefix="/api/v1")
 app.include_router(llm.router, prefix="/api/v1")
 app.include_router(chat_graph.router, prefix="/api/v1")
+app.include_router(attachments.router, prefix="/api/v1")
 
 install_error_handlers(app)
 instrument_fastapi(app)
