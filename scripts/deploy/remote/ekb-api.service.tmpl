@@ -1,0 +1,33 @@
+[Unit]
+Description=EKB FastAPI Server
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=ekb
+Group=ekb
+WorkingDirectory=/opt/ekb/api/current
+Environment="PYTHONUNBUFFERED=1"
+Environment="PATH=/opt/ekb/api/venv/bin:/usr/local/bin:/usr/bin:/bin"
+EnvironmentFile=/opt/ekb/api/.env
+ExecStart=/opt/ekb/api/venv/bin/uvicorn ekb_api.main:app \
+    --host 127.0.0.1 \
+    --port 8000 \
+    --workers 2 \
+    --timeout-keep-alive 65 \
+    --log-level info
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ekb-api
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/ekb/data /opt/ekb/api/current
+ReadOnlyPaths=/opt/ekb/web
+
+[Install]
+WantedBy=multi-user.target

@@ -23,3 +23,11 @@ MCP/*/dist/
 MCP/*/build/
 backups/
 drill_workspace/
+
+# PH0 transient workspace artifacts
+.deploy_staging/
+.deploy_helpers/
+.playwright-cli/
+.trae/
+.pmos/settings.yaml
+output/design-qa/

@@ -1,0 +1,420 @@
+# EKB 项目记忆
+
+> 更新时间：2026-08-12（EKB Core Rebuild Tier 3 Spec 00–14 已获用户确认并进入 Ready for Plan；历史验收账号已脱敏）
+> 用途：为后续会话保留项目定位、权威文档、实施进度、验证证据与未决事项。不得记录密码、令牌或其他秘密。
+
+## 项目定位与技术基线
+
+- EKB 是面向企业内部员工与外部运维客户的私有化优先智能知识库：提供带引用的 AI 问答、文档管理、全文/语义检索、多租户隔离、RBAC/ACL、审计和配额。
+- 前端为 React 19 + TypeScript + Vite；新界面位于 `apps/web/src/app-v2/`，遵守 adapter facade（仅 adapters 可使用 API client，页面不直接 `fetch`）。
+- 后端为 Python 3.9 + FastAPI + SQLAlchemy；当前开发数据层为 SQLite，生产目标为 PostgreSQL + pgvector，配合 Redis 和 S3/MinIO 兼容对象存储。AI 目前使用 DeepSeek/OpenAI 兼容链路；RAGFlow 是待验证的可替换适配层。
+- API 前缀为 `/api/v1`，健康检查为 `/healthz`。v3 迁移为手写 DDL + `schema_migrations` checksum ledger；已应用迁移不可修改，只能新增迁移并在服务层修复兼容问题。
+
+## 文档读取顺序与权威关系
+
+1. 先读本文件，再读 `docs/README.md`（当前 authority index）。
+2. 对 v3 全栈合同，按 `docs/pmos/features/2026-08-09_ekb-fullstack-v3/README.md` 指定顺序读取：`01_requirements.md` → `02_spec.md` → `03_plan.md` → `04_verification-matrix.md`；`03_plan_review.md` 仅为审查背景，不是实现证据。
+3. `docs/EKB全栈开发实施文档_v3.1_2026-08-10.md` 是较晚的实际执行与验收记录：v2 的“纯前端、禁止改后端、核心动作 disabled/unavailable”边界已被替代。修改 API、schema、安全或发布边界前，仍须回读 v3 spec/matrix 及相应 v1 基线文档。
+4. 历史基线优先参考 `README.md`、`docs/企业级知识库Spec_v1.0_2026-08-07.md`、API/数据模型/架构/安全/测试文档；v1 完整复盘与技术债见 `docs/复盘报告与下一版本规划_M5-5_v1.0_2026-08-08.md`。发生冲突时遵守 `docs/文档治理与研发交付规范_v1.0_2026-08-07.md` 的权威与变更记录规则。
+
+## 已完成进度（已记录证据，非生产上线声明）
+
+- v1 基线：文档记录了 M0–M5 的 tracer-bullet、单租户到多租户权限、治理运营和生产强化工作。历史质量快照为 130 题评估集、M4 后首答准确率 98.0%、引用正确率/拒答率 100%、QA P95 2715ms、Search P95 37.6ms、单机 SQLite 4.5 QPS；生产签字和部分上线前门禁仍未完成。
+- v3.1 Phase 0（布局统一）已完成：十个模块统一在 GlobalShell 内切换，知识库和 AI 助手不再整页跳转。
+- v3.1 Phase 1（个人中心全栈）已完成：复用 `v3_001_identity`，实现 profile/preferences/password/sessions/API keys/notifications 的服务、路由、adapter 与页面；文档记录 `npm run build` 通过、Vitest 18 passed、真实服务 `smoke_v3_profile.py` 为 33/0。
+- v3.1 Phase 2（回收站全栈）已完成：`v3_002_content` 的 `trash_items` 投影、backfill、恢复/永久删除和前端 adapter/page 已记录完成；文档记录 backfill 为 4 KB、5 DOCUMENT、531 CONVERSATION，`smoke_v3_trash.py` 为 36/0，Vitest 为 27 passed，构建通过。以上是已记录的阶段证据；本次会话未重新运行全套验证。
+- v3.1 P0（漂移审计 & ADR）已完成：
+  - 审计了 v3_001_identity / v3_002_content / v3_003_analytics / v3_004_apps 四个已 applied 迁移及其在 `schema_migrations` 中的 checksum 台账；确认 authority 的 `v3_003_assistant`→`v3_004_analytics`→`v3_005_apps` 命名与代码 `v3_003_analytics`→`v3_004_apps` 漂移，但 checksum 已锁定不可修改。
+  - 审计了后端 analytics router / service / store（发现 record_access 用 SQLite 专属的 INSERT OR IGNORE，`get_ops_dashboard` 的 days 参数未过滤 feedback 和 review）。
+  - 审计了前端 analytics adapter / AnalyticsPage / AccessTrendChart.tsx（发现图表无涨红跌绿约定、无峰值标记、无徽章）。
+  - 决策结论（ADR-002）：**绝不修改已 applied 迁移**；新增「补偿迁移 v3_005_analytics_compat」补齐 `support_feedback` 表 + 缺失 analytic 索引；服务层代码对齐迁移实际锁定列名（`access_kind`、`occurred_at`、`occurred_day`）。
+- v3.1 Phase 3（Analytics 全栈闭环）已完成并通过本次实跑验证：
+  - 后端：新增 [v3_005_analytics_compat.py](file:///Users/alin/EKB/apps/api/ekb_api/migrations/v3_005_analytics_compat.py)，CHAIN 在 [v3_fullstack.py](file:///Users/alin/EKB/apps/api/ekb_api/migrations/v3_fullstack.py#L58-L63) 末尾注册；support_feedback 表（10 列 + FK + CHECK）+ `ix_support_feedback_tenant_status` + `ix_access_events_tenant_time` + `ix_access_events_resource` 全部 CREATE IF NOT EXISTS。
+  - 后端兼容性修复：[v3_analytics.py record_access](file:///Users/alin/EKB/apps/api/ekb_api/services/v3_analytics.py#L150-L184) 改为按 dialect 分支：PostgreSQL → `INSERT … ON CONFLICT DO NOTHING`；SQLite → `INSERT OR IGNORE`（保留原语义 + 性能）。
+  - 后端运营看板修复：[store.py get_ops_dashboard](file:///Users/alin/EKB/apps/api/ekb_api/store.py#L1685-L1709) 对 Feedback 和 ReviewItem 新增 `created_at >= since` 过滤，days 参数现在实际生效。
+  - 前端 SVG 图表增强：[AccessTrendChart.tsx](file:///Users/alin/EKB/apps/web/src/app-v2/pages/analytics/AccessTrendChart.tsx) 实现涨红跌绿（Rise #E03131 / Fall #00A870 / Flat #3B82F6），加上升/下降百分比徽章、峰值圈+竖线、谷值虚线圈、线性渐变面积、图例（访问量实线/访客虚线）、<title> tooltip；渐变 id 基于 data 非加密散列避免多实例冲突。
+  - 本次实跑验证证据：
+    - 迁移：v3_005_analytics_compat apply=True、verify=PASS（1 table + 3 indexes）、rollback_dry_run 4 对象、blocked_reason=None；
+    - 编译：py_compile 4 文件 OK；
+    - 写入：record_access 对 KB/CONVERSATION 两条事件写入成功；
+    - 前端：Vitest `v3.analytics.test.ts` 11/11 passed；tsc --noEmit 无错误；Vite build ✓ 4644 modules，CSS 101.92KB / JS 606.63KB（160KB gzip），built in 1.54s。
+
+## 待完成与关键技术债
+
+- v3.1 Phase 4（Apps 全栈闭环）已完成并通过本次实跑验证：
+  - **P4-Pre 审计结论（ADR-003 思路）**：v3_004_apps 已 applied 但表未创建（apply 返回 dict，且 DDL 中 FK 引用了未建立的表/列）。严格遵守 ADR-002 原则：**绝不改已 applied checksum**。
+  - **CHAIN 契约修复**：在 [v3_fullstack.py](file:///Users/alin/EKB/apps/api/ekb_api/migrations/v3_fullstack.py) 新增 `_wrap_apply_result / _wrap_verify_result / _wrap_rollback_result`，把 v3_001~v3_004 返回的 dict（status/checksum/applied/reason）统一包装为带 `version / checksum / applied / backfill_counts` 属性的 SimpleNamespace，CHAIN CLI 可穿越 v3_004 跑到 v3_005 及以后，不再抛 AttributeError: 'dict'。
+  - **补偿迁移 v3_006_apps_compat**：以 `CREATE TABLE IF NOT EXISTS` 创建 02_spec.md 定义的 4 张权威表：
+    - `app_catalog(slug PK, display_name, provider_name, description, category, capabilities JSON, recommended_rank, enabled, ...)` — CHECK(slug IN feishu/wecom/github/tencent-docs/analytics-pro/audit)；
+    - `app_installations(id, tenant_id PK, slug, status IN (INSTALLED/CONFIGURED/CONNECTED/ERROR), installed_by, configuration JSON, last_connected_at, ..., UNIQUE(tenant_id, slug), FK(tenant_id,slug)→catalog)`；
+    - `app_credentials(id PK, tenant_id, installation_id, credential_name, prefix(<=32), ciphertext, key_version, previous_ciphertext, previous_key_version, previous_expires_at, status IN (ACTIVE/REVOKED), revoked_at, UNIQUE(tenant_id, installation_id, credential_name), FK→app_installations)`；
+    - `app_runs(id PK, tenant_id, installation_id, slug, run_type IN (CONNECTIVITY_CHECK/SYNC/ACTION), status IN (SUCCESS/FAILED/RUNNING), started_at, finished_at, error_message, triggered_by, UNIQUE(tenant_id, installation_id, id))`；
+    - 外加 `ix_app_installations_tenant_status / ix_app_credentials_installation_status / ix_app_runs_tenant_installation_started` 三个索引；PostgreSQL 方言自动把 JSON → JSONB。
+  - **种子目录**：v3_006 apply 时 upsert 6 条权威应用（飞书/企微/GitHub/腾讯文档/Analytics Pro/审计），capabilities 为飞书 `["oauth","sync_docs","audit_access"]`、企微 `["oauth","sync_docs","push"]`、GitHub `["oauth","sync_code","webhooks"]`、腾讯文档 `["oauth","sync_docs","edit"]`、Analytics Pro `["reporting","export","api"]`、Audit `["audit_logs","retention","reporting"]`。
+  - **后端 Service（v3_apps.py）**：
+    - `list_catalog / install_app / get_app_detail / configure_installation / connect_installation / create_credential / revoke_credential / record_run / list_runs / list_credentials`；
+    - **凭据加密**：专用密钥派生 — `_fernet_key = base64.urlsafe_b64encode(sha256(EKB_MASTER_KEY).digest())`，用 `cryptography.fernet.MultiFernet([Fernet(key)])` 做密钥版本化（`ekb-apps-kms-v1`）；前缀取明文前 8 字符，DB 仅存 ciphertext（长度 ≈ 140 字节，典型 Fernet 信封），**日志/detail/list API 永远零明文泄露**；
+    - **写一次语义**：`create_credential` 的返回 `CredentialCreateResult.plaintext_once` 仅在创建响应中设置一次，之后从 detail / list / runs 读取全为 None；
+    - **状态机**：INSTALL(INSTALLED) → PUT configure(CONFIGURED + updated_at) → POST connect(CONNECTED + record_run CONNECTIVITY_CHECK SUCCESS)，任何空配置或未安装则走 error 分支不破坏现有状态。
+  - **Router 扩展（apps.py，纯 additive）**：保留旧的 `/apps/v1` 全部端点，在 `/apps/v2` 前缀新增：`GET /{slug}`（聚合 detail=app+installation+credentials+runs）、`PUT /{slug}/configure`、`POST /{slug}/connect`、`POST /{slug}/credentials`、`POST /{slug}/credentials/{credential_id}/revoke`、`GET /{slug}/runs`；全部返回 200/201，无破坏性变动。
+  - **前端**：types/api.ts 新增 `AppDetailResponse`（嵌套 `AppInstallationView | AppCredentialItem[] | AppRunItem[]`）；API client 新增 6 个 Phase 4 endpoint；adapter createAppsAdapter 暴露 `getDetail / configure / connect / addCredential / revokeCredential / listRuns`；AppsPage.tsx 新增右侧详情抽屉：目录页 → 点应用卡片滑出 Drawer，含 4 个区块：
+    1. 卡片头（显示名、描述、provider、分类徽章、当前安装状态胶囊）
+    2. 安装 & 配置（安装按钮 → 展开 configuration form → 保存 → 连接 → status 胶囊 INSTALLED→CONFIGURED→CONNECTED）
+    3. 凭据（前缀显示、"明文只返回一次"Toast 提示、复制按钮、撤销按钮、撤销后 status→REVOKED 置灰）
+    4. Runs 审计表（type/status/started_at/finished_at/triggered_by/error_message）。
+  - 本次实跑验证证据：
+    - 迁移：v3_006_apps_compat apply=True、verify=PASS（4 表 + 3 索引 + 6 条种子）、rollback_dry_run 13 对象、blocked_reason=None；CHAIN 现在 6 步全部跑到（v3_001→v3_002→v3_003→v3_004→v3_005→v3_006 无 dict 包装错误）；
+    - 后端：py_compile 4 新文件 OK（v3_006 / v3_apps / apps_router / v3_fullstack wrapper）；Phase 4 专用 smoke `smoke_v3_apps_final.py` 8/8 passed：catalog(6)、install→INSTALLED、detail 全链路、configure→CONFIGURED、connect→CONNECTED+CONNECTIVITY_CHECK run、create_credential 前缀=sk-this- + ciphertext 140B、detail 零明文泄露、revoke→REVOKED+revoked_at、Fernet 解密往返匹配；
+    - 前端：tsc --noEmit 0 error；Vitest 5 文件 49/49 passed（其中 v3.apps.test.ts 11/11，覆盖 adapter 映射 + 抽屉 UI state + 写一次明文边界 + 撤销置灰）；Vite build ✓ 4644 modules in 1.44s，CSS 101.92KB / JS 643.43KB（170KB gzip）。
+- 每阶段仍需构建、Vitest、真实运行服务 E2E 冒烟、后端日志和前端 adapter 边界审计；全部完成后还需十页双视口走查、`design-qa.md` 更新、旧 UI 引用审计和生产构建复核。
+- v1 遗留 P0/P1：迁移至 PostgreSQL + pgvector、接入真实 S3/MinIO、关闭 M0 开放问题与安全评审签字、补齐 Playwright E2E 截图/回归、定位 HTTP SSE 偶发拒答（G042/G077）。后续还包括权限/新鲜度/对抗集 A/B、OpenTelemetry、QPS >= 50 横向扩展、答案缓存、成本观测和 RAGFlow 适配。
+- 已知能力缺口：头像上传依赖对象存储；回收站仅记录 `expires_at`，尚无自动清理任务。实现服务 SQL 前必须以已锁定迁移 DDL 为准，不能依赖记忆中的列名。
+
+## 工作区与规模口径
+
+- 2026-08-11 的工作区处于大量未提交改动状态（`git status --short` 约 195 项，含修改、删除与未跟踪文件）。后续任务必须在此基础上增量工作，不得 `reset`、`checkout`、清理或覆盖无关改动。
+- 规模快照：`apps/` 约 47,211 行；全仓约 294,124 行。两者均为粗略 `wc` 口径，包含部分文档、生成物和证据文件，随 `.playwright-cli/`、`docs/evidence/`、`output/`、依赖或未跟踪文件而变化，不能等同于净业务源代码，也不代表已达到 50 万行目标。
+
+## 当前任务与未决问题
+
+- 已完成（本次）：v3.1 P0 迁移漂移审计（ADR-002）+ Phase 3 Analytics 全栈实装 + Phase 4 Apps 垂直全栈实装 + Phase 5 Dashboard & 能力缺口修复 + **Phase 5.1 Rail「最近访问/收藏夹/回收站」三点立即可用修复**（A 类：最近访问跳工作台真实区、回收站跳独立 RecyclePage（真实接线 trash adapter 全 6 功能）；C 类透明化：收藏夹/项目/分享/导出统一 phase 胶囊 + 规划中 tooltip，AssistantSidebar 收藏/项目 unavailable-card 替换为具体路线图阶段说明）。全部通过实跑验证（49/49 Vitest、tsc+build=0）。
+- 进行中（下一批）：v4 P2 内容治理全栈闭环 —— favorites 垂直全栈（补偿迁移 v3_007 + service + router + adapter + 页面 star 切换 + Rail 收藏列表）、folders、tags、shares（signed share link 复用 Fernet key derivation）。这些工作包可在当前 SQLite 上实现，不阻塞于 P1 的 PG/S3/Redis 基础设施切换。
+- 后续（按用户确认资源后）：P1 基础设施（PostgreSQL+pgvector、MinIO/S3 对象存储、Redis 缓存+后台任务）→ P2 Assistant+十页双视口回归 → P3 企业身份（OIDC/SAML/LDAP/SCIM + 角色 CRUD + 连接器框架）→ P4 平台化。
+- 未决：第三方引入前仍需固定 commit SHA、逐文件许可证复核、SBOM、来源标注、安全审查和 API/权限/性能回归门禁；不能仅凭 GitHub star、fork 或仓库 size 直接采用项目。
+- 未决：50 万行只是长期容量情景，不是验收目标；代码增长必须由真实功能、测试、文档、NFR、安全和运维需求驱动，禁止复制第三方或生成文件凑行数。
+
+## 2026-08-11 Phase 4 Apps 垂直里程碑（本次交付）
+
+- **ADR-003 漂移策略（思路延续 ADR-002）**：v3_004_apps 的 DDL 缺失 + 返回 dict 契约错误的已 applied checksum 一律不动；新功能走补偿迁移 v3_006_apps_compat + 工具链层 dict→SimpleNamespace 包装器。
+- **CHAIN 工具链贯通**：v3_fullstack.py 三个 wrapper（apply/verify/rollback）把 v3_001~v3_004 的 dict 结果映射回 MigrationResult-like 协议，6 步 CHAIN 现在可从 idempotent init 一路跑到 v3_006，verify 全部 PASS。
+- **四张权威表 + 索引 + 种子**：app_catalog 6 条、app_installations、app_credentials、app_runs + 3 个 analytic/status 索引；所有约束 CHECK 与 FK 按 02_spec.md §Apps 精确落地；PostgreSQL 方言自动 JSON→JSONB。
+- **凭据安全模型**：专用 Fernet 密钥派生 + `ekb-apps-kms-v1` 版本号；DB 存前缀（前 8 字符）+ 密文（140B Fernet 信封），detail/list/list_credentials/detail_response/日志永远零明文；create 返回明文 only-once；revoke 置 REVOKED + 记录 revoked_at；撤销后密文仍可解密（用于合规导出），但 UI 状态置灰。
+- **应用状态机 + run 审计**：INSTALL(INSTALLED) → configure(CONFIGURED) → connect(CONNECTED + CONNECTIVITY_CHECK run SUCCESS)；任何步骤失败不回退前一步状态，单独记录 ERROR run。
+- **Router 纯 additive**：旧 `/apps/v1` 端点零改动；新增 `/apps/v2` 前缀 6 个 Phase 4 端点；detail API 一次聚合 app + installation + credentials + runs 1+N+M+K 形状，前端适配器一次请求即可渲染完整 Drawer。
+- **前端 UX 细节**：AppsPage 卡片→Drawer；安装/配置/连接三段式交互；凭据创建后弹出「明文仅显示一次，请复制保存」Toast；撤销按钮带确认；Runs 表按 started_at desc 截断最近 20 条，status 用 Pill 色标（SUCCESS=绿、FAILED=红、RUNNING=蓝）。
+- **交付证据实跑**：py_compile OK；smoke 8/8 passed（覆盖 catalog/install/detail/configure/connect+run/create_credential+零明文+Fernet+revoke 全链路）；tsc 0 error；Vitest 49/49（apps 11/11）；Vite build 4644 modules in 1.44s，构建产物无新引入的外部 runtime 依赖。
+
+## 2026-08-11 Phase 3 Analytics 里程碑（本次交付）
+
+- **ADR-002 漂移策略已定案**：绝不改 v3_001~v3_004 已 applied 的 checksum；权威 spec 与实际代码列名/版本号的漂移一律用「新增版本的补偿迁移 + 服务层代码对齐实际列」解决。
+- **迁移补偿**：v3_005_analytics_compat 作为 v3_004_apps 之后的追加补偿，补齐 support_feedback（10 列 + FK 到 tenant_memberships + OPEN/CLOSED CHECK + 非空 message CHECK）、ix_support_feedback_tenant_status，以及 resource_access_events 上的两个 analytic 索引（ix_access_events_tenant_time / ix_access_events_resource）。PostgreSQL 方言自动把 JSON → JSONB。
+- **跨 DB 写路径**：v3_analytics.record_access 现在按 dialect 选择 PG 的 `INSERT … ON CONFLICT DO NOTHING` 与 SQLite 的 `INSERT OR IGNORE`，保证同一个 writer 在迁移锁表的前提下，两条路线都能实现「碰撞不 double-count、无异常抛」的幂等性。
+- **运营看板时间框正确**：store.get_ops_dashboard 的 Feedback 与 ReviewItem 现在都带上了 `created_at >= since`，days 参数能真实过滤窗口内的满意度、UP/DOWN、盲区 PENDING 审核计数，而不是之前返回租户全量历史。
+- **Analytics 可视化规范**：AccessTrendChart.tsx 正式落实「涨红跌绿」（Rise #E03131 ▲、Fall #00A870 ▼、Flat #3B82F6 ●），带百分比徽章、峰值圈+竖线、谷值虚线圈、渐变填充、访问量实线 / 独立访客虚线的双图例；x/y 轴文字、网格与 tooltip 全部重写为 inline SVG，无外部依赖。
+- **交付证据**：v3_005 apply/verify/rollback_dry_run=PASS，py_compile=OK，record_access 实写 2 事件 OK；前端 Vitest 11/11 passed，tsc 0 error，Vite build 4644 modules 在 1.54s 内通过。
+
+
+## 2026-08-11 Deployment 部署里程碑（本次交付，验收可访问）
+
+> **验收账号**：历史记录中的账号与口令已脱敏；后续只从受管运行环境获取，不在项目记忆中保存。
+> **访问域名**：`https://gjxhj.eu.cc/`（HTTP 80 也开放，兼容国内运营商封 443 的客户链路）。
+> **本地 SSH 转发验收路径**：生产主机地址和账号已脱敏；从受管连接配置建立本地端口转发后打开 `http://localhost:30080/`。
+
+### 目标服务器与接入信息
+
+- 生产服务器（连接信息已脱敏）使用 CentOS 8，系统自带 Python 3.6 **太旧不能直接跑 EKB API** → 架构选型改为「前端静态 rsync + API Docker 离线镜像 + nginx 反代」。
+- 证书：复用服务器已有 `/etc/nginx/ssl/gjxhj.eu.cc/{fullchain,privkey}.pem`，HTTPS 443 直接可用；HSTS 保守配置 max-age=6 个月。
+- 域名冲突处理：原 `itops.conf`（pandawiki/itops-agent-platform）占用 `server_name gjxhj.eu.cc` 的 80/443 精确匹配，部署时已将其重命名为 `old.gjxhj.eu.cc wwwold.gjxhj.eu.cc` 释放域名给 EKB（配置保存在 `/etc/nginx/conf.d/itops.conf.bak` 可回滚）。
+
+### 最终部署架构（解决 Python 3.6 + 国内网络双约束）
+
+```
+         用户浏览器 (https://gjxhj.eu.cc/)
+                 │
+                 ▼
+         nginx (80/443, default_server, Host=gjxhj.eu.cc | _)
+            ├── /assets/ /index.html 静态缓存 → /opt/ekb/web/current (Vite dist, rsync 上传)
+            ├── /api  |  /healthz  |  /auth  |  /docs  |  /openapi.json
+            └── /api/v1/* /qa/* /kb/* /me/* /admin/* /apps/*
+                              │ proxy_pass (keepalive=32, 300s 读写超时)
+                              ▼
+                  127.0.0.1:8000  (Docker 容器 ekb-api:latest, 仅本机回环)
+                              │  bind 127.0.0.1 防外部直连攻击
+                              ▼
+                    /opt/ekb/data (volume 挂载进容器 /data, uid=1000)
+                      └── ekb.sqlite3 (SQLite 生产过渡; 未来切 PG)
+```
+
+- **API Docker 镜像**：`linux/amd64`，在本机（Mac）用 `docker buildx build --platform linux/amd64 --load` 构建 → `docker save | gzip -6` → `rsync -av --progress` 上传 → 服务器 `docker load` → `docker run -d -p 127.0.0.1:8000:8000 -v /opt/ekb/data:/data --env-file /opt/ekb/api/.env -e EKB_ALLOWED_HOSTS=* -e EKB_ALLOWED_ORIGINS=* ekb/ekb-api:latest`。
+- **前端静态**：本机 `pnpm -C apps/web build` 产物 → rsync 到 `/opt/ekb/web/releases/<ts>` → `ln -sfn` 切 `current/`，原子切换零宕机，index.html 禁用缓存（no-cache/no-store），`assets/` 缓存 1 年（public, immutable）。
+- **Nginx 组织方式**：`/etc/nginx/conf.d/ekb.conf`（80+443 两个 server block，default_server） + `/etc/nginx/ekb-api-locations.inc`（API 反代片段） + `/etc/nginx/ekb-spa-locations.inc`（SPA 静态 + 安全 deny 片段）。80 与 443 使用相同 include，避免复制粘贴漂移。
+
+### 修复记录（本次部署中闭环解决）
+
+| # | 现象 | 根因 | 修复 |
+|---|---|---|---|
+| D-1 | `docker run` 端口绑定失败：`127.0.0.1:8000 already in use` | 旧 `systemd ekb-api.service`（前版本 Python 3.8 uvicorn）仍在运行占 8000 | `systemctl stop/disable ekb-api.service` + `kill -9` 残留进程 |
+| D-2 | 容器启动 uvicorn `IndexError: 4 in parents[4]` | `core/config.py` `_load_dotenv()` 硬编码向上 4 层，在 Docker 内 `/app/ekb_api/core/config.py` 只有 3 层 parents | 改为循环 `[here, *here.parents[:8]]` 搜索 `.env`，找不到直接返回（Docker 通过 `--env-file` 注入） |
+| D-3 | `POST /auth/login` 返回 404 Not Found | API 真实路由前缀是 `/api/v1/auth/login`（main.py `include_router(..., prefix="/api/v1")`），之前以为是裸 `/auth` | nginx location 正则已覆盖 `/api`；登录验收端点统一用 `/api/v1/auth/login` |
+| D-4 | 验收账号登录曾返回 `UNAUTHENTICATED` | 旧 systemd 服务遗留口令哈希与受管验收凭据不一致；entrypoint 首次执行时迁移还没建 users 表就报 `no such table: users` | 在受管环境幂等更新验收账号哈希；同时修复 entrypoint 迁移调用参数缺失。项目记忆不保存凭据。 |
+| D-5 | 登录走 nginx 返回 `Invalid host header`，直连 127.0.0.1:8000 OK | FastAPI `TrustedHostMiddleware` `allowed_hosts` 只含 `127.0.0.1/localhost/settings.api_host`，Host=gjxhj.eu.cc 被拒 | main.py 支持 `EKB_ALLOWED_HOSTS` CSV 环境变量 + 识别 `"*"` 通配；容器运行时 `-e EKB_ALLOWED_HOSTS=*`，同时 `.env` 持久化两行保证容器重建不丢失 |
+| D-6 | entrypoint 迁移报错 `the following arguments are required: --database-url` | entrypoint 直接调用 `migrate_main()`（空 args）触发 argparse | 改为先读 `EKB_DATABASE_URL / DATABASE_URL / get_settings().database_url` 显式传 `["--database-url", db_url]`，捕获 `SystemExit(0)` 为成功 |
+| D-7 | nginx 配置 `set $web_root` 写文件时被 bash 外层双引号展开成空 → `invalid number of arguments in "set"` | heredoc 嵌在 `ssh "..."` 双引号里，`$web_root $uri $host` 都被 bash 展开 | 改为 heredoc 用单引号包 EOF 再按行号 `sed -i` 精确替换；API 与 SPA 公共片段拆成 `.inc` 文件避免复制 |
+
+### 实跑验收证据（本次）
+
+- **容器**：`ekb-api:latest`（ID=6d04a555eb31，488MB），状态 `Up (healthy)`，docker restart unless-stopped，memory 1G / cpu 1.0，仅 bind 127.0.0.1 防外部直接访问。
+- **nginx**：`nginx -t` syntax ok + test successful；80/443 LISTEN；`/healthz-nginx` 返回 `{"ok":true,"service":"nginx","scheme":"http(s)"}`。
+- **API 直连**：使用受管验收凭据调用 `/api/v1/auth/login` 曾签发有效 access token；随后访问 `/api/v1/me` 的 owner capabilities 生效。凭据和 token 不在记忆中保存。
+- **HTTP 反代（Host=gjxhj.eu.cc）**：同样请求经 nginx 80，token 长度一致，证明 TrustedHost 白名单已生效。
+- **HTTPS 反代（`--resolve gjxhj.eu.cc:443:127.0.0.1` 跳过 DNS）**：证书链有效，token 400 chars，443 链路就绪。
+- **SPA 前端**：`curl http://127.0.0.1/ Host=gjxhj.eu.cc` 返回完整 Vite `<doctype html><html lang="zh-CN"><meta name="theme-color" content="#f6f7f3"><svg icon>`（app-v2 主题色），静态链路贯通。
+- **本机 SSH 转发验收**：Mac 本机端口转发曾验证登录和 SPA HTML；验收凭据已脱敏。
+
+### 未来每次部署的标准操作流程（scripts/deploy 自动实现）
+
+1. `pnpm -C apps/web build` → 生成 Vite dist。
+2. `docker buildx build --platform linux/amd64 --load -t ekb/ekb-api:latest -f apps/api/Dockerfile apps/api`（layer cache 命中通常 <10s）。
+3. `docker save ekb/ekb-api:latest | gzip -6 > /tmp/ekb-deploy/ekb-api-amd64.tar.gz`。
+4. `rsync -e 'ssh -p 37307'` 上传前端 dist + 镜像 tar.gz 到服务器。
+5. 服务器：`nginx` 前端目录原子切 `current` symlink → 加载/切换容器 → 从受管环境确保验收账号可用；不在命令或记忆中硬编码口令。
+6. 健康检查：`GET /healthz` 直连 + 经 nginx；使用受管凭据登录并访问 `/me`；`GET /` 必须是 SPA HTML。
+7. 失败回滚：前端回滚 symlink 到上一个 release 目录；`docker tag` 回滚上一个 `ekb-api:previous` → `docker run` 旧镜像。
+
+### 未决/后续
+
+- 当前生产库仍是 SQLite `/opt/ekb/data/ekb.sqlite3`；按 MEMORY 中 P0 计划，下一阶段迁移到 PostgreSQL + pgvector，届时需要将容器 `DATABASE_URL` 切到内网 PG，`/data` 仅保留 Fernet master key、tmp、runs。
+- 域名 DNS：用户需将 `gjxhj.eu.cc` 的 A 记录解析到 `103.236.93.60`（若走 Cloudflare 则开 DNS only 或 Full SSL，避免 Flexible 模式把 443 变 80 绕回）。目前未真实公网 DNS 验证，用 `--resolve` + SSH 转发模拟证明链路 OK。
+- 未接入真实对象存储，附件/头像仍在 SQLite BLOB 或本地 `/data`；后续 MinIO/S3 接入后 nginx 需新增 `/files/` presigned 路由或直接反代 S3 兼容网关。
+- 镜像构建层仍能优化：目前全层 COPY 每次 174MB rsync；可拆成依赖层 + 代码层，进一步把 `docker save | gzip` 产物从 174MB 压到 ~40MB，rsync 时间从 80s → 10s 级。
+
+
+## 2026-08-11 Phase 5 Dashboard & 能力缺口全量修复里程碑（本次交付）
+
+> **用户问题触发**：用户发现工作台和多个页面存在大量「能力不可用」占位，询问是否未按文档完成所有开发。经审计，全局不可用文案分为三类（A=后端已有能力但前端未接线；B=后端未实现；C=v4 路线图规划中未开始），本里程碑按优先级顺序修复 A 类（真有功能但前端死占位）+ C 类文案透明化（明确「v4 P? · 模块：××× 规划中」与 disabled title），B 类因 spec 未定义不伪造。
+
+### 三类缺口审计与决策（ADR-004 思路）
+
+- **A 类 · 后端已实现 + 前端未接线 = 必修优先类**：工作台 Dashboard 所有 metric 卡片 + 趋势图 + 分布图 + 最近动态。证据：`ekb_api/routers/analytics.py` 已完整暴露 `GET /analytics/overview`、`/trend`、`/distribution`、`/activity` 4 个端点，`adapter/analytics.ts` 已封装调用，但旧版 [DashboardPage.tsx](file:///Users/alin/EKB/apps/web/src/app-v2/pages/DashboardPage.tsx) 全页硬编码字符串「能力不可用」+ 灰色占位数字。根因：Dashboard 为 Phase 5 延后项，v3 初版先完成布局骨架；与 v3.1 合同实际后端先行不符 → 本轮补上前端接线。
+- **B 类 · 后端未实现（v3 spec 未定义）= 不伪造，保留明确提示**：回收站自动清理定时器、头像上传到对象存储、邮件邀请 SMTP。这些依赖外部基础设施（S3/MinIO、Redis 定时任务、邮件网关），v3.1 02_spec 未定义 → 保留 disabled 按钮 + tooltip「需要××× 基础设施」，不在本轮伪造实现。
+- **C 类 · v4 路线图规划中 = 文案透明化，不用含糊的 unavailable**：角色 CRUD（v4 P1）、分享端点（v4 P2）、文件夹/共享文档/分类占比（v4 P2）、权限矩阵编辑（v4 P3）。查阅 [EKB后续全栈开发路线图_v4.0_2026-08-11.md](file:///Users/alin/EKB/docs/EKB后续全栈开发路线图_v4.0_2026-08-11.md)，这些能力在路线图 P1/P2/P3 有明确里程碑 → 本里程碑统一把 UI 上的「不可用」灰色占位、`unavailable` 字符串、empty 小标签替换为：彩色 phase 胶囊（蓝=P1、黄=P2、绿=P3，如 `<span style="badge">v4 P1 · 身份能力</span>`）+ 具体开放说明（disabled title + 不可用卡片内描述）。用户点开 tooltip 立即知道「这是规划中的 v4 功能，不会等太久」，而不是「EKB 还没做完」的失败印象。
+
+### A 类关键交付：Dashboard 从死占位 → 实时数据驱动（3 个新图表组件 + DashboardPage 重写）
+
+- **3 个 SVG 自绘图表组件（新增文件）**：
+  1. [DashboardTrendChart.tsx](file:///Users/alin/EKB/apps/web/src/app-v2/components/dashboard/DashboardTrendChart.tsx)：访问趋势折线图（访问量蓝色实线 + 独立访客虚线），niceMax Y 轴、峰值圆点、SVG `<title>` tooltip、日期 x 轴、线性渐变填充。props 传 `points[{date,accesses,visitors}] + peak + total`，纯 SVG 无 canvas。
+  2. [DashboardDistributionBar.tsx](file:///Users/alin/EKB/apps/web/src/app-v2/components/dashboard/DashboardDistributionBar.tsx)：知识库访问分布横向条形图，按 accesses 排序，max 5 条，右侧数字 + 百分比，颜色按 rank 渐变（蓝→浅蓝）。
+  3. [DashboardActivityFeed.tsx](file:///Users/alin/EKB/apps/web/src/app-v2/components/dashboard/DashboardActivityFeed.tsx)：最近访问动态列表，pill 色标（DOCUMENT=蓝、KB=绿、CONVERSATION=橙）+ 图标 + 操作人 + 相对时间 + 资源名称 truncate，maxItems 默认 6。
+- **DashboardPage 重写（全闭环 5 卡+3 图+日期筛选）**：
+  - 顶部 5 张 MetricCard：`访问概览 / 总文档 / 活跃会话 / AI 问答 / 成员`，从 `analytics.getOverview()` 取真实 `totalAccesses/totalDocuments/activeConversations/totalAnswers/totalMembers`；每张卡片含环比数字 + 趋势徽章 + 14 天 sparkline。
+  - 日期筛选：趋势图默认 14 天（Tab 7/14/30）、分布图默认 7 天（7/30）、最近动态 Tab（最近访问/文档/知识库/AI 问答）。用户点 Tab 重新 fetch 对应 days 参数。
+  - 三个图表区：左上 TrendChart、左下 DistributionBar、右侧 ActivityFeed，按 v3.1 dashboard.css 网格布局。
+  - 底部 RecentAccessSection：Tab 切换 4 类过滤器（文档/知识库/AI 问答），真实从 `analytics.getActivity(20)` 拉数据，表格展示名称/类型/操作人/最近访问。
+- **Adapter 契约对齐**：`createAnalyticsAdapter` 的 `getOverview/getTrend/getDistribution/getActivity` 返回值形状精确匹配 Dashboard 组件 props（PageState 包装 + error state fallback 到 StatePanel）。
+
+### C 类文案透明化（5 个页面修复，共 8 处关键变更）
+
+| 页面 | 变更点 | 旧 UI 文案 / 状态 | 新 UI 文案 / 状态 |
+|---|---|---|---|
+| AppsPage | detailState 初始值 | `'unavailable'`（导致 Vitest 断言死） | `'empty'`（空抽屉 → 用户未点应用时显示「选择左侧应用」） |
+| AppsPage | 应用列表「未安装」占位 | unavailable 文本标签 | 灰底 + 明确的「未安装 → 点卡片开始配置」提示 |
+| KnowledgePage | 未选知识库时 documentsState/membersState | `'unavailable'`（导致 StatePanel 渲染红灰错误块） | `'empty'`（不渲染错误态，用户选 KB 后再加载） |
+| KnowledgePage | 侧栏 3 个标签（文件夹/共享文档/分类占比） | `<small>当前后端未提供</small>` + unavailable | `<small>v4 P2 · 内容治理</small>` + 分类占比标注 `<small>v4 P2 · 治理指标</small>` |
+| AssistantPage | 分享按钮 tooltip + disabled | 「分享未实现」 | `v4 P2 内容治理：分享端点（signed share link + ACL 快照）规划中，当前不伪造分享成功` |
+| AssistantPage | 其他 2 个 disabled 按钮 | 简短「不可用」 | 每个按钮 title 标注对应 v4 阶段：引用导出、模型切换、高级指令、对话删除批量、提示词编辑器、对话导出 MD/PDF |
+| TeamPage | 角色管理面板标题 + unavailable-card | `<strong>角色写入暂不可用</strong>` + `unavailable` + disabled 空 title | 2 个阶段胶囊 `v4 P1 · 身份能力` + `已授权只读` + 文案改为「角色 CRUD 暂不开放」+ `v4 P1 开放：角色类型定义、角色编辑、内置角色继承、成员能力映射` |
+| TeamPage | 权限矩阵面板标题 + unavailable-card | `<strong>权限写入暂不可用</strong>` + `unavailable` | `v4 P3 · 企业身份` + `已授权只读` + 文案改为「capability 矩阵编辑、SCIM 同步、批量邀请/禁用/导出审计预计在 v4 P3 开放」 |
+
+### 交付证据实跑
+
+- **前端边界测试**：Vitest 5 文件 49/49 passed（identity 6 + profile 12 + trash 9 + analytics 11 + apps 11）；Vitest AppsPage tests 11/11 通过（detailState 现在 initial=empty 不渲染 `state="unavailable"`；marketplace 作为唯一 unavailable capability 的声明未改变，因此 `declares marketplace as the only unavailable capability` 仍通过）。
+- **前端构建**：`tsc -b` 0 errors；`vite build` ✓ 4647 modules transformed in 1.47s；产出：`dist/index.html 0.79KB`、`index-*.css 101.92KB (16.32KB gzip)`、`index-*.js 663.38KB (175.90KB gzip)`。警告 `chunks larger than 500KB` 为可选优化（v4 代码拆分），不影响交付。
+- **修复的真实类型错误**：RecentAccessSection.tsx 有 2 个 TS 错误（`JSX.Element` 命名空间 → 改为 `ReactNode` import；`readonly AnalyticsActivityItemView[]` 无法赋给 mutable array → 标注 `: readonly AnalyticsActivityItemView[]`），修复后 tsc 通过。
+- **后端健康**：`GET http://127.0.0.1:8023/healthz` 返回 `{"status":"ok","pgvector":{"required":false}}`，迁移、API server、app services 正常。
+- **Dashboard 4 个真实端点 shape 验证**（adapter boundary 实跑证据）：analytics router 返回的 JSON 与前端 adapter 声明完全对齐 — `overview` 含 5 个 int+rate 字段、`trend` 含 points[]+peak+total+days、`distribution` 含 items[]+totalAccesses、`activity` 含 items[]+limit+next。
+
+### 本轮 v4 路线图对齐（为下一轮铺垫）
+
+- 用户触发下一轮时，先读 `docs/EKB后续全栈开发路线图_v4.0_2026-08-11.md` 的 P1/P2/P3 实现顺序，不要凭记忆开发。
+- v4 P1 身份能力建议起点：`roles.service` → router → adapter → TeamPage 抽屉，复用 v3 现有 `v3_identity` 迁移模式（新增补偿迁移 + 纯 additive router 端点）。
+- v4 P2 内容治理：文件夹树 / 共享 ACL / signed share link 必须复用现有 Fernet key derivation（已在 Apps 凭据实现 `ekb-apps-kms-v1`，可延伸为 `ekb-share-kms-v1`），避免再造加密轮子。
+
+
+## 2026-08-11 Phase 5.1 Rail「最近访问/收藏夹/回收站」三点立即修复里程碑（本次交付）
+
+> **用户问题触发**：用户明确反馈「知识库中的最近访问、收藏夹、回收站还是显示不可用」——要求先把这三个点立即改了，再按 v4 路线图继续推进。此前 Phase 5 C 类透明化只覆盖了页面级，但遗漏了 KnowledgeSpaceRail（知识库侧栏）的三个显眼入口。用户一眼就看到「（不可用）」，触发"没开发完"印象。
+
+### 审计结论（三点逐点分类）
+
+| 侧栏入口 | 后端真实能力 | 前端状态 | ADR-004 分类 | 策略 |
+|---|---|---|---|---|
+| **回收站** | ✅ FULLY 可用：`trash_items` 表（v3_002_content）+ `v3_trash.py` + `routers/trash.py` + smoke_v3_trash 36/0；前端 trash adapter 声明 6 个方法全部 `available`，独立页面 [RecyclePage](file:///Users/alin/EKB/apps/web/src/app-v2/pages/RecyclePage.tsx)（hash 路由 `#/recycle`）真实接线列表、过滤、搜索、还原、永久删除、清空 | `<button disabled>回收站（不可用）` | **A 类 · 后端已实现前端未接线**（纯前端跳转，零后端） | `<a href="#/recycle">回收站</a>`，删除括号 |
+| **最近访问** | ✅ FULLY 可用：`resource_access_events` 表（v3_003_analytics）+ `GET /analytics/activity` 端点 + `analytics.getActivity(limit)` adapter 已在 Dashboard RecentAccessSection 组件同端点渲染成功 | `<button disabled>最近访问（不可用）` | **A 类 · 后端已实现前端未接线**（复用同端点） | `<a href="#/dashboard">最近访问</a>`，title 提示「跳转到工作台最近访问区」。不做 Rail 内折叠列表（避免 100+ 行逻辑在两处复制） |
+| **收藏夹** | ❌ 后端 0 代码（grep favorite/favourites 全库无 match）。v4 路线图 §6.1 明确 favorites 属于 P2 内容治理工作包，必须与 folders/tags/shares 同步（补偿迁移 + service + router + adapter + star 切换） | `<button disabled>收藏夹（不可用）` | **C 类 · v4 路线图规划中（P2 内容治理）** → 透明化 | 保留 disabled，title 改为「v4 P2 内容治理：收藏端点（跨资源 favorites 投影表 + 星标切换 API）规划中，当前不伪造本地收藏」；删除括号，加黄底 phase 徽章 `<small>v4 P2</small>`（颜色 #FEF3C7 / #92400E，与 Phase 5 约定一致） |
+
+### 全局 C 类透明化延伸（避免"收藏"按钮在多处显示不同阶段）
+
+Phase 5 只把 AssistantPage 头部按钮改了 tooltip，但没加 phase 胶囊；AssistantSidebar 的"收藏/项目" tab 还是含糊"API 未提供"且 unavailable-card 无具体阶段说明。本轮统一透明化，确保用户在任何页面看到的"收藏"按钮，不管是 star/heart，都显示相同的阶段与理由：
+
+1. **[AssistantPage.tsx](file:///Users/alin/EKB/apps/web/src/app-v2/pages/AssistantPage.tsx#L518-L532) chat-actions 3 个按钮（分享/收藏/导出）**：所有 disabled 按钮都加上 `v4 P2` phase 小胶囊（黄底黑字），tooltip 与 Rail 收藏夹一致（引用 Phase 5 已更新的 title，本轮新增 phase 徽章显示）。
+2. **[AssistantSidebar.tsx](file:///Users/alin/EKB/apps/web/src/app-v2/components/assistant/AssistantSidebar.tsx#L69-L93) tabs（收藏/项目）**：
+   - 收藏 tab title：`"v4 P2 内容治理：收藏端点（跨资源 favorites 投影表 + 星标切换 API）规划中，当前不伪造本地收藏。"` + `<small>v4 P2</small>` 徽章。
+   - 项目 tab title：`"v4 P2 内容治理：文件夹/项目桶端点（会话分组 + 拖拽）规划中，当前不伪造本地项目容器。"` + `<small>v4 P2</small>` 徽章。
+   - 当 activeTab 为收藏/项目时，原 `StatePanel state="unavailable" message="收藏视图已禁用。" reason="当前 API 未提供对应端点"` → **替换为**：`message="收藏视图：规划中（v4 P2 内容治理）"` + `reason="跨资源 favorites 投影表 + 星标切换 API（toggle/list/check）完成后，此处切换为真实收藏列表；当前不伪造本地收藏容器。"`（项目同理）。
+
+### 交付证据实跑
+
+- **前端构建**：`tsc -b` 0 errors；`vite build` ✓ 4647 modules transformed in 1.52s；产出：`dist/index.html 0.79KB`、`index-*.css 101.92KB (16.32KB gzip)`、`index-*.js 665.12KB (176.32KB gzip)`。
+- **前端边界测试**：Vitest 5 文件 49/49 passed（identity 6 + profile 12 + trash 9 + analytics 11 + apps 11）。本轮只新增/修改 3 个 React 组件（KnowledgeSpaceRail、AssistantPage、AssistantSidebar），不碰任何 page 级 unavailable state 断言；apps tests 11/11 全过（仍声明 marketplace 为唯一 unavailable，与 Phase 5 一致，无回归）。
+- **Rail 手动验收（本机）**：
+  - 点"最近访问" → `#/dashboard`，Dashboard 的 RecentAccessSection 显示资源类型 pill + 操作人 + 最近访问（同一 adapter 端点），跳转目标有效。
+  - 点"回收站" → `#/recycle`，RecyclePage 渲染已接线的 trash adapter：type filter + keyword search + restore/purge 按钮（都不是 disabled），跳转目标真实可用。
+  - "收藏夹"按钮 disabled，但 tooltip 包含具体路线图阶段，徽章显眼"v4 P2"，不再含糊"不可用"。
+  - AssistantPage 头部分享/收藏/导出：鼠标悬停显示黄色 P2 胶囊 + 详细 tooltip，不再是 disabled 灰按钮无说明。
+  - AssistantSidebar "收藏/项目" tab：选中时 StatePanel 明确"规划中（v4 P2 内容治理）"+ 具体功能点，不再是"已禁用"空理由。
+
+### 与 v4 路线图的实施顺序决策
+
+**原文档顺序**：P0（已完）→ P1（PG/S3/Redis 基础设施）→ P2（内容治理 + Assistant + 十页走查）→ P3 → P4。
+
+**本轮决策调整**（写入计划文档 `.trae/documents/Rail三不可用修复+路线图后续开发_plan.md`）：先做 **P2 内容治理（favorites/folders/tags/shares）**，再做 **P1 基础设施切换**。理由：
+1. 用户立即痛点就是收藏夹 Rail 按钮"假不可用"，先做 P2 favorites 可让按钮立即真实化，无需等待 PG/S3/Redis。
+2. P2 内容治理只依赖关系表 + REST API，当前 SQLite 生产库完全可承载。
+3. P1 是"基础设施切换"级工作，适合在核心功能对齐后再做，避免双轨并行的复杂性。
+4. 本计划文档（`.trae/documents/`）已明确工作包 A1~A5（P2 内容治理）→ B1~B4（P1 基础设施）→ C（P2 剩余）→ D（P3）的顺序，严格落实"每轮部署验收"。
+
+---
+
+## 2026-08-11 Phase 6 · Batch 2 · P2 favorites 全栈闭环里程碑（本次交付）
+
+> **触发条件**：用户明确下达「好的，立即开始 Batch 2 · P2 favorites 全栈开发」指令。此前 Phase 5.1 只把收藏夹按钮做了"透明化（v4 P2 标签+说明）"，本轮要求**后端全栈实现 + 前端真实接线 + 部署验收**。
+>
+> **验收标准**：
+> 1. 后端迁移表 `favorites`（复合唯一键 tenant+subject+type+id）被创建并被 db.py 迁移链引用；
+> 2. `/api/v1/favorites`（list/counts）、`/check`、`/toggle` 3 个端点返回真实投影；
+> 3. 知识空间侧边栏（KnowledgeSpaceRail）收藏夹展开区真实渲染星标列表（KB/DOCUMENT/CONVERSATION 三类，带 type color bar）；
+> 4. AssistantPage 头部 ☆ 收藏按钮真实 toggle（乐观 UI + 失败回滚 + operation notice 提示）；
+> 5. AssistantSidebar 「收藏」tab 不再显示 unavailable，真实渲染 CONVERSATION 类型星标会话列表；
+> 6. 部署后使用受管验收账号登录，`/api/v1/favorites` 返回 HTTP 200 且首项标题非空；
+> 7. 修复 list_favorites SQL 错误（no such column: conversations.kb_id），确保 SQLite/PostgreSQL 双兼容；
+> 8. 额外修复：Python 3.9 `Path.parents[:8]` 切片不兼容（config.py），保证服务器旧 Python 环境可启动。
+
+### 交付清单（后端 → 前端 → 部署 → 验收，按实施顺序记录）
+
+#### A · 后端迁移 + 服务 + 路由（Phase 6 新增）
+
+| 文件 | 角色 | 核心变化 |
+|------|------|----------|
+| [v3_007_content_governance_compat.py](file:///Users/alin/EKB/apps/api/ekb_api/migrations/v3_007_content_governance_compat.py) | 补偿迁移 v3_007 | 新建 `favorites` 表（id / tenant_id / subject_id / resource_type ∈{KB,DOCUMENT,CONVERSATION} / resource_id / favorited_at）；`UNIQUE(tenant,subject,type,rid)` 复合约束；2 条索引（按时间/按类型）；`CHECK(resource_type IN (...))` 保证 enum 合法；遵循 ADR-002 append-only 策略，不修改任何历史迁移。 |
+| [v3_fullstack.py](file:///Users/alin/EKB/apps/api/ekb_api/migrations/v3_fullstack.py) | 迁移链编排 | 注册 v3_007 为 `MigrationStep(VERSION, apply_v3_007, verify_v3_007, rollback_v3_007_dry_run)`，保证 CHAIN 是幂等的 ordered。 |
+| [db.py](file:///Users/alin/EKB/apps/api/ekb_api/core/db.py#L175-L188) | init_db 迁移执行 | **修复关键遗漏**：`prepare_legacy_schema → apply_v3_001~v3_007` 的顺序执行链。此前 `init_db()` 只执行到 v3_002，导致 favorites 表从未创建（Rail 按钮不可用的根因之一）。补齐 v3_003 / v3_004 / v3_005 / v3_006 / v3_007 7 步显式导入 + 顺序调用。 |
+| [config.py](file:///Users/alin/EKB/apps/api/ekb_api/core/config.py#L24-L35) | dotenv 加载兼容 | **修复 Python 3.9 兼容性**：`Path.parents[:8]` 的 slice 语法只在 Python 3.10+ 支持。改为 `itertools.islice(here.parents, 8)` 兼容 3.9/3.10/3.11，避免容器启动 `TypeError: '<' not supported between instances of 'slice' and 'int'`。 |
+| [v3_content_governance.py](file:///Users/alin/EKB/apps/api/ekb_api/services/v3_content_governance.py) | favorites 服务层（核心） | 实现 3 个公共原语：`toggle_favorite(tenant, subject, type, rid)`（先 probe → INSERT / DELETE，UNIQUE 冲突时 re-read 幂等收敛）、`list_favorites(tenant, subject, type?, limit, offset)`（分页 + counts 聚合）、`check_favorite(tenant, subject, type, rid)`（composite key probe）。关键是 **`_resolve_titles_bulk` 单查询跨资源 JOIN**，避免 N+1：KB/DOCUMENT/CONVERSATION 各一条 SQL，结果组装为 `{type:id → {title, parent_id, parent_title}}` 字典。list_favorites 调用后只保留 title_map 命中的条目（硬删除/越权的投影行保留但从列表剔除）。 |
+| [v3_content_governance.py L156-L173](file:///Users/alin/EKB/apps/api/ekb_api/services/v3_content_governance.py#L156-L173) | **Bugfix：删除对 conversations.kb_id 的引用** | 首次部署触发 `OperationalError: no such column: conversations.kb_id`——根因是 models.py 的 Conversation 模型只有 id/tenant_id/user_id/title，**没有 kb_id 外键**。把 conversations 子查询从 `kb_id AS parent_id, (SELECT name FROM knowledge_bases WHERE id=conversations.kb_id)` 改为 `NULL AS parent_id, NULL AS parent_title`，保证 CONVERSATION 资源在前端显示为"无父级归属"，同时 SQL 可在实际 schema 下运行。 |
+| [content_governance.py](file:///Users/alin/EKB/apps/api/ekb_api/routers/content_governance.py) | REST 路由层 | 3 个纯 additive 端点（前缀 `/api/v1/favorites`）：`GET ""`（list + counts + resource_types 枚举）、`GET /check`（probe）、`POST /toggle`（body {resource_type, resource_id}）。全部通过 `get_live_auth_context` 做租户/用户隔离，禁止跨租户 favorite。无破坏性改动。 |
+
+#### B · 前端类型 + API client + Adapter（Phase 6 新增）
+
+| 文件 | 核心变化 |
+|------|----------|
+| [types/favorites.ts](file:///Users/alin/EKB/apps/web/src/app-v2/types/favorites.ts) | 新增 favorites 领域类型：`FavoritesResourceKind = 'KB' \| 'DOCUMENT' \| 'CONVERSATION'`、`FavoriteItemView`、`FavoritesListResult`（state: loading/ready/empty/error/permission-denied）、`FavoriteToggleResult`（带 favorited 新状态）。 |
+| [lib/api.ts](file:///Users/alin/EKB/apps/web/src/lib/api.ts) | API client 新增 3 个方法：`listFavorites(query)`、`checkFavorite(resourceType, resourceId)`、`toggleFavorite(resourceType, resourceId)`。 |
+| [adapters/favorites.ts](file:///Users/alin/EKB/apps/web/src/app-v2/adapters/favorites.ts) | 实现 `FavoritesServices` 接口：list/check/toggle 三方法全链路 try/catch → adapter failure。toggle 调用成功后返回服务端的**新状态**（不是客户端本地假设），确保和 DB 一致。 |
+| [adapters/index.ts](file:///Users/alin/EKB/apps/web/src/app-v2/adapters/index.ts) | createServices 新增 `services.favorites = createFavoritesAdapter(client)`。 |
+
+#### C · 前端 UI 接线（KnowledgeSpaceRail / AssistantPage / AssistantSidebar）
+
+| 文件 | 变化要点 |
+|------|----------|
+| [KnowledgeSpaceRail.tsx](file:///Users/alin/EKB/apps/web/src/app-v2/components/knowledge/KnowledgeSpaceRail.tsx) | **Rail 收藏夹展开区真实化**：从 disabled 按钮改为可展开 `<button aria-expanded>`。点击展开区触发 `loadFavorites()`，根据 state 渲染 loading/error/empty/unavailable（权限过滤后空）/列表 5 态。每条收藏项左侧 type color bar（PDF→红/DOCX→蓝/XLSX→绿/PPTX→橙，这里会话用有机色），右侧 title + kind + favorited_at；badge 显示总数。点击 item 触发 `onOpenFavorite(type, id, parentId)` 跳转。 |
+| [KnowledgePage.tsx](file:///Users/alin/EKB/apps/web/src/app-v2/pages/KnowledgePage.tsx) | 加载 favorites 数据并传给 Rail：`services.favorites.list()`（不分资源类型），统计 counts.KB / DOCUMENT / CONVERSATION 给 Rail 胶囊显示。onOpenFavorite 按资源类型跳页面：KB → #/knowledge?kb=xxx，DOCUMENT → #/documents?id=xxx&kb=yyy，CONVERSATION → #/assistant?conv=xxx。 |
+| [AssistantPage.tsx](file:///Users/alin/EKB/apps/web/src/app-v2/pages/AssistantPage.tsx) | 头部 ☆ 按钮从 disabled + P2 胶囊 → **真实 toggle 交互**：① `loadFavorites(CONVERSATION)` 初次进入侧栏加载；② 切换会话时 `checkFavorite(CONVERSATION, convId)` 预填 star 状态；③ `handleToggleCurrentFavorite()`：乐观 UI（prev === null ? true : !prev）→ POST toggle → 成功：`setOperationNotice('已收藏会话 XXX，星标仅你自己可见')` → 重新 loadFavorites；失败：回滚乐观状态 + 失败提示。isStreaming / currentConvFavoriting 时按钮置 disabled（防重复提交）。 |
+| [AssistantSidebar.tsx](file:///Users/alin/EKB/apps/web/src/app-v2/components/assistant/AssistantSidebar.tsx) | 「收藏」tab 从 StatePanel unavailable → **真实 CONVERSATION 收藏列表**。activeTab='favorites' 时调用 services.favorites.list({resourceType:'CONVERSATION'})，按 StatePanel 约定显示 loading/error/empty/列表。会话 item 左侧显示 fill Heart 图标（#059669 绿），title 右侧显示 favorited_at（短日期格式）。选中时 `is-selected` 高亮与最近会话一致。「项目」tab 保留 v4 P2 胶囊 + 详细 tooltip。 |
+
+### 质量验证与回归证据
+
+```
+======== 后端 compileall + smoke ========
+✓ compileall ekb_api 通过（3 新文件/3 修改文件无 SyntaxError）
+✓ Python 3.9 smoke test（本地）：
+    Toggle ADD (CONVERSATION): favorited=True, at=2026-08-11T06:43:08Z
+    Check: favorited=True
+    List:  total=1, items=1, counts={KB:0, DOCUMENT:0, CONVERSATION:1}
+           first:  type=CONVERSATION, title=数据库连接池耗尽时应该先检查哪些指标？, parent_title=None
+    Toggle REMOVE: favorited=False
+    Final list: total=0
+    → All assertions PASSED（toggle/check/list 无回归）
+
+======== 前端 tsc + Vite build ========
+✓ tsc -b 0 errors
+✓ vite build ✓ 4649 modules transformed in 1.56s
+    dist/index.html                   0.79 kB
+    dist/assets/index-fUZvQU-I.css  101.92 kB │ gzip:  16.32 kB
+    dist/assets/index-CfC2uNlI.js   672.58 kB │ gzip: 178.57 kB
+
+======== 服务器端 API 验收（通过转发 curl） ========
+✓ /healthz：{"status":"ok","pgvector":{"required":false,"available":null,"status":"not_applicable"}}
+✓ `/api/v1/auth/login`（受管验收账号）：曾签发有效 access token，scope 包含 kb:read、kb:write、qa:ask 等
+✓ /api/v1/favorites（HTTPS 转发）：返回 items[0].title=你好,counts.CONVERSATION=1 → 证明 favorites 表、
+    v3_007 迁移、router、service、title_resolver 全链路贯通，无 kb_id 报错
+✓ 验收账号幂等初始化曾完成；具体账号和口令不在项目记忆中保存
+
+======== 浏览器 UI 验收 ========
+✓ 登录页正常加载（http://localhost:30080/，通过 SSH 端口转发访问服务器 nginx）：
+    标题 "EKB 企业知识库"，邮箱/密码输入框，"登录工作台" 主面板，产品介绍 Hero
+✓ Dashboard 登录后正常渲染：
+    左侧 Rail（工作台/知识库/AI助手/文档中心/团队与权限/数据看板/应用中心/回收站/个人中心）
+    工作台真实指标卡片（知识库文档/知识标签/团队成员/访问量/AI问答）
+    resource_access_events 真实趋势图、使用分布条形图、最近动态 feed
+✓ 浏览器网络请求已捕获 favorites 完整调用链：
+    GET  /api/v1/favorites?limit=50&offset=0
+    GET  /api/v1/favorites?resource_type=CONVERSATION
+    GET  /api/v1/favorites/check?resource_type=CONVERSATION&resource_id=xxx
+    POST /api/v1/favorites/toggle → 200
+    GET  /api/v1/favorites?resource_type=CONVERSATION （toggle 后 reload）
+    → 证明 AssistantPage 的 Star toggle 已真实触发后端写入
+```
+
+### 部署架构与本轮运维细节（写入项目记忆，后续复用时参考）
+
+**架构结论**：本轮 **不使用 deploy.sh 的 venv+systemd 分支**（`/opt/ekb/api/venv` 在服务器上不存在，deploy.sh Step 4 会失败）。实际运行架构是：
+
+```
+用户浏览器 → gjxhj.eu.cc (Nginx 80/443，SSL 证书 /etc/nginx/ssl/gjxhj.eu.cc/*)
+            ├── /opt/ekb/web/current/*.html + assets/  (SPA 静态，rsync 直推 + ln -sfn 原子切换)
+            └── /api/* → 127.0.0.1:8000  (Docker 容器 ekb-api，仅绑定 loopback，避免外部直连)
+Docker 容器配置（服务器 docker inspect）：
+    image:  ekb/ekb-api:latest （174 MB，Python 3.11-slim）
+    ports:  127.0.0.1:8000->8000/tcp
+    volumes:/opt/ekb/data:/data（SQLite / 备份）
+    restart: unless-stopped，memory_limit 1g，cpu_quota 1.0（按项目记忆约束）
+    env:    EKB_ALLOWED_HOSTS=* （ECHO 兼容性），EKB_DEV_USER_*=admin，EKB_DATABASE_URL=sqlite:////data/ekb.sqlite3
+Nginx 配置：
+    /etc/nginx/conf.d/ekb.conf  —— 80/443 default_server，server_name gjxhj.eu.cc _
+      include /etc/nginx/ekb-api-locations.inc  (API 前缀路由)
+      include /etc/nginx/ekb-spa-locations.inc  (SPA try_files)
+    /etc/nginx/conf.d/ekb_high_ports.conf —— 30080/8080 额外虚拟主机（用于端口转发无 Host 头调试）
+**注意前端路径层级**：Nginx 的 `root $web_root`（即 `/opt/ekb/web/current`）期望下面直接有 index.html，
+不能是 `current/dist/index.html`（否则 403）。rsync 上传时如果用 release dir 包了 dist/ 子目录，
+必须在切换软链后额外 `cp -a $RELEASE_DIR/dist/. $RELEASE_DIR/` 扁平化。
+```
+
+**本轮部署快速流程（无需 Docker buildx，因为 build 拉取 docker.io 元数据会 TLS 超时）**：
+1. 本地打 `tar czf ekb-api-code.tar.gz ekb_api/ ensure_admin.py` → `scp` 到 `/tmp/ekb-api-update.tar.gz`
+2. 远程 `tar xzf` 后 `docker cp /tmp/ekb-api-newcode/ekb_api/. ekb-api:/app/ekb_api/`
+3. `docker restart ekb-api` → wait healthz
+4. 前端 dist `rsync -a web/dist/` → `root@remote:/opt/ekb/web/releases/$TAG/dist/`
+5. `ln -sfn $RELEASE /opt/ekb/web/current` → **重要**：`cp -a dist/. .` 扁平化（否则 403）
+6. `nginx -s reload`
+7. 从受管环境幂等初始化验收账号；禁止在脚本参数、日志或项目记忆中硬编码口令
+8. 用 curl + SSH 端口转发（`ssh -fNL 30080:127.0.0.1:80`）验收（因为公网 DNS/SSL 可能未就绪，但 30080 转发总能验证）。
+```
+
+## 2026-08-12 EKB Core Rebuild Tier 3 Spec 里程碑
+
+- 已创建唯一的新核心重构文档链：`docs/specs/ekb-core-rebuild/00-current-state.md` 至 `14-implementation-plan.md`，共 15 份、3170 行，状态统一为 Ready for Plan；`docs/README.md` 已加入 authority/supersession 规则，用户已最终确认，Sol 最终复审无 P0/P1。
+- 需求与验证命名空间：`EKB-CR-FR-001`–`060`、`EKB-CR-NFR-001`–`014`、`AC-CR-001`–`060`、`AC-CR-NFR-001`–`014`、`CR-PH0`–`PH8`。本里程碑只完成 Spec，不代表任何业务实现或验收项已通过。
+- 固定架构：保留 React app-v2 + FastAPI 模块化单体控制面；目标 PostgreSQL+pgvector、S3-compatible object storage、可靠 queue/worker/scheduler；附件独立于 KB；Provider/Model 为助手唯一模型数据源；Embedding profile 不可变；Regenerate 使用回答分支；Theme 使用语义 token；内容回收站由 Scheduler 做 30 天自动清理。
+- AI 范围：普通多轮对话 + 可选 0..N KB RAG + 独立文件/图片附件；支持 Strict grounded 与 Knowledge enhanced；本轮明确排除 Internet Web Search、MCP、工具/代码执行、Agent runtime 和音频。
+- 数据治理：已应用 v3 migration/checksum 永不修改；新增 `v4_001`–`v4_008` 仅为规格中的目标 manifest，严格按 PH1(001–004：provenance/runtime/provider security/PostgreSQL 主库原子切换)→PH2(005 retention)→PH3(006 ingestion)→PH4(007 chat)→PH5(008 attachments) append，实际实现必须 additive 并经 apply/verify/rollback rehearsal。当前生产业务仍以 SQLite 为真值；PH1 切换前必须逐表/租户/关系对账，切换后 SQLite 只读且禁止双写。
+- 服务器已只保留 EKB；清理前 EKB 数据和配置已备份并校验。当前生产主机没有稳定 DNS/HTTPS 出网，Cloudflare tunnel、外部 Provider 和 Embedding 的真实生产验收因此是硬阻塞；不得用 mock 代替或在记忆中保存任何服务器/Provider 凭据。
+- 每个实施 Phase 完成后强制：更新 Spec/authority/evidence 与本记忆、提交并推送精确代码、备份和原子部署、健康+真实浏览器验证、记录回滚结果；门禁失败不切换。
+- 下一步：按 `14-implementation-plan.md` 执行 PH0 工作树审计与 baseline branch 快照；每完成一个 Phase 必须同步对应 Spec/authority/evidence 与本记忆。业务代码、测试、运行配置和 migration 写入仍必须由 `luna_max_worker` 串行完成，Sol 负责拆解、架构决策、diff/证据审查和发布判断。
+
+## 2026-08-12 CR-PH0 可审查写入阶段
+
+- 已创建并切换未提交分支 `codex/ekb-core-baseline-20260812`；保留当前脏工作树，不执行 reset、checkout 覆盖、clean、commit、push 或生产写操作。
+- 已在 `.gitignore` 仅补充 `.deploy_staging/`、`.deploy_helpers/`、`.playwright-cli/`、`.trae/`、`.pmos/settings.yaml`、`output/design-qa/`。
+- 已脱敏并收紧 `scripts/deploy/` 风险脚本：生产目标和 SSH 用户改为运行时必填；可选密码只在 SSH helper 内从运行时环境注入，缺失 `sshpass` 不回退交互式输入；缺失/占位目标、默认管理员身份或缺少管理员运行时设置时 fail closed；日志和远程验证不打印凭据、代理、provider 端点或原始响应。
+- PH0 证据索引：`docs/evidence/ekb-core-rebuild/ph0/2026-08-12-baseline/manifest.md`。已完成 bash/Python 语法、目标 fail-closed、secret scan（仅文件/行模式）、Markdown 链接和 FR/NFR/AC/Phase 静态交叉检查；`git diff --check` 通过。
+- 生产 health、schema ledger、备份状态和浏览器只读检查未通过安全可审计的受管连接执行，证据明确记录 `BLOCKED/NOT RUN`；PH1–PH8、生产部署、备份恢复、迁移和验收仍未完成。证据入口为 `docs/evidence/ekb-core-rebuild/ph0/2026-08-12-baseline/manifest.md`，验证记录为 `.../verification.md`。Sol 需先审查 diff、证据和脚本行为，再决定是否提交/推送。
