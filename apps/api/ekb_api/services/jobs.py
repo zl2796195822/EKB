@@ -241,6 +241,39 @@ class JobService:
         available_at: Optional[str] = None,
         now: Optional[str] = None,
     ) -> EnqueueResult:
+        with self.engine.begin() as connection:
+            return self.enqueue_in(
+                connection,
+                tenant_id=tenant_id,
+                job_type=job_type,
+                idempotency_key=idempotency_key,
+                payload=payload,
+                max_attempts=max_attempts,
+                priority=priority,
+                available_at=available_at,
+                now=now,
+            )
+
+    def enqueue_in(
+        self,
+        connection,
+        *,
+        tenant_id: str,
+        job_type: str,
+        idempotency_key: str,
+        payload: dict[str, Any],
+        max_attempts: int = 3,
+        priority: int = 0,
+        available_at: Optional[str] = None,
+        now: Optional[str] = None,
+    ) -> EnqueueResult:
+        """Enqueue on a caller-owned connection so the write joins its transaction.
+
+        Callers that already hold a transaction (for example the PH3 ingestion
+        version writer) must use this variant: opening a second connection from
+        the pool would deadlock SQLite and break atomicity on PostgreSQL.
+        """
+
         if not tenant_id or not job_type or not idempotency_key:
             raise ValueError("tenant_id, job_type and idempotency_key are required")
         if max_attempts < 1:
@@ -263,48 +296,47 @@ class JobService:
             "created_at": current,
             "updated_at": current,
         }
-        with self.engine.begin() as connection:
-            dialect = self.engine.dialect.name
-            if dialect == "postgresql":
-                statement = (
-                    "INSERT INTO background_jobs "
-                    "(id, tenant_id, job_type, idempotency_key, state, priority, max_attempts, "
-                    "payload, available_at, created_at, updated_at) VALUES "
-                    "(:id, :tenant, :job_type, :idempotency, :state, :priority, :max_attempts, "
-                    "CAST(:payload AS JSONB), :available_at, :created_at, :updated_at) "
-                    "ON CONFLICT (tenant_id, job_type, idempotency_key) DO NOTHING"
-                )
-            else:
-                statement = (
-                    "INSERT OR IGNORE INTO background_jobs "
-                    "(id, tenant_id, job_type, idempotency_key, state, priority, max_attempts, "
-                    "payload, available_at, created_at, updated_at) VALUES "
-                    "(:id, :tenant, :job_type, :idempotency, :state, :priority, :max_attempts, "
-                    ":payload, :available_at, :created_at, :updated_at)"
-                )
-            result = connection.execute(text(statement), params)
-            created = result.rowcount == 1
-            row = connection.execute(
-                text(
-                    "SELECT * FROM background_jobs WHERE tenant_id=:tenant AND job_type=:job_type "
-                    "AND idempotency_key=:idempotency"
-                ),
-                {"tenant": tenant_id, "job_type": job_type, "idempotency": idempotency_key},
-            ).first()
-            if row is None:
-                raise RuntimeError("job insert did not produce a durable row")
-            job = _row_to_job(row)
-            if created:
-                self._write_outbox(
-                    connection,
-                    tenant_id=tenant_id,
-                    aggregate_type="job",
-                    aggregate_id=job.id,
-                    event_type="job.created",
-                    payload={"job_id": job.id, "job_type": job.job_type},
-                    now=current,
-                )
-            return EnqueueResult(job, created)
+        dialect = self.engine.dialect.name
+        if dialect == "postgresql":
+            statement = (
+                "INSERT INTO background_jobs "
+                "(id, tenant_id, job_type, idempotency_key, state, priority, max_attempts, "
+                "payload, available_at, created_at, updated_at) VALUES "
+                "(:id, :tenant, :job_type, :idempotency, :state, :priority, :max_attempts, "
+                "CAST(:payload AS JSONB), :available_at, :created_at, :updated_at) "
+                "ON CONFLICT (tenant_id, job_type, idempotency_key) DO NOTHING"
+            )
+        else:
+            statement = (
+                "INSERT OR IGNORE INTO background_jobs "
+                "(id, tenant_id, job_type, idempotency_key, state, priority, max_attempts, "
+                "payload, available_at, created_at, updated_at) VALUES "
+                "(:id, :tenant, :job_type, :idempotency, :state, :priority, :max_attempts, "
+                ":payload, :available_at, :created_at, :updated_at)"
+            )
+        result = connection.execute(text(statement), params)
+        created = result.rowcount == 1
+        row = connection.execute(
+            text(
+                "SELECT * FROM background_jobs WHERE tenant_id=:tenant AND job_type=:job_type "
+                "AND idempotency_key=:idempotency"
+            ),
+            {"tenant": tenant_id, "job_type": job_type, "idempotency": idempotency_key},
+        ).first()
+        if row is None:
+            raise RuntimeError("job insert did not produce a durable row")
+        job = _row_to_job(row)
+        if created:
+            self._write_outbox(
+                connection,
+                tenant_id=tenant_id,
+                aggregate_type="job",
+                aggregate_id=job.id,
+                event_type="job.created",
+                payload={"job_id": job.id, "job_type": job.job_type},
+                now=current,
+            )
+        return EnqueueResult(job, created)
 
     def get(self, *, tenant_id: str, job_id: str) -> JobView:
         with self.engine.connect() as connection:

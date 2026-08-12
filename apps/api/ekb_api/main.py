@@ -27,6 +27,7 @@ from ekb_api.routers import (
     identity_v3,
     jobs,
     kb,
+    kb_upload,
     llm,
     me,
     qa,
@@ -140,6 +141,7 @@ app.include_router(trash.router, prefix="/api/v1")
 app.include_router(analytics.router, prefix="/api/v1")
 app.include_router(apps.router, prefix="/api/v1")
 app.include_router(jobs.router, prefix="/api/v1")
+app.include_router(kb_upload.router, prefix="/api/v1")
 app.include_router(content_governance.router, prefix="/api/v1")
 app.include_router(llm.router, prefix="/api/v1")
 

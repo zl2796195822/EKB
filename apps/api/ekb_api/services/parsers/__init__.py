@@ -1,0 +1,53 @@
+"""PH3 parser package: registry, parsers and stable error codes."""
+
+from __future__ import annotations
+
+from ekb_api.services.parsers.registry import (
+    ACL_REVOKED,
+    BATCH_LIMIT_EXCEEDED,
+    CONVERSION_FAILED,
+    EMBEDDING_DIMENSION_MISMATCH,
+    EMBEDDING_RATE_LIMITED,
+    FILE_EMPTY,
+    FILE_TOO_LARGE,
+    INDEX_ACTIVATION_FAILED,
+    MIME_UNSUPPORTED,
+    OBJECT_CHECKSUM_MISMATCH,
+    OCR_FAILED,
+    PARSER_CORRUPT,
+    PARSER_ENCRYPTED,
+    PATH_INVALID,
+    PATH_TOO_DEEP,
+    ParsedSection,
+    ParserError,
+    ParseResult,
+    ParserRegistry,
+    get_default_registry,
+    is_retryable,
+    sanitize_detail,
+)
+
+__all__ = [
+    "ACL_REVOKED",
+    "BATCH_LIMIT_EXCEEDED",
+    "CONVERSION_FAILED",
+    "EMBEDDING_DIMENSION_MISMATCH",
+    "EMBEDDING_RATE_LIMITED",
+    "FILE_EMPTY",
+    "FILE_TOO_LARGE",
+    "INDEX_ACTIVATION_FAILED",
+    "MIME_UNSUPPORTED",
+    "OBJECT_CHECKSUM_MISMATCH",
+    "OCR_FAILED",
+    "PATH_INVALID",
+    "PATH_TOO_DEEP",
+    "PARSER_CORRUPT",
+    "PARSER_ENCRYPTED",
+    "ParserError",
+    "ParserRegistry",
+    "ParseResult",
+    "ParsedSection",
+    "get_default_registry",
+    "is_retryable",
+    "sanitize_detail",
+]

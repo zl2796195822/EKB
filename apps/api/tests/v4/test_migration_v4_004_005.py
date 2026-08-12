@@ -92,9 +92,13 @@ def test_v4_004_005_apply_verify_and_idempotent(tmp_path: Path) -> None:
             text("SELECT version, checksum FROM migration_provenance ORDER BY manifest_position")
         ).all()
         versions = [row[0] for row in provenance]
-        assert versions[-2:] == ["v4_004_postgres_cutover", "v4_005_retention_governance"]
-        assert provenance[-2][1] == V4_004_CHECKSUM
-        assert provenance[-1][1] == V4_005_CHECKSUM
+        # The chain is append-only, so assert relative order and checksum binding
+        # rather than tail position (later phases append after v4_005).
+        position_004 = versions.index("v4_004_postgres_cutover")
+        position_005 = versions.index("v4_005_retention_governance")
+        assert position_005 == position_004 + 1
+        assert provenance[position_004][1] == V4_004_CHECKSUM
+        assert provenance[position_005][1] == V4_005_CHECKSUM
 
 
 def test_v4_004_005_rollback_is_dry_run_blocked(tmp_path: Path) -> None:

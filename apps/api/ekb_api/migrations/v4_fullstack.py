@@ -25,6 +25,7 @@ from ekb_api.migrations import (
     v4_003_provider_security,
     v4_004_postgres_cutover,
     v4_005_retention_governance,
+    v4_006_storage_ingestion,
 )
 
 
@@ -244,6 +245,13 @@ CHAIN = (
         apply_name="apply_v4_005",
         verify_name="verify_v4_005",
         rollback_name="rollback_v4_005_dry_run",
+    ),
+    _step(
+        v4_006_storage_ingestion.VERSION,
+        v4_006_storage_ingestion,
+        apply_name="apply_v4_006",
+        verify_name="verify_v4_006",
+        rollback_name="rollback_v4_006_dry_run",
     ),
 )
 

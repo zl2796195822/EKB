@@ -1,0 +1,101 @@
+"""PH3 external-boundary contract: every unconfigured provider fails closed.
+
+The acceptance rule for PH3–PH6 is that an absent object store / embedding
+provider must raise a typed ``*Unavailable`` error. It must never return a
+fabricated success, and it must never degrade into a silent no-op that would let
+a document look ingested while carrying no vectors.
+
+Path normalization is tested here too because it is the other place where a
+permissive fallback would be a security bug (directory traversal into another
+tenant's prefix).
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from ekb_api.services.embedding import EmbeddingUnavailable, build_embedding_client
+from ekb_api.services.parsers.registry import (
+    PATH_INVALID,
+    PATH_TOO_DEEP,
+    is_retryable,
+    sanitize_detail,
+)
+from ekb_api.services.storage import (
+    MAX_PATH_DEPTH,
+    ObjectStorageUnavailable,
+    PathValidationError,
+    build_storage_client,
+    normalize_relative_path,
+)
+
+
+def test_object_storage_fails_closed_when_unconfigured() -> None:
+    with pytest.raises(ObjectStorageUnavailable):
+        build_storage_client()
+
+
+def test_embedding_fails_closed_when_unconfigured() -> None:
+    with pytest.raises(EmbeddingUnavailable):
+        build_embedding_client()
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "/etc/passwd",
+        "\\\\server\\share",
+        "../../secrets.txt",
+        "docs/../../escape.txt",
+        "docs/\x00null.txt",
+        "",
+        "CON",
+        "docs/PRN.txt",
+    ],
+)
+def test_path_normalization_rejects_unsafe_inputs(raw: str) -> None:
+    with pytest.raises(PathValidationError) as excinfo:
+        normalize_relative_path(raw)
+    assert excinfo.value.code == PATH_INVALID
+
+
+def test_path_depth_limit_is_enforced() -> None:
+    too_deep = "/".join(["d"] * (MAX_PATH_DEPTH + 1)) + "/f.txt"
+    with pytest.raises(PathValidationError) as excinfo:
+        normalize_relative_path(too_deep)
+    assert excinfo.value.code == PATH_TOO_DEEP
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("docs/a.txt", "docs/a.txt"),
+        ("docs\\a.txt", "docs/a.txt"),
+        ("./docs//a.txt", "docs/a.txt"),
+        ("docs/./sub/a.txt", "docs/sub/a.txt"),
+    ],
+)
+def test_path_normalization_is_stable(raw: str, expected: str) -> None:
+    assert normalize_relative_path(raw) == expected
+
+
+def test_error_taxonomy_marks_only_transient_codes_retryable() -> None:
+    assert is_retryable("EMBEDDING_RATE_LIMITED") is True
+    assert is_retryable("PARSER_ENCRYPTED") is False
+    assert is_retryable("FILE_TOO_LARGE") is False
+    assert is_retryable("UNKNOWN_CODE_FROM_PROVIDER") is False
+
+
+def test_sanitize_detail_drops_unknown_and_sensitive_keys() -> None:
+    cleaned = sanitize_detail(
+        {
+            "retry_after_seconds": 30,
+            "api_key": "sk-should-never-persist",
+            "provider_trace": "stack/trace/with/paths",
+            "stderr": "libreoffice crashed at /tmp/xyz",
+        }
+    )
+    assert "api_key" not in cleaned
+    assert "provider_trace" not in cleaned
+    assert "stderr" not in cleaned
+    assert sanitize_detail(None) == {}
