@@ -19,7 +19,11 @@ from ekb_api.core.audit import (
     redact_metadata,
 )
 from ekb_api.core.auth import get_auth_context, get_store
-from ekb_api.core.config import get_runtime_chat_providers, get_settings
+from ekb_api.core.config import (
+    get_configured_runtime_chat_providers,
+    get_runtime_chat_providers,
+    get_settings,
+)
 from ekb_api.core.db import get_engine
 from ekb_api.core.egress import assert_egress_allowed, resolve_tenant_routing
 from ekb_api.core.errors import ApiError
@@ -256,15 +260,39 @@ async def ask(
     # Phase 2 Step2.2：消费 AskOptions 新增参数
     # 1) model 覆盖：用户在 Composer 显式选择的模型优先级最高
     requested_model = (payload.options.model or "").strip() or None
+    selected_model = None
     if requested_model:
-        # TenantRoute 是 frozen=True dataclass，使用 dataclasses.replace 安全变更 model
+        # Explicit selection is validated against the same actor-scoped DB
+        # capability source exposed below.  This happens before quota,
+        # retrieval, persistence, or any LLM/network call.
+        configured_models = get_configured_runtime_chat_providers(
+            tenant_id=auth.tenant_id,
+            user_id=auth.actor_id,
+        )
+        selected_model = next(
+            (provider for provider in configured_models if provider.name == requested_model),
+            None,
+        )
+        if selected_model is None:
+            raise ApiError(
+                400,
+                "MODEL_UNAVAILABLE",
+                "所选远程模型当前不可用或不在当前主体授权范围",
+            )
+
+        # TenantRoute 是 frozen=True dataclass，使用 dataclasses.replace 安全变更 model。
+        # provider_name is the full provider/model capability id, so llm.py
+        # cannot silently select another provider for an explicit choice.
         from dataclasses import replace as _dc_replace  # noqa: PLC0415
 
         try:
-            route = _dc_replace(route, model=requested_model)
-        except Exception:  # noqa: BLE001
-            # 兜底：直接用局部变量覆盖，保证后续 route.model 读取优先用请求值
-            logger.warning("TenantRoute.replace 失败，回退为不传选模型")
+            route = _dc_replace(
+                route,
+                provider_name=selected_model.name,
+                model=selected_model.model,
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise ApiError(400, "MODEL_UNAVAILABLE", "所选远程模型当前不可用") from exc
     # 附件 ID 是独立的聊天资源，绝不能当成 KB ID 参与 ACL 或检索。
     # 3) deep_thinking 读取供后续 prompt 透传
     #    thinking_level 五档：light 才关（=无推理增强），mild/medium/high/extreme 都开
@@ -323,6 +351,14 @@ async def ask(
                 "ATTACHMENT_NOT_FOUND",
                 "附件不存在、未处理完成或不在当前授权范围",
             ) from exc
+
+    if selected_model is not None and image_attachments and not selected_model.supports_vision:
+        raise ApiError(
+            400,
+            "MODEL_NOT_ALLOWED",
+            "当前选定远程模型不支持图片理解",
+            {"reason": "VISION_MODEL_REQUIRED", "model": requested_model},
+        )
 
     # 预写消息：USER 正常；ASSISTANT 先为空占位（v2 下 turn_id 关联）。
     user_message = store.save_message(
@@ -1291,21 +1327,13 @@ async def get_composer_capabilities(
     route = resolve_tenant_routing(auth, settings, model_routing_key=tenant.model_routing_key)
 
     # 运行时 providers：配置中心动态 + env 静态 fallback
-    runtime_providers = get_runtime_chat_providers(
+    runtime_providers = get_configured_runtime_chat_providers(
         tenant_id=auth.tenant_id, user_id=auth.actor_id
     )
 
     # 构建模型列表：仅使用当前主体已配置的远程 Provider。
     models_out: list[ModelInfo] = []
     seen_ids: set[str] = set()
-    # DeepSeek 允许对外展示的模型白名单（2026-08 官方平台仅这两个公开 V4 模型），
-    # 其它 legacy 模型从下拉里一律过滤掉，
-    # 避免用户选到已下线/旧地址模型。
-    _DS_ALLOWED: set[str] = {"deepseek-v4-flash", "deepseek-v4-pro"}
-    _DS_DISPLAY: dict[str, str] = {
-        "deepseek-v4-flash": "V4 Flash",
-        "deepseek-v4-pro": "V4 Pro",
-    }
     if runtime_providers:
         # 把当前选中的 provider 放最前面，便于前端默认选中
         prioritized = sorted(
@@ -1323,8 +1351,7 @@ async def get_composer_capabilities(
             ),
         )
         for p in prioritized:
-            # p.name 格式是 "<provider_key>/<model_id>"，id 直接复用；
-            # 若 env 静态配置格式是 legacy-llm（单名），也兼容
+            # p.name 格式是 "<provider_key>/<model_id>"，id 直接复用。
             mid = p.name
             if mid in seen_ids:
                 continue
@@ -1332,21 +1359,20 @@ async def get_composer_capabilities(
                 pkey, mname = mid.split("/", 1)
             else:
                 pkey, mname = p.name, p.model
-            # DeepSeek 过滤：仅保留白名单
-            if pkey == "deepseek" and mname not in _DS_ALLOWED:
-                continue
             seen_ids.add(mid)
-            # 展示名称：DeepSeek 使用中文友好名，其它 provider 直接用原始 model id
-            display_name = _DS_DISPLAY.get(mname) if pkey == "deepseek" else None
-            if not display_name:
-                display_name = mname
+            display_name = p.display_name or mname
+            model_capabilities = p.capabilities or {}
             models_out.append(
                 ModelInfo(
                     id=mid,
                     name=display_name,
                     provider=pkey,
                     description=display_name,
-                    supports_deep_thinking=True,
+                    supports_deep_thinking=bool(
+                        model_capabilities.get("reasoning") is True
+                        or model_capabilities.get("deep_thinking") is True
+                    ),
+                    supports_vision=p.supports_vision,
                 )
             )
     caps = ComposerCapabilities(

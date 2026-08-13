@@ -447,3 +447,10 @@ Nginx 配置：
 - DONE-LOCAL：联网 Web Search 已从本地 QA UI/API/runtime/config 移除；旧 `options.web_search` 在检索前返回 `400 FEATURE_REMOVED`，不触发 retrieval 或外部网络调用。
 - QA 继续使用授权 KB RAG、独立附件上下文和远程 LLM Provider/Model；Composer 浏览器状态不显示联网搜索，但添加文件、远程模型和 KB 上下文保持可见。
 - 验证记录：backend `345 passed, 2 skipped`；web `51 passed`、typecheck/build；定向 API `28 passed`、RAG/多轮 `21 passed`、`git diff --check` 通过。生产部署、备份、回滚和生产浏览器仍未完成。
+
+## 2026-08-13 Provider/Model linkage local closure
+
+- DONE-LOCAL：`GET /api/v1/qa/capabilities` 与显式 Ask model 选择共享当前 `tenant+actor` 的活动加密 credential 和启用远程 Provider/Model registry；capability/vision 信息以 DB registry 为唯一来源，不构造默认模型或本地模型。
+- 显式 model 的 unknown、disabled、cross-tenant、no-credential 情形统一 fail closed 为 `MODEL_UNAVAILABLE`；图片选择非 `vision=true` 模型为 `MODEL_NOT_ALLOWED`；显式选择不静默 fallback；普通无 model 请求保留既有 provider fallback。
+- 验证：backend `349 passed, 2 skipped`；web `51 passed`、typecheck/build；定向 `63 passed`；范围 Ruff（忽略既有 E501 等）、compileall、`git diff --check` 通过。真实浏览器此前确认 Profile 模型服务目录、Assistant 添加文件/模型/KB context 可见。
+- 未验证真实 Provider 出网或生产完成；生产 PostgreSQL/pgvector、对象存储、队列/Worker/Scheduler、服务器备份/部署/回滚和生产浏览器仍 `NOT RUN/BLOCKED`。本条不记录任何凭据，且不涉及 Skills/legacy backup/deploy/migrations/theme/Web Search。

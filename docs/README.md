@@ -55,3 +55,10 @@ CR-PH1-T01 + CR-PH1-T03 的第一真实业务切片已在本地工作树实现�
 - DONE-LOCAL：助手附件“提升”入口和真实错误/状态/ID 显示；主题支持 semantic tokens、light/dark/auto、系统主题和 storage 同步、reduced-motion；LLM-only，不使用本地模型/mock。
 - 验证：后端 343 passed, 2 skipped；前端 51 passed、typecheck/build 通过；ruff、compileall、git diff --check 通过；真实浏览器登录后实调 KB 与 promotion API 返回 202，数据库确认 document_version.source_object_id 与 attachment 一致。
 - NOT RUN/BLOCKED：生产 PostgreSQL/pgvector、对象存储、可靠队列/Worker/Scheduler、服务器备份/部署/重启/生产浏览器；运行时 DEPLOY_HOST 和受管凭据未配置，不猜测、不输出、不落盘。生产未完成，不能标记 PH0–PH8 全部完成。
+
+## Provider/Model linkage local closure (2026-08-13)
+
+- DONE-LOCAL：`GET /api/v1/qa/capabilities` 与显式 Ask `options.model` 共享当前 `tenant+actor` 的活动加密 credential、启用远程 Provider/Model registry；capability/vision 信息以 DB registry 为准，不构造默认或本地模型。
+- DONE-LOCAL：显式选择的 unknown/disabled/cross-tenant/no-credential model 返回 `MODEL_UNAVAILABLE`；图片 + 非 `vision=true` model 返回 `MODEL_NOT_ALLOWED`；显式选择不静默 fallback；普通无 model 请求保留 provider fallback。
+- 验证：backend `349 passed, 2 skipped`；web `51 passed`、typecheck/build；定向 Provider/Model 回归 `63 passed`；范围 Ruff（忽略既有 E501 等）、compileall、`git diff --check` 通过。真实浏览器此前已确认 Profile 模型服务目录、Assistant 添加文件/模型/KB context 可见。
+- 边界：未验证真实 Provider 出网或生产完成；生产 PostgreSQL/pgvector、对象存储、队列/Worker/Scheduler、服务器备份/部署/回滚和生产浏览器仍 `NOT RUN/BLOCKED`。未改 Skills、legacy backup、deploy、migration、theme 或 Web Search。

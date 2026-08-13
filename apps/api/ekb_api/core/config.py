@@ -78,6 +78,10 @@ class ModelProvider:
     model: str
     timeout_seconds: float = 30.0
     supports_vision: bool = False
+    # Copied from the enabled llm_models row.  Runtime code must not infer
+    # capabilities from a model name or a provider preset.
+    display_name: str | None = None
+    capabilities: dict | None = None
 
 
 @dataclass(frozen=True)
@@ -442,7 +446,9 @@ def _load_runtime_model_providers_from_db(
                 try:
                     from ekb_api.services import secrets as provider_secrets
 
-                    api_key = provider_secrets.decrypt(str(ciphertext))
+                    api_key = provider_secrets.decrypt(str(ciphertext)).strip()
+                    if not api_key:
+                        continue
                 except Exception:
                     continue
 
@@ -454,7 +460,9 @@ def _load_runtime_model_providers_from_db(
                         else (endpoint_configs_raw or {})
                     )
                 except (TypeError, ValueError):
-                    endpoint_configs = {}
+                    continue
+                if not isinstance(endpoint_configs, dict):
+                    continue
 
                 endpoint_name = default_endpoint or "openai-chat-completions"
                 endpoint_cfg = endpoint_configs.get(endpoint_name, {}) if endpoint_configs else {}
@@ -480,30 +488,39 @@ def _load_runtime_model_providers_from_db(
                 model_rows = session.execute(
                     text(
                         """
-                        SELECT model_id, display_name, model_type, capabilities
+                        SELECT model_id, display_name, model_type, capabilities,
+                               tenant_id, user_id
                         FROM llm_models
-                        WHERE provider_id = :pid AND is_enabled = 1
+                        WHERE provider_id = :pid
+                          AND tenant_id = :t AND user_id = :u
+                          AND is_enabled = 1
                         ORDER BY created_at ASC
                         """
                     ),
-                    {"pid": provider_id},
+                    {"pid": provider_id, "t": tenant_id, "u": user_id},
                 ).fetchall()
 
-                models_to_use: list[tuple[str, str]] = []  # [(model_id, display_name)]
+                models_to_use: list[tuple[str, str, dict]] = []
                 for m in model_rows:
                     mid, mname, mtype = str(m[0]), str(m[1] or m[0]), (m[2] or "chat")
+                    if not mid.strip() or "/" in mid:
+                        # Public ids use provider_key/model_id.  An embedded
+                        # slash would make the selected provider ambiguous.
+                        continue
                     model_capabilities = m[3] or {}
                     if isinstance(model_capabilities, str):
                         try:
                             model_capabilities = json.loads(model_capabilities)
                         except (TypeError, ValueError):
-                            model_capabilities = {}
+                            continue
+                    if not isinstance(model_capabilities, dict):
+                        continue
                     if kind == "chat" and not (mtype and "embedding" in mtype.lower()):
-                        models_to_use.append((mid, mname))
+                        models_to_use.append((mid, mname, model_capabilities))
                     elif kind == "embedding" and mtype and "embedding" in mtype.lower():
-                        models_to_use.append((mid, mname))
+                        models_to_use.append((mid, mname, model_capabilities))
 
-                for mid, _mname in models_to_use:
+                for mid, mname, model_capabilities in models_to_use:
                     runtime_name = f"{provider_key}/{mid}"
                     out.append(
                         ModelProvider(
@@ -514,9 +531,10 @@ def _load_runtime_model_providers_from_db(
                             model=mid,
                             timeout_seconds=timeout_seconds,
                             supports_vision=bool(
-                                isinstance(model_capabilities, dict)
-                                and model_capabilities.get("vision") is True
+                                model_capabilities.get("vision") is True
                             ),
+                            display_name=mname,
+                            capabilities=dict(model_capabilities),
                         )
                     )
     except _LLMConfigUnavailable:
@@ -578,6 +596,25 @@ def get_runtime_chat_providers(
         seen.add(p.name)
         merged.append(p)
     return merged
+
+
+def get_configured_runtime_chat_providers(
+    *,
+    tenant_id: str,
+    user_id: str,
+) -> list[ModelProvider]:
+    """Actor-scoped DB models with active, decryptable credentials only.
+
+    This is intentionally separate from ``get_runtime_chat_providers``:
+    normal no-model routing keeps its existing environment fallback, while
+    the QA capabilities and explicit model-selection contract must not expose
+    or accept an environment/default/local model.
+    """
+    return _load_runtime_model_providers_from_db(
+        tenant_id=tenant_id,
+        user_id=user_id,
+        kind="chat",
+    )
 
 
 def get_runtime_embedding_providers(

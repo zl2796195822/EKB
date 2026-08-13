@@ -85,3 +85,25 @@ API 五步链已实际返回成功状态：登录、知识库列表、batch 创�
 - QA 保留授权 KB RAG、附件上下文和远程 LLM Provider/Model；真实浏览器 Composer 不显示联网搜索，添加文件、远程模型和 KB 上下文仍可见。
 - 验证：backend `345 passed, 2 skipped`；web `51 passed`、typecheck/build；定向 API `28 passed`、RAG/多轮回归 `21 passed`、`git diff --check` 通过。
 - 生产 PostgreSQL/pgvector、对象存储、队列/Worker/Scheduler、服务器备份/部署/回滚和生产浏览器仍未执行；本证据只代表本地 DONE-LOCAL。
+
+## 2026-08-13 Provider/Model linkage DONE-LOCAL
+
+### 实际闭环
+
+- `GET /api/v1/qa/capabilities` 与显式 `POST /api/v1/qa/ask` 的 `options.model` 共享当前 `tenant+actor` 的活动加密 credential 与启用远程 Provider/Model registry。
+- capabilities 中的模型和 capability/vision 信息来自 DB registry；没有默认模型、本地模型或伪造 Provider 成功。
+- unknown、disabled、cross-tenant、no-credential 的显式 model 返回 `MODEL_UNAVAILABLE`。
+- 图片请求选择非 `vision=true` 模型返回 `MODEL_NOT_ALLOWED`；显式选择固定对应 Provider，不静默 fallback；普通无 model 请求保留既有 Provider fallback。
+
+### 验证结果
+
+- Backend：`349 passed, 2 skipped`。
+- Web：`51 passed`；typecheck/build 通过。
+- Provider/Model 定向回归：`63 passed`。
+- 范围 Ruff（忽略既有 E501 等风格问题）、compileall、`git diff --check` 通过；新增测试 teardown 已隔离全局 breaker、测试 Provider 和 credential 状态。
+- 真实浏览器此前已确认 Profile 模型服务目录、Assistant 添加文件、模型选择和 KB context 可见；本切片没有以浏览器或外网结果冒充真实 Provider 出网。
+
+### 未完成与边界
+
+- 真实 Provider 出网、生产 PostgreSQL/pgvector、生产对象存储、可靠队列/Worker/Scheduler、服务器备份/部署/回滚和生产浏览器验收均未执行，保持 `NOT RUN/BLOCKED`。
+- 本地 DONE-LOCAL 不代表生产完成；本记录不包含任何凭据，且本切片未修改 Skills、legacy backup、deploy scripts、migrations、theme 或 Web Search。

@@ -237,6 +237,7 @@ class ModelInfo(BaseModel):
     provider: str
     description: Optional[str] = None
     supports_deep_thinking: bool = False
+    supports_vision: bool = False
 
 
 class ComposerCapabilities(BaseModel):
