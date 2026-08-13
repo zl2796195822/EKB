@@ -69,4 +69,5 @@ API 五步链已实际返回成功状态：登录、知识库列表、batch 创�
 ## 尚未执行 / 生产阻塞
 
 - 未执行生产 PostgreSQL/pgvector 原子切库、生产对象存储、可靠队列/Worker/Scheduler、外部 LLM/Embedding 凭据配置、服务器备份/部署/回滚或生产浏览器验收。
+- 本次服务器入口检查实际执行 `bash scripts/deploy/deploy.sh --skip-tests`，因运行时未提供 `DEPLOY_HOST` 以退出码 `64` fail closed；未建立 SSH、未执行备份、迁移、重启或线上写入。
 - 这些动作需要已配置且可审计的生产基础设施、稳定出网和用户批准的部署窗口；本地缺少 Provider 凭据时保持 fail closed，不用 mock 代替。
