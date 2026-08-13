@@ -43,12 +43,42 @@ from ekb_api.routers import (
 settings = get_settings()
 
 
+_LOCAL_SCHEDULER_DEFAULT_INTERVAL_SECONDS = 60
+_LOCAL_SCHEDULER_MIN_INTERVAL_SECONDS = 1
+_LOCAL_SCHEDULER_MAX_INTERVAL_SECONDS = 300
+
+
+def _local_scheduler_interval_seconds(raw_value: str | None) -> int:
+    if not isinstance(raw_value, str):
+        return _LOCAL_SCHEDULER_DEFAULT_INTERVAL_SECONDS
+
+    normalized_value = raw_value.strip()
+    if not normalized_value.isascii() or not normalized_value.isdecimal():
+        return _LOCAL_SCHEDULER_DEFAULT_INTERVAL_SECONDS
+
+    try:
+        interval_seconds = int(normalized_value)
+    except ValueError:
+        return _LOCAL_SCHEDULER_DEFAULT_INTERVAL_SECONDS
+
+    if not (
+        _LOCAL_SCHEDULER_MIN_INTERVAL_SECONDS
+        <= interval_seconds
+        <= _LOCAL_SCHEDULER_MAX_INTERVAL_SECONDS
+    ):
+        return _LOCAL_SCHEDULER_DEFAULT_INTERVAL_SECONDS
+    return interval_seconds
+
+
 @asynccontextmanager
 async def _lifespan(_app: FastAPI):
     scheduler_task: asyncio.Task | None = None
     if settings.environment == "development" and os.getenv(
         "EKB_LOCAL_SCHEDULER", "true"
     ).lower() in {"1", "true", "yes", "on"}:
+        scheduler_interval_seconds = _local_scheduler_interval_seconds(
+            os.getenv("EKB_LOCAL_SCHEDULER_INTERVAL")
+        )
 
         async def _run_local_scheduler() -> None:
             from ekb_api.core.db import get_engine
@@ -61,7 +91,7 @@ async def _lifespan(_app: FastAPI):
                     await asyncio.to_thread(run_ingest_tick, get_engine())
                 except Exception as exc:  # noqa: BLE001 - keep API alive; next tick retries
                     _log.warning("local.scheduler.tick_failed", error_type=type(exc).__name__)
-                await asyncio.sleep(60)
+                await asyncio.sleep(scheduler_interval_seconds)
 
         scheduler_task = asyncio.create_task(_run_local_scheduler())
     try:
