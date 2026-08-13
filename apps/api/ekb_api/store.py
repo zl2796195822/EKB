@@ -1380,6 +1380,9 @@ class SqlStore:
         turn_id: Optional[str] = None,
         visibility_state: str = MessageVisibility.VISIBLE.value,
     ) -> Message:
+        from ekb_api.core.logging import get_logger  # noqa: PLC0415
+
+        logger = get_logger("ekb.store")
         SessionLocal = get_session_local()
         with SessionLocal() as session:
             message = models.Message(
@@ -1395,6 +1398,109 @@ class SqlStore:
             session.add(message)
             session.commit()
             session.refresh(message)
+            saved_message = _to_message(message)
+            try:
+                from ekb_api.migrations.v4_007_chat_graph import (  # noqa: PLC0415
+                    message_content_hash,
+                )
+
+                bind = session.bind
+                if bind is not None:
+                    inspector = inspect(bind)
+                    message_columns = {
+                        column["name"] for column in inspector.get_columns("messages")
+                    }
+                    conversation_columns = {
+                        column["name"]
+                        for column in inspector.get_columns("conversations")
+                    }
+                    if {
+                        "branch_id",
+                        "parent_message_id",
+                        "content_hash",
+                    }.issubset(message_columns) and "active_branch_id" in conversation_columns \
+                        and inspector.has_table("conversation_branches"):
+                        params = {
+                            "conversation_id": conversation_id,
+                            "tenant_id": auth.tenant_id,
+                            "actor_id": auth.actor_id,
+                        }
+                        branch_row = session.execute(
+                            text(
+                                "SELECT active_branch_id FROM conversations "
+                                "WHERE id=:conversation_id AND tenant_id=:tenant_id "
+                                "AND user_id=:actor_id AND deleted_at IS NULL"
+                            ),
+                            params,
+                        ).first()
+                        branch_id = branch_row[0] if branch_row is not None else None
+                        if branch_row is not None and branch_id is None:
+                            from ekb_api.core.db import get_engine  # noqa: PLC0415
+                            from ekb_api.services.conversations import (  # noqa: PLC0415
+                                ConversationGraphService,
+                            )
+
+                            root_branch = ConversationGraphService(get_engine()).ensure_root_branch(
+                                tenant_id=auth.tenant_id,
+                                conversation_id=conversation_id,
+                                user_id=auth.actor_id,
+                                connection=session.connection(),
+                            )
+                            session.execute(
+                                text(
+                                    "UPDATE conversations SET active_branch_id=:branch_id "
+                                    "WHERE id=:conversation_id AND tenant_id=:tenant_id "
+                                    "AND active_branch_id IS NULL"
+                                ),
+                                {
+                                    "branch_id": root_branch.id,
+                                    "conversation_id": conversation_id,
+                                    "tenant_id": auth.tenant_id,
+                                },
+                            )
+                            branch_id = root_branch.id
+                        if branch_id is not None:
+                            parent_row = session.execute(
+                                text(
+                                    "SELECT id FROM messages "
+                                    "WHERE tenant_id=:tenant_id "
+                                    "AND conversation_id=:conversation_id "
+                                    "AND branch_id=:branch_id AND id<>:message_id "
+                                    "ORDER BY created_at DESC, id DESC LIMIT 1"
+                                ),
+                                {
+                                    **params,
+                                    "branch_id": branch_id,
+                                    "message_id": message.id,
+                                },
+                            ).first()
+                            parent = parent_row[0] if parent_row is not None else None
+                            session.execute(
+                                text(
+                                    "UPDATE messages SET branch_id=:branch_id, "
+                                    "parent_message_id=:parent, content_hash=:hash "
+                                    "WHERE id=:message_id AND tenant_id=:tenant_id"
+                                ),
+                                {
+                                    "branch_id": branch_id,
+                                    "parent": parent,
+                                    "hash": message_content_hash(role, content),
+                                    "message_id": message.id,
+                                    "tenant_id": auth.tenant_id,
+                                },
+                            )
+                            session.commit()
+                            session.refresh(message)
+            except Exception as exc:  # noqa: BLE001 - legacy save must succeed
+                try:
+                    session.rollback()
+                except Exception:  # noqa: BLE001 - fail-open after legacy save
+                    pass
+                logger.warning(
+                    "save_message v4 branch bridge failed",
+                    error=type(exc).__name__,
+                )
+                return saved_message
             return _to_message(message)
 
     def update_message_visibility(

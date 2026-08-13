@@ -566,3 +566,10 @@ Nginx 配置：
 - 验证：`npx vitest run src/app-v2/tests/v3.conversation-branches.test.ts` 为 `4 passed`；`npm run test` 为 `13 files / 72 tests passed`；`npm run typecheck`、`npm run build`、`git diff --check` 通过。
 - 当前浏览器未认证；Share/Projects 保持 disabled。本地结果不代表 PH0-PH8 或生产完成。
 - 生产/服务器、备份、部署和回滚未执行，仍为 `NOT RUN/BLOCKED`；不记录密码、token、凭据或私有地址。证据见 `docs/evidence/ekb-core-rebuild/local/2026-08-14-conversation-branches.md`。
+
+## 2026-08-14 legacy store.save_message 到 chat branch graph 本地桥接
+
+- DONE-LOCAL：在 v4 schema 下，`store.save_message` 为 legacy QA 消息自动创建/激活 root branch，并写入 `branch_id`、`parent_message_id`、`content_hash`；无 v4 列时保持 legacy 路径。
+- 验证：`bridge-check` 临时 SQLite 为 `PASS`；PH4 `32 passed`；API `28 passed`；ruff/compileall `passed`。
+- `qa.py` 的多轮 history graph bridge 尚未完成；当前浏览器未认证。本地开发切片不宣称 PH4 或 PH0–PH8 全部完成。
+- 生产/服务器（`[production host]`）、备份、部署、回滚均 `NOT RUN/BLOCKED`；不记录密码、token、API key 或私密地址。证据见 `docs/evidence/ekb-core-rebuild/local/2026-08-14-chat-branch-bridge.md`。

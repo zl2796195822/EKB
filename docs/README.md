@@ -137,3 +137,10 @@ CR-PH1-T01 + CR-PH1-T03 的第一真实业务切片已在本地工作树实现�
 - 验证：定向 `v3.conversation-branches.test.ts` 为 `4 passed`；`npm run test` 为 `13 files / 72 tests passed`；`npm run typecheck`、`npm run build`、`git diff --check` 通过。当前浏览器未认证。
 - Share/Projects 保持 disabled；本地切片不能宣称 PH0-PH8 或生产完成，生产/服务器、备份、部署和回滚仍 `NOT RUN/BLOCKED`。
 - 证据见 [`evidence/ekb-core-rebuild/local/2026-08-14-conversation-branches.md`](./evidence/ekb-core-rebuild/local/2026-08-14-conversation-branches.md)。不记录秘密。
+
+## Legacy store.save_message 到 chat branch graph 本地桥接（2026-08-14）
+
+- DONE-LOCAL：在 v4 schema 下，`store.save_message` 为 legacy QA 消息自动创建/激活 root branch，并写入 `branch_id`、`parent_message_id`、`content_hash`；无 v4 列时保持 legacy 路径。
+- 验证：`bridge-check` 临时 SQLite 为 `PASS`；PH4 `32 passed`；API `28 passed`；ruff/compileall `passed`。
+- `qa.py` 的多轮 history graph bridge 尚未完成；当前浏览器未认证。本地开发切片不宣称 PH4 或 PH0–PH8 全部完成。
+- 生产/服务器（`[production host]`）、备份、部署、回滚均 `NOT RUN/BLOCKED`；不记录密码、token、API key 或私密地址。证据见 [`docs/evidence/ekb-core-rebuild/local/2026-08-14-chat-branch-bridge.md`](./evidence/ekb-core-rebuild/local/2026-08-14-chat-branch-bridge.md)。
