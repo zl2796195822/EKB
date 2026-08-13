@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ipaddress
 import json
 import urllib.error
 import urllib.request
@@ -13,8 +14,12 @@ from starlette import status
 from ekb_api.core.db import get_session_local
 from ekb_api.core.errors import ApiError
 from ekb_api.domain import AuthContext, new_id, utc_now
-from ekb_api.services.llm_provider_catalog import get_preset_provider, list_preset_providers
 from ekb_api.services import secrets as provider_secrets
+from ekb_api.services.llm_provider_catalog import (
+    get_preset_provider,
+    is_local_provider_key,
+    list_preset_providers,
+)
 
 
 def _permission_denied() -> ApiError:
@@ -23,6 +28,82 @@ def _permission_denied() -> ApiError:
 
 def _not_found(entity: str = "资源") -> ApiError:
     return ApiError(status.HTTP_404_NOT_FOUND, "NOT_FOUND", f"{entity}不存在")
+
+
+def _remote_provider_required() -> ApiError:
+    return ApiError(
+        status.HTTP_400_BAD_REQUEST,
+        "REMOTE_PROVIDER_REQUIRED",
+        "仅支持非回环的远程 HTTP(S) LLM/Embedding Provider",
+    )
+
+
+def _validate_remote_url(value: Any) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise _remote_provider_required()
+    candidate = value.strip()
+    try:
+        parsed = urlparse(candidate)
+        hostname = (parsed.hostname or "").rstrip(".").lower()
+    except ValueError as exc:
+        raise _remote_provider_required() from exc
+    if parsed.scheme not in {"http", "https"} or not hostname:
+        raise _remote_provider_required()
+    if hostname == "localhost" or hostname.endswith(".localhost"):
+        raise _remote_provider_required()
+    try:
+        address = ipaddress.ip_address(hostname)
+    except ValueError:
+        address = None
+    mapped_address = getattr(address, "ipv4_mapped", None)
+    if address is not None and (
+        address.is_loopback
+        or address.is_unspecified
+        or bool(mapped_address and mapped_address.is_loopback)
+    ):
+        raise _remote_provider_required()
+    return candidate
+
+
+def _validate_remote_endpoint_configs(endpoint_configs: Any) -> dict:
+    """Validate every configured Provider/model-list URL before persistence or use."""
+    if not isinstance(endpoint_configs, dict) or not endpoint_configs:
+        raise _remote_provider_required()
+
+    found_url = False
+    for config in endpoint_configs.values():
+        if not isinstance(config, dict):
+            raise _remote_provider_required()
+
+        for key in ("baseUrl", "base_url"):
+            if key in config:
+                _validate_remote_url(config[key])
+                found_url = True
+
+        for key in ("modelsApiUrls", "models_api_urls"):
+            if key not in config:
+                continue
+            models_urls = config[key]
+            if not isinstance(models_urls, dict) or not models_urls:
+                raise _remote_provider_required()
+            for value in models_urls.values():
+                _validate_remote_url(value)
+                found_url = True
+
+    if not found_url:
+        raise _remote_provider_required()
+    return endpoint_configs
+
+
+def _provider_row_is_remote(provider_row: Any) -> bool:
+    if is_local_provider_key(provider_row.get("provider_key")):
+        return False
+    try:
+        endpoint_configs = _safe_json_load(provider_row.get("endpoint_configs"))
+        _validate_remote_endpoint_configs(endpoint_configs)
+    except ApiError:
+        return False
+    return True
 
 
 # ---- Domain dataclasses ----
@@ -458,6 +539,8 @@ def list_llm_providers(auth: AuthContext) -> list[LLMProvider]:
 
     existing_by_key: dict[str, LLMProvider] = {}
     for row in rows:
+        if not _provider_row_is_remote(row):
+            continue
         provider = _provider_row_to_obj(row)
         existing_by_key[provider.provider_key] = provider
 
@@ -599,6 +682,8 @@ def get_llm_provider(auth: AuthContext, provider_id: str) -> LLMProvider | None:
         ).mappings().first()
     if row is None:
         return None
+    if not _provider_row_is_remote(row):
+        return None
     return _provider_row_to_obj(row)
 
 
@@ -611,6 +696,8 @@ def create_llm_provider(auth: AuthContext, data: dict) -> LLMProvider:
     merged: dict = {}
 
     if preset_provider_id:
+        if is_local_provider_key(str(preset_provider_id)):
+            raise _remote_provider_required()
         preset = get_preset_provider(preset_provider_id)
         if preset:
             merged.update({
@@ -640,6 +727,12 @@ def create_llm_provider(auth: AuthContext, data: dict) -> LLMProvider:
         raise ApiError(status.HTTP_400_BAD_REQUEST, "INVALID_REQUEST", "provider_key 必填")
     if "name" not in merged or not merged["name"]:
         raise ApiError(status.HTTP_400_BAD_REQUEST, "INVALID_REQUEST", "name 必填")
+    if is_local_provider_key(str(merged["provider_key"])):
+        raise _remote_provider_required()
+
+    endpoint_configs = _safe_json_load(merged.get("endpoint_configs"))
+    _validate_remote_endpoint_configs(endpoint_configs)
+    merged["endpoint_configs"] = json.dumps(endpoint_configs, ensure_ascii=False)
 
     provider_id = new_id()
     now = utc_now()
@@ -699,7 +792,7 @@ def update_llm_provider(auth: AuthContext, provider_id: str, data: dict) -> LLMP
     with SessionLocal() as session:
         row = session.execute(
             text(
-                "SELECT id, tenant_id, user_id FROM llm_providers WHERE id = :id"
+                "SELECT id, tenant_id, user_id, provider_key FROM llm_providers WHERE id = :id"
             ),
             {"id": provider_id},
         ).mappings().first()
@@ -707,6 +800,10 @@ def update_llm_provider(auth: AuthContext, provider_id: str, data: dict) -> LLMP
             raise _not_found("LLM Provider")
         if str(row["tenant_id"]) != auth.tenant_id or str(row["user_id"]) != auth.actor_id:
             raise _permission_denied()
+        if is_local_provider_key(str(row["provider_key"])):
+            raise _remote_provider_required()
+        if "endpoint_configs" in data and data["endpoint_configs"] is not None:
+            _validate_remote_endpoint_configs(data["endpoint_configs"])
 
         set_clauses: list[str] = []
         params: dict[str, Any] = {"id": provider_id}
@@ -829,7 +926,7 @@ def list_llm_models(auth: AuthContext, provider_id: str) -> list[LLMModel]:
         with SessionLocal() as session:
             row = session.execute(
                 text(
-                    "SELECT id, preset_provider_id FROM llm_providers "
+                    "SELECT id, preset_provider_id, provider_key, endpoint_configs FROM llm_providers "
                     "WHERE tenant_id = :t AND user_id = :u AND preset_provider_id = :ppid"
                 ),
                 {"t": auth.tenant_id, "u": auth.actor_id, "ppid": key},
@@ -843,7 +940,7 @@ def list_llm_models(auth: AuthContext, provider_id: str) -> list[LLMModel]:
         with SessionLocal() as session:
             prow = session.execute(
                 text(
-                    "SELECT id, preset_provider_id FROM llm_providers "
+                    "SELECT id, preset_provider_id, provider_key, endpoint_configs FROM llm_providers "
                     "WHERE id = :id AND tenant_id = :t AND user_id = :u"
                 ),
                 {"id": provider_id, "t": auth.tenant_id, "u": auth.actor_id},
@@ -851,6 +948,9 @@ def list_llm_models(auth: AuthContext, provider_id: str) -> list[LLMModel]:
         if prow is None:
             return []
         provider_info = dict(prow)
+
+    if not _provider_row_is_remote(provider_info):
+        return []
 
     whitelist_ids, _catalog_specs = _provider_catalog_whitelist(provider_info)
 
@@ -907,13 +1007,18 @@ def create_llm_model(auth: AuthContext, provider_id: str, data: dict) -> LLMMode
     SessionLocal = get_session_local()
     with SessionLocal() as session:
         prow = session.execute(
-            text("SELECT id, tenant_id, user_id FROM llm_providers WHERE id = :id"),
+            text(
+                "SELECT id, tenant_id, user_id, provider_key, endpoint_configs "
+                "FROM llm_providers WHERE id = :id"
+            ),
             {"id": provider_id},
         ).mappings().first()
         if prow is None:
             raise _not_found("LLM Provider")
         if str(prow["tenant_id"]) != auth.tenant_id or str(prow["user_id"]) != auth.actor_id:
             raise _permission_denied()
+        if not _provider_row_is_remote(prow):
+            raise _remote_provider_required()
 
         required = ("model_id", "display_name")
         for field in required:
@@ -1055,29 +1160,25 @@ def _remote_models_endpoint(provider_row: dict[str, Any]) -> str:
         )
     except (TypeError, ValueError):
         endpoint_configs = {}
-    if not isinstance(endpoint_configs, dict):
-        endpoint_configs = {}
+    _validate_remote_endpoint_configs(endpoint_configs)
 
     endpoint_name = str(provider_row.get("default_chat_endpoint") or "")
     config = endpoint_configs.get(endpoint_name, {})
     if not isinstance(config, dict):
-        config = {}
-    models_urls = config.get("modelsApiUrls") or config.get("models_api_urls") or {}
-    if isinstance(models_urls, dict):
+        raise _remote_provider_required()
+    for models_urls_key in ("modelsApiUrls", "models_api_urls"):
+        models_urls = config.get(models_urls_key)
+        if not isinstance(models_urls, dict):
+            continue
         for key in (endpoint_name, "openai", "default"):
             candidate = models_urls.get(key)
             if isinstance(candidate, str) and candidate.strip():
-                parsed = urlparse(candidate.strip())
-                if parsed.scheme in {"http", "https"} and parsed.hostname:
-                    return candidate.strip()
+                return _validate_remote_url(candidate)
 
     base_url = config.get("baseUrl") or config.get("base_url")
     if not isinstance(base_url, str) or not base_url.strip():
-        raise ApiError(status.HTTP_400_BAD_REQUEST, "INVALID_PROVIDER", "Provider 未配置远程端点")
-    parsed = urlparse(base_url.strip())
-    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
-        raise ApiError(status.HTTP_400_BAD_REQUEST, "INVALID_PROVIDER", "Provider 端点必须是远程 HTTP(S) 地址")
-    base = base_url.rstrip("/")
+        raise _remote_provider_required()
+    base = _validate_remote_url(base_url).rstrip("/")
     for suffix in ("/chat/completions", "/responses", "/embeddings"):
         if base.lower().endswith(suffix):
             base = base[: -len(suffix)]
@@ -1150,6 +1251,8 @@ def sync_models_from_provider(auth: AuthContext, provider_id: str) -> dict:
             raise _not_found("LLM Provider")
         if str(prow["tenant_id"]) != auth.tenant_id or str(prow["user_id"]) != auth.actor_id:
             raise _permission_denied()
+        if not _provider_row_is_remote(prow):
+            raise _remote_provider_required()
 
         key = str(prow["provider_key"])
         api_key = _read_provider_secret(session, auth, prow)

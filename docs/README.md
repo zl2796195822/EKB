@@ -172,3 +172,11 @@ CR-PH1-T01 + CR-PH1-T03 的第一真实业务切片已在本地工作树实现�
 - 验证快照：后端全量 `401 passed, 2 skipped`；前端 `72 passed`；typecheck/build passed；`npm audit` 为 `0 vulnerabilities`。浏览器本次 snapshot 未显示 console 错误，但 console 未作为零错误验收，不声称 `console=0`。
 - 这是本地切片，不宣称 PH0–PH8 全部完成；生产 PostgreSQL/pgvector、对象存储、队列/Worker/Scheduler、服务器备份、部署、回滚仍 `NOT RUN/BLOCKED`，生产服务器统一写作 `[production host]`。
 - 详细证据见 [`evidence/ekb-core-rebuild/local/2026-08-14-browser-parent-chain.md`](./evidence/ekb-core-rebuild/local/2026-08-14-browser-parent-chain.md)。不记录密码、token、私密地址或 Provider 密钥。
+
+## Remote-only Provider boundary closure (2026-08-14)
+
+- DONE-LOCAL：Provider/Model 配置入口现在只接受非回环的远程 HTTP(S) LLM/Embedding Provider。目录移除 Ollama、LM Studio、GPUStack、OpenVINO Model Server、OpenCode Go、New API 等本地推理预设；已配置的本地或无效端点记录不进入 Provider 列表或模型列表。
+- 创建/更新 Provider 以及模型列表同步统一校验 `endpoint_configs`、`baseUrl/base_url` 和 `modelsApiUrls/models_api_urls`；`localhost`、`127.0.0.1`、`::1`、`0.0.0.0`、IPv4-mapped loopback 与非 HTTP(S) 地址 fail closed 为 `REMOTE_PROVIDER_REQUIRED`，更新失败不提交原值。
+- 远程 Provider/Model 的既有 DB registry、QA capabilities 与显式 model selection 路径保持不变。测试中的 `.invalid` 地址仅用于无出网边界合同，不代表真实 Provider 成功，也未调用真实外部服务。
+- 验证：`tests/v3/test_llm_provider_credentials.py` 为 `13 passed`；`tests/v4/test_qa_model_selection.py` 为 `4 passed`；`compileall`、`git diff --check` 通过；前端 `pnpm run typecheck` 通过。Ruff 的 import 合同检查通过；完整改动 Python 文件 Ruff 仍报告既有 31 个 E501/UP035/UP006/E702 风格问题，本切片未扩大范围修复。
+- 边界：本条仅为本地 `DONE-LOCAL`，不代表真实 Provider 出网、生产 PostgreSQL/pgvector、生产部署、备份/回滚或 PH0–PH8 完成；生产统一使用 `[production host]` / `[REDACTED]`，不记录凭据、token、API key 或私有地址。

@@ -600,3 +600,10 @@ Nginx 配置：
 - SQLite 核对同一 `turn` 的 `USER`/`ASSISTANT` 同 branch，`assistant.parent_message_id` 指向 `USER`。本次浏览器 snapshot 未显示 console 错误，但 console 未作为零错误验收，不声称 `console=0`。
 - 验证快照：后端全量 `401 passed, 2 skipped`；前端 `72 passed`；typecheck/build passed；`npm audit` 为 `0 vulnerabilities`。本次文档写入未重跑验证。
 - 本地切片不宣称 PH0–PH8 全部完成；生产 PostgreSQL/pgvector、对象存储、队列/Worker/Scheduler、服务器备份、部署和回滚仍 `NOT RUN/BLOCKED`，服务器统一使用 `[production host]`。不记录密码、token、私密地址或 Provider 密钥。证据：`docs/evidence/ekb-core-rebuild/local/2026-08-14-browser-parent-chain.md`。
+
+## 2026-08-14 Remote-only Provider 配置边界收口
+
+- DONE-LOCAL：Provider/Model 入口仅保留非回环远程 HTTP(S) LLM/Embedding Provider；目录移除 Ollama、LM Studio、GPUStack、OpenVINO Model Server、OpenCode Go、New API 本地预设，已配置本地/无效端点不进入列表。
+- 创建/更新 Provider、创建模型和模型列表同步统一拒绝 `localhost`、`127.0.0.1`、`::1`、`0.0.0.0`、IPv4-mapped loopback、非 HTTP(S) 端点及本地 Provider key，稳定错误码为 `REMOTE_PROVIDER_REQUIRED`；创建无残留，更新原值保留。
+- 验证：Provider 边界 API/service `13 passed`；既有显式 model selection `4 passed`；Web typecheck、compileall、Ruff import 检查、`git diff --check` 通过。完整 Ruff 仍有 31 个既有风格问题，未扩大范围。
+- LLM-only 边界保持：QA capabilities 与显式 model selection 继续使用现有远程 DB registry；`.invalid` 仅为无出网测试边界，不代表真实 Provider 成功。生产出网、生产配置、部署/备份/回滚和 PH0–PH8 仍未完成，统一写作 `[production host]` / `[REDACTED]`，不保存秘密。

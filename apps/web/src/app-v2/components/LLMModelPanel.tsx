@@ -32,6 +32,46 @@ type ListItem =
 
 type Notice = { readonly tone: 'ok' | 'error'; readonly text: string } | null
 
+const LOCAL_PROVIDER_KEYS = new Set([
+  'ollama',
+  'ollama-chat',
+  'lmstudio',
+  'lm-studio',
+  'new-api',
+  'newapi',
+  'gpustack',
+  'gpu-stack',
+  'ovms',
+  'openvino',
+  'openvino-model-server',
+  'opencode',
+  'opencode-go',
+])
+
+function isRemoteHttpUrl(value: string): boolean {
+  try {
+    const url = new URL(value.trim())
+    const hostname = url.hostname.replace(/^\[|\]$/g, '').toLowerCase()
+    if (!['http:', 'https:'].includes(url.protocol)) return false
+    if (hostname === 'localhost' || hostname.endsWith('.localhost')) return false
+    if (hostname === '127.0.0.1' || hostname === '::1' || hostname === '0.0.0.0') return false
+    return true
+  } catch {
+    return false
+  }
+}
+
+function isRemoteProvider(provider: LLMProviderView): boolean {
+  if (LOCAL_PROVIDER_KEYS.has(provider.providerKey.trim().toLowerCase())) return false
+  return Object.values(provider.endpointConfigs).every((config) => {
+    const urls = [
+      config.baseUrl,
+      ...Object.values(config.modelsApiUrls ?? {}),
+    ].filter((value): value is string => Boolean(value))
+    return urls.every(isRemoteHttpUrl)
+  })
+}
+
 type ModelDraft = {
   readonly id?: string
   readonly modelId: string
@@ -168,7 +208,8 @@ export function LLMModelPanel({ services }: LLMModelPanelProps) {
     void loadPresets()
   }, [loadProviders, loadPresets])
 
-  const configured = providers.filter((p) => !p.isPresetBuiltin)
+  const configured = providers.filter((p) => !p.isPresetBuiltin && isRemoteProvider(p))
+  const remotePresets = presets.filter((p) => !LOCAL_PROVIDER_KEYS.has(p.id.trim().toLowerCase()))
   const configuredIds = useMemo(() => new Set(configured.map((p) => p.id)), [configured])
 
   const listItems: ListItem[] = useMemo(() => {
@@ -179,14 +220,14 @@ export function LLMModelPanel({ services }: LLMModelPanelProps) {
         items.push({ kind: 'configured', provider: p })
       }
     }
-    for (const preset of presets) {
+    for (const preset of remotePresets) {
       if (configuredIds.has(preset.id)) continue
       if (!lower || preset.name.toLowerCase().includes(lower)) {
         items.push({ kind: 'preset', preset })
       }
     }
     return items
-  }, [configured, presets, configuredIds, searchText])
+  }, [configured, remotePresets, configuredIds, searchText])
 
   const configuredItems = listItems.filter((i) => i.kind === 'configured')
   const presetItems = listItems.filter((i) => i.kind === 'preset')
@@ -549,7 +590,6 @@ function ProviderDetail({
       'openai-chat-completions': 'Chat',
       'chat': 'Chat',
       'anthropic-messages': 'Messages',
-      'ollama-chat': 'Ollama Chat',
       'completions': 'Completions',
       'openai-completions': 'Completions',
       'embeddings': 'Embeddings',
@@ -562,7 +602,7 @@ function ProviderDetail({
       'realtime': 'Realtime',
     }
     if (known[key]) return known[key]
-    const cleaned = key.replace(/^(openai|anthropic|ollama|azure|google|cohere|mistral|gemini|deepseek)[-_]/i, '')
+    const cleaned = key.replace(/^(openai|anthropic|azure|google|cohere|mistral|gemini|deepseek)[-_]/i, '')
     if (!cleaned) return key
     const words = cleaned.split(/[-_]/).filter(Boolean)
     if (words.length === 0) return key

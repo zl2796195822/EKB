@@ -509,62 +509,6 @@ PRESET_PROVIDERS: list[dict] = [
         },
     },
     {
-        "id": "lmstudio",
-        "name": "LM Studio",
-        "description": "本地运行开源大模型的桌面客户端，提供兼容 OpenAI 的本地服务。无需 API Key。",
-        "default_chat_endpoint": "openai-chat-completions",
-        "endpoint_configs": {
-            "openai-chat-completions": {
-                "baseUrl": "http://localhost:1234/v1",
-                "adapterFamily": "openai",
-            }
-        },
-        "auth_type": "api-key",
-        "auth_optional": True,
-        "model_list_source": "api",
-        "websites": {
-            "official": "https://lmstudio.ai",
-            "docs": "https://lmstudio.ai/docs",
-            "apiKey": "",
-            "models": "https://lmstudio.ai/models",
-        },
-        "api_features": {
-            "arrayContent": False,
-            "streamOptions": True,
-            "developerRole": False,
-            "serviceTier": False,
-            "verbosity": False,
-        },
-    },
-    {
-        "id": "new-api",
-        "name": "New API",
-        "description": "开源的大模型管理与分发系统，兼容 OpenAI 协议。",
-        "default_chat_endpoint": "openai-chat-completions",
-        "endpoint_configs": {
-            "openai-chat-completions": {
-                "baseUrl": "http://localhost:3000/v1",
-                "adapterFamily": "openai",
-            }
-        },
-        "auth_type": "api-key",
-        "auth_optional": False,
-        "model_list_source": "api",
-        "websites": {
-            "official": "https://github.com/Calcium-Ion/new-api",
-            "docs": "https://docs.newapi.pro",
-            "apiKey": "",
-            "models": "",
-        },
-        "api_features": {
-            "arrayContent": True,
-            "streamOptions": True,
-            "developerRole": False,
-            "serviceTier": False,
-            "verbosity": False,
-        },
-    },
-    {
         "id": "302ai",
         "name": "302.AI",
         "description": "302.AI 大模型聚合平台，支持多种主流模型。",
@@ -1265,34 +1209,6 @@ PRESET_PROVIDERS: list[dict] = [
         },
     },
     {
-        "id": "gpustack",
-        "name": "GPUStack",
-        "description": "GPUStack 开源 GPU 集群管理和大模型推理平台。",
-        "default_chat_endpoint": "openai-chat-completions",
-        "endpoint_configs": {
-            "openai-chat-completions": {
-                "baseUrl": "http://localhost:8080/v1",
-                "adapterFamily": "openai",
-            }
-        },
-        "auth_type": "api-key",
-        "auth_optional": False,
-        "model_list_source": "api",
-        "websites": {
-            "official": "https://github.com/gpustack/gpustack",
-            "docs": "https://docs.gpustack.ai",
-            "apiKey": "",
-            "models": "",
-        },
-        "api_features": {
-            "arrayContent": True,
-            "streamOptions": True,
-            "developerRole": False,
-            "serviceTier": False,
-            "verbosity": False,
-        },
-    },
-    {
         "id": "voyageai",
         "name": "VoyageAI",
         "description": "Voyage AI 专业 Embedding 和 Rerank 模型 API。",
@@ -1315,34 +1231,6 @@ PRESET_PROVIDERS: list[dict] = [
         "api_features": {
             "arrayContent": True,
             "streamOptions": False,
-            "developerRole": False,
-            "serviceTier": False,
-            "verbosity": False,
-        },
-    },
-    {
-        "id": "ovms",
-        "name": "OpenVINO Model Server",
-        "description": "Intel OpenVINO Model Server 本地推理服务。无需 API Key。",
-        "default_chat_endpoint": "openai-chat-completions",
-        "endpoint_configs": {
-            "openai-chat-completions": {
-                "baseUrl": "http://localhost:8000/v3",
-                "adapterFamily": "openai",
-            }
-        },
-        "auth_type": "api-key",
-        "auth_optional": True,
-        "model_list_source": "api",
-        "websites": {
-            "official": "https://github.com/openvinotoolkit/model_server",
-            "docs": "https://docs.openvino.ai/2024/ovms_what_is_openvino_model_server.html",
-            "apiKey": "",
-            "models": "",
-        },
-        "api_features": {
-            "arrayContent": False,
-            "streamOptions": True,
             "developerRole": False,
             "serviceTier": False,
             "verbosity": False,
@@ -1740,49 +1628,42 @@ PRESET_PROVIDERS: list[dict] = [
             "verbosity": True,
         },
     },
-    {
-        "id": "opencode",
-        "name": "OpenCode Go",
-        "description": "OpenCode Go 开源 AI 编程助手（兼容 OpenAI 协议的自建后端）。",
-        "default_chat_endpoint": "openai-chat-completions",
-        "endpoint_configs": {
-            "openai-chat-completions": {
-                "baseUrl": "http://localhost:8888/v1",
-                "adapterFamily": "openai",
-            }
-        },
-        "auth_type": "api-key",
-        "auth_optional": True,
-        "model_list_source": "api",
-        "websites": {
-            "official": "https://github.com/opencode-mit/opencode-go",
-            "docs": "https://github.com/opencode-mit/opencode-go",
-            "apiKey": "",
-            "models": "",
-        },
-        "api_features": {
-            "arrayContent": True,
-            "streamOptions": True,
-            "developerRole": False,
-            "serviceTier": False,
-            "verbosity": False,
-        },
-    },
 ]
 
-_LOCAL_PROVIDER_KEYS = {"lmstudio", "new-api", "gpustack", "ovms", "opencode"}
+_LOCAL_PROVIDER_KEYS = {
+    "ollama",
+    "ollama-chat",
+    "lmstudio",
+    "lm-studio",
+    "new-api",
+    "newapi",
+    "gpustack",
+    "gpu-stack",
+    "ovms",
+    "openvino",
+    "openvino-model-server",
+    "opencode",
+    "opencode-go",
+}
+
+
+def is_local_provider_key(provider_key: str | None) -> bool:
+    """Return whether a provider key identifies a local inference service."""
+    return isinstance(provider_key, str) and provider_key.strip().lower() in _LOCAL_PROVIDER_KEYS
 
 
 def get_preset_provider(provider_key: str) -> dict | None:
     """根据 provider_key 获取预设服务商配置。"""
-    if provider_key in _LOCAL_PROVIDER_KEYS:
+    if is_local_provider_key(provider_key):
         return None
     for provider in PRESET_PROVIDERS:
-        if provider["id"] == provider_key:
+        if provider["id"] == provider_key and not is_local_provider_key(provider["id"]):
             return provider
     return None
 
 
 def list_preset_providers() -> list[dict]:
     """列出全部远程预设服务商，不暴露本地推理入口。"""
-    return [provider for provider in PRESET_PROVIDERS if provider["id"] not in _LOCAL_PROVIDER_KEYS]
+    return [
+        provider for provider in PRESET_PROVIDERS if not is_local_provider_key(provider.get("id"))
+    ]
