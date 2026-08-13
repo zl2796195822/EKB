@@ -39,6 +39,22 @@ const ALLOWED_EXTENSIONS = new Set([
 const ACCEPT_ATTR = Array.from(ALLOWED_EXTENSIONS).join(',')
 
 const CONCURRENCY_OPTIONS = [1, 2, 4, 8] as const
+export const UPLOAD_CENTER_STORAGE_KEY = 'ekb.upload-center.batch-refs.v1'
+
+function rememberUploadBatches(progress: BulkUploadProgress): void {
+  if (typeof window === 'undefined') return
+  try {
+    const current = JSON.parse(window.localStorage.getItem(UPLOAD_CENTER_STORAGE_KEY) ?? '[]') as unknown
+    const refs = Array.isArray(current) ? current.filter((value): value is { batchId: string } => Boolean(value && typeof value === 'object' && 'batchId' in value && typeof (value as { batchId?: unknown }).batchId === 'string')) : []
+    const byId = new Map(refs.map((ref) => [ref.batchId, ref]))
+    for (const item of progress.perFile.values()) {
+      if (item.batchId) byId.set(item.batchId, { batchId: item.batchId })
+    }
+    window.localStorage.setItem(UPLOAD_CENTER_STORAGE_KEY, JSON.stringify(Array.from(byId.values()).slice(-30)))
+  } catch {
+    // Browser storage may be disabled; server remains authoritative.
+  }
+}
 
 interface BatchUploadModalProps {
   readonly open: boolean
@@ -358,6 +374,7 @@ export function BatchUploadModal({ open, kbId, services, onClose, onSuccess }: B
         concurrency,
         signal: ac.signal,
         onProgress: (next) => {
+          rememberUploadBatches(next)
           setProgress(next)
           setSuccessCount(next.completed)
           setFailedCount(next.failed)
@@ -467,6 +484,7 @@ export function BatchUploadModal({ open, kbId, services, onClose, onSuccess }: B
         concurrency,
         signal: ac.signal,
         onProgress: (next) => {
+          rememberUploadBatches(next)
           setProgress((prev) => {
             if (!prev) {
               setSuccessCount(next.completed)

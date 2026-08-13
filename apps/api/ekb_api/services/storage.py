@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 import os
 import unicodedata
 from dataclasses import dataclass, field
@@ -541,6 +542,13 @@ class ItemProjection:
     version_id: Optional[str]
     job_id: Optional[str]
     error: Optional[dict]
+    source_status: str
+    byte_size: int
+    uploaded_bytes: int
+    stage: Optional[str]
+    attempt_id: Optional[str]
+    attempt_no: Optional[int]
+    attempts: int
 
 
 @dataclass
@@ -554,6 +562,8 @@ class BatchProjection:
     created_at: str
     updated_at: str
     items: list[ItemProjection] = field(default_factory=list)
+    source_status: str = ""
+    counts: dict[str, int] = field(default_factory=dict)
 
 
 # ---- Upload service -------------------------------------------------------
@@ -1098,17 +1108,27 @@ class UploadService:
             items = [
                 self._item_projection(connection, row, tenant_id=tenant_id) for row in item_rows
             ]
-            item_statuses = {str(row.status) for row in item_rows}
-            if "FAILED" in item_statuses:
-                batch_status = "FAILED"
-            elif item_statuses and item_statuses == {"COMPLETED"}:
-                batch_status = "COMPLETED"
-            elif item_statuses.intersection({"COMPLETING", "UPLOADED"}):
-                batch_status = "COMPLETING"
-            elif item_statuses.intersection({"UPLOADING", "WAITING"}):
-                batch_status = "UPLOADING"
+            item_statuses = [item.status for item in items]
+            counts = {status: item_statuses.count(status) for status in (
+                "queued", "uploading", "verifying", "processing", "indexing",
+                "ready", "failed", "cancelled",
+            )}
+            if counts["failed"]:
+                batch_status = "failed"
+            elif item_statuses and all(status == "ready" for status in item_statuses):
+                batch_status = "ready"
+            elif counts["cancelled"] and sum(counts.values()) == counts["cancelled"]:
+                batch_status = "cancelled"
+            elif counts["indexing"]:
+                batch_status = "indexing"
+            elif counts["processing"]:
+                batch_status = "processing"
+            elif counts["verifying"]:
+                batch_status = "verifying"
+            elif counts["uploading"]:
+                batch_status = "uploading"
             else:
-                batch_status = str(batch.status)
+                batch_status = "queued"
         return BatchProjection(
             id=str(batch.id),
             kb_id=str(batch.knowledge_base_id),
@@ -1119,6 +1139,8 @@ class UploadService:
             created_at=str(batch.created_at),
             updated_at=str(batch.updated_at),
             items=items,
+            source_status=str(batch.status),
+            counts=counts,
         )
 
     def _item_projection(self, connection, item_row, *, tenant_id: str) -> ItemProjection:
@@ -1126,6 +1148,11 @@ class UploadService:
         job_id = None
         progress = None
         error = None
+        stage = None
+        attempt_id = None
+        attempt_no = None
+        attempts = 0
+        job_status = None
         if item_row.source_object_id is not None:
             dv = connection.execute(
                 text(
@@ -1138,46 +1165,89 @@ class UploadService:
                 version_id = str(dv.id)
                 job = connection.execute(
                     text(
-                        "SELECT id, status FROM ingest_jobs "
+                        "SELECT id, status, attempts FROM ingest_jobs "
                         "WHERE document_version_id=:dv AND tenant_id=:tenant LIMIT 1"
                     ),
                     {"dv": str(dv.id), "tenant": tenant_id},
                 ).first()
                 if job is not None:
                     job_id = str(job.id)
-        if item_row.error_code is not None:
+                    job_status = str(job.status).upper()
+                    attempts = int(job.attempts or 0)
+        if item_row.error_code is not None or job_status == "FAILED":
+            error_code = str(item_row.error_code or "INGEST_FAILED")
+            error_detail = _json_value(getattr(item_row, "error_detail", None))
             error = {
-                "code": str(item_row.error_code),
-                "message": "上传失败",
-                "retryable": False,
+                "code": error_code,
+                "message": "上传或摄取失败",
+                "retryable": _is_retryable_error(error_code),
             }
+            if isinstance(error_detail, dict):
+                from ekb_api.services.parsers.registry import sanitize_detail
+
+                error["detail"] = sanitize_detail(error_detail)
         # progress from the active/last attempt of the ingest job
         if job_id is not None:
             attempt = connection.execute(
                 text(
-                    "SELECT state, current_stage, progress_current, progress_total "
+                    "SELECT id, attempt_no, state, current_stage, progress_current, progress_total, "
+                    "error_code, sanitized_error "
                     "FROM ingest_job_attempts WHERE ingest_job_id=:job AND tenant_id=:tenant "
                     "ORDER BY attempt_no DESC LIMIT 1"
                 ),
                 {"job": job_id, "tenant": tenant_id},
             ).first()
             if attempt is not None:
+                attempt_id = str(attempt.id)
+                attempt_no = int(attempt.attempt_no)
+                stage = str(attempt.current_stage) if attempt.current_stage else None
                 unit = _progress_unit(str(attempt.current_stage))
                 progress = {
                     "unit": unit,
                     "current": int(attempt.progress_current or 0),
                     "total": int(attempt.progress_total or 0),
-                    "stage": str(attempt.current_stage),
+                    "stage": stage,
                 }
+                if attempt.error_code and error is None:
+                    error = {
+                        "code": str(attempt.error_code),
+                        "message": "摄取失败",
+                        "retryable": _is_retryable_error(str(attempt.error_code)),
+                    }
+                if attempt.sanitized_error and error is not None:
+                    detail = _json_value(attempt.sanitized_error)
+                    if isinstance(detail, dict):
+                        error["detail"] = detail
+        raw_status = str(item_row.status).upper()
+        status = _canonical_upload_status(
+            raw_status,
+            job_status=job_status,
+            stage=stage,
+            has_job=job_id is not None,
+        )
+        if status in {"uploading", "verifying"}:
+            progress = {
+                "unit": "bytes",
+                "current": int(item_row.uploaded_bytes or 0),
+                "total": int(item_row.byte_size or 0),
+                "stage": status.upper(),
+            }
         return ItemProjection(
             id=str(item_row.id),
             client_item_id=str(item_row.client_item_id),
             relative_path=str(item_row.normalized_relative_path),
-            status=str(item_row.status),
+            status=status,
             progress=progress,
             version_id=version_id,
             job_id=job_id,
             error=error,
+            source_status=raw_status,
+            byte_size=int(item_row.byte_size or 0),
+            uploaded_bytes=int(item_row.uploaded_bytes or 0),
+            stage=stage,
+            attempt_id=attempt_id,
+            attempt_no=attempt_no,
+            attempts=attempts,
         )
 
 
@@ -1200,3 +1270,44 @@ def _progress_unit(stage: str) -> str:
         "EMBEDDING": "chunks",
         "INDEXING": "vectors",
     }.get(stage, "units")
+
+
+def _json_value(value: object) -> object:
+    if value is None or isinstance(value, (dict, list, int, float, bool)):
+        return value
+    try:
+        return json.loads(str(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def _is_retryable_error(code: str) -> bool:
+    from ekb_api.services.parsers.registry import is_retryable
+
+    return bool(is_retryable(code))
+
+
+def _canonical_upload_status(
+    raw_status: str,
+    *,
+    job_status: Optional[str],
+    stage: Optional[str],
+    has_job: bool,
+) -> str:
+    if raw_status in {"ABORTED", "CANCELLED"} or job_status == "CANCELLED":
+        return "cancelled"
+    if raw_status in {"REJECTED", "FAILED"}:
+        return "failed"
+    if job_status == "SUCCEEDED" or raw_status == "COMPLETED":
+        return "ready"
+    if job_status == "FAILED":
+        return "failed"
+    if stage == "INDEXING":
+        return "indexing"
+    if has_job or job_status in {"QUEUED", "RUNNING"} or raw_status in {"UPLOADED", "COMPLETING"}:
+        return "processing"
+    if raw_status == "UPLOADING":
+        return "uploading"
+    if raw_status in {"WAITING", "ACCEPTED"}:
+        return "queued"
+    return "verifying"

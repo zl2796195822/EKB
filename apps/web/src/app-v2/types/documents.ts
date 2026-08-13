@@ -105,6 +105,55 @@ export interface DocumentsServices {
   readonly retry: (kbId: string, docId: string) => Promise<{ readonly state: PageState; readonly data?: { readonly status: string; readonly traceId: string }; readonly error?: AdapterError }>
   readonly listVersions: (kbId: string, docId: string) => Promise<DocumentVersionsResult>
   readonly diff: (kbId: string, docId: string, from: number, to: number) => Promise<DocumentDiffResult>
+  readonly getUploadBatch: (batchId: string) => Promise<UploadBatchResult>
+  readonly retryUploadJob: (jobId: string) => Promise<UploadBatchActionResult>
+  readonly cancelUploadJob: (jobId: string) => Promise<UploadBatchActionResult>
+  readonly abortUploadItem: (itemId: string) => Promise<UploadBatchActionResult>
+}
+
+export type UploadCenterStatus = 'queued' | 'uploading' | 'verifying' | 'processing' | 'indexing' | 'ready' | 'failed' | 'cancelled'
+
+export interface UploadBatchItemView {
+  readonly id: string
+  readonly clientItemId: string
+  readonly relativePath: string
+  readonly status: UploadCenterStatus
+  readonly sourceStatus?: string
+  readonly byteSize?: number
+  readonly uploadedBytes?: number
+  readonly stage: string | null
+  readonly attemptId: string | null
+  readonly attemptNo: number | null
+  readonly attempts: number
+  readonly progress: Readonly<Record<string, unknown>> | null
+  readonly versionId: string | null
+  readonly jobId: string | null
+  readonly error: { readonly code: string; readonly message: string; readonly retryable: boolean; readonly detail?: Readonly<Record<string, unknown>> } | null
+}
+
+export interface UploadBatchView {
+  readonly id: string
+  readonly kbId: string
+  readonly mode: string
+  readonly status: UploadCenterStatus
+  readonly itemCount: number
+  readonly totalBytes: number
+  readonly createdAt: string
+  readonly updatedAt: string
+  readonly counts: Readonly<Record<string, number>>
+  readonly items: readonly UploadBatchItemView[]
+}
+
+export interface UploadBatchResult {
+  readonly state: PageState
+  readonly data?: UploadBatchView
+  readonly error?: AdapterError
+}
+
+export interface UploadBatchActionResult {
+  readonly state: PageState
+  readonly data?: { readonly status: string; readonly attemptId?: string; readonly attemptNo?: number }
+  readonly error?: AdapterError
 }
 
 /**
@@ -134,6 +183,8 @@ export interface BulkFileProgress {
   readonly data?: UploadAcceptedView
   readonly error?: AdapterError
   readonly skippedReason?: string
+  readonly batchId?: string
+  readonly uploadItemId?: string
 }
 
 export interface BulkUploadProgress {

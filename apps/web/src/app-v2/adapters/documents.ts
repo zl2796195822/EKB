@@ -14,6 +14,9 @@ import type {
   DocumentView,
   DocumentsServices,
   UploadAcceptedView,
+  UploadBatchActionResult,
+  UploadBatchItemView,
+  UploadBatchView,
 } from '../types'
 import { stateForData, stateForError, toAdapterError } from './index'
 
@@ -46,6 +49,37 @@ function mapDocument(input: import('../../types/api').DocumentRecord): DocumentV
 
 function mapUpload(input: import('../../types/api').UploadAcceptedResponse): UploadAcceptedView {
   return { docId: input.doc_id, jobId: input.job_id, status: input.status, traceId: input.trace_id }
+}
+
+function mapUploadBatch(input: import('../../types/api').UploadBatchProjection): UploadBatchView {
+  return {
+    id: input.id,
+    kbId: input.kb_id,
+    mode: input.mode,
+    status: input.status as UploadBatchView['status'],
+    itemCount: input.item_count,
+    totalBytes: input.total_bytes,
+    createdAt: input.created_at,
+    updatedAt: input.updated_at,
+    counts: input.counts ?? {},
+    items: input.items.map((item): UploadBatchItemView => ({
+      id: item.id,
+      clientItemId: item.client_item_id,
+      relativePath: item.relative_path,
+      status: item.status as UploadBatchItemView['status'],
+      sourceStatus: item.source_status,
+      byteSize: item.byte_size,
+      uploadedBytes: item.uploaded_bytes,
+      stage: item.stage ?? null,
+      attemptId: item.attempt_id ?? null,
+      attemptNo: item.attempt_no ?? null,
+      attempts: item.attempts ?? 0,
+      progress: item.progress,
+      versionId: item.version_id,
+      jobId: item.job_id,
+      error: item.error,
+    })),
+  }
 }
 
 function mapVersionChunk(input: import('../../types/api').DocumentVersionChunk): DocumentVersionChunkView {
@@ -200,6 +234,9 @@ async function uploadBulkImpl(
       if (!accepted?.accepted || !accepted.upload_item_id || !accepted.upload_session?.upload_urls[0]) {
         throw new Error(accepted?.error_code || '上传预检未接受文件')
       }
+      const withServerIds = perFile.get(item.id)!
+      perFile.set(item.id, { ...withServerIds, batchId: batch.batch_id, uploadItemId: accepted.upload_item_id, status: 'uploading' })
+      emit()
       await client.putUploadObject(accepted.upload_session.upload_urls[0], item.file)
       const completed = await client.completeUploadItem(accepted.upload_item_id, {
         sha256: checksum,
@@ -212,7 +249,7 @@ async function uploadBulkImpl(
         traceId: completed.ingest_job_id,
       }
       const cur = perFile.get(item.id)!
-      perFile.set(item.id, { ...cur, status: 'success', data })
+      perFile.set(item.id, { ...cur, status: 'success', data, batchId: batch.batch_id, uploadItemId: accepted.upload_item_id })
     } catch (error) {
       const mapped = toAdapterError(error, '文档上传失败')
       const cur = perFile.get(item.id)!
@@ -316,6 +353,37 @@ export function createDocumentsAdapter(client: ApiClient): DocumentsServices {
         return { state: 'ready', data: mapDiff(await client.getDocumentDiff(kbId, docId, from, to)) }
       } catch (error) {
         return errorResult(error, '版本差异加载失败')
+      }
+    },
+    getUploadBatch: async (batchId) => {
+      try {
+        return { state: 'ready', data: mapUploadBatch(await client.getUploadBatch(batchId)) }
+      } catch (error) {
+        return errorResult(error, '上传批次状态加载失败')
+      }
+    },
+    retryUploadJob: async (jobId): Promise<UploadBatchActionResult> => {
+      try {
+        const result = await client.retryIngestJob(jobId)
+        return { state: 'ready', data: { status: 'queued', attemptId: result.attempt_id, attemptNo: result.attempt_no } }
+      } catch (error) {
+        return errorResult(error, '摄取任务重试失败')
+      }
+    },
+    cancelUploadJob: async (jobId): Promise<UploadBatchActionResult> => {
+      try {
+        const result = await client.cancelIngestJob(jobId)
+        return { state: 'ready', data: { status: result.status } }
+      } catch (error) {
+        return errorResult(error, '摄取任务取消失败')
+      }
+    },
+    abortUploadItem: async (itemId): Promise<UploadBatchActionResult> => {
+      try {
+        const result = await client.abortUploadItem(itemId)
+        return { state: 'ready', data: { status: result.status } }
+      } catch (error) {
+        return errorResult(error, '上传项取消失败')
       }
     },
   }

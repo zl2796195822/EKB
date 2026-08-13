@@ -49,6 +49,16 @@ CR-PH1-T01 + CR-PH1-T03 的第一真实业务切片已在本地工作树实现�
 ## CR-PH4-T07 local contract closure (2026-08-13)
 
 联网 Web Search 已从本地 QA UI、API、runtime 和配置移除；旧 `options.web_search` 请求在检索/网络调用前以 `400 FEATURE_REMOVED` fail closed。QA 仍独立保留授权 KB RAG、附件上下文和远程 LLM Provider/Model；Composer 真实浏览器状态不显示联网搜索，添加文件、远程模型和 KB 上下文仍可见。阶段记录：backend `345 passed, 2 skipped`；web `51 passed`、typecheck/build 通过。以上仅为本地证据，不代表生产部署完成。
+
+## CR-PH3-T06 Upload Center local closure (2026-08-13)
+
+本地 DONE-LOCAL 仅覆盖 Upload Center 的真实状态/刷新恢复切片，不代表全 PH3 或 PH0–PH8 完成。服务端 batch projection 从持久化 batch/session/item/ingest job 读取 canonical `queued`、`uploading`、`verifying`、`processing`、`indexing`、`ready`、`failed`、`cancelled`，并返回 counts、阶段/进度、attempt、job id 及脱敏 error code/message/retryable 信息；未知、越权或不属于当前租户的 batch/item fail closed。
+
+前端以 `ekb.upload-center.batch-refs.v1` 保存 batch refs，启动/刷新后逐个重新 GET 服务端 projection，不依赖内存成功态；failed 且 retryable 的 item 调用真实 retry，processing/uploading 调用真实 cancel/abort，操作完成后重新 GET，不写假成功。浏览器实测的本地上传路径已记录真实服务端状态；本地 embedding provider 缺失时真实失败为 `EMBEDDING_UNAVAILABLE`，UI 保持失败，不把 queued/processing 冒充 ready。
+
+验证：后端 Upload Center/ingest/boundary 定向回归 `34 passed`；前端 `52 passed`，typecheck/build 通过；`git diff --check` 与本次文档 diff secret scan 通过。生产 PostgreSQL/pgvector、对象存储、可靠队列/Worker/Scheduler、服务器备份、部署/回滚和生产浏览器均未执行，原因是当前运行时没有生产目标/受管凭据；本地 SQLite 证据不代表生产完成。
+
+下一步本地缺口：仍需在具备受管远程 embedding/provider 与生产基础设施配置后验证成功索引、PG/pgvector、对象存储及可靠 worker/scheduler；Upload Center 目前恢复已知 batch refs，尚不是跨设备的服务端全局批次列表。全 PH3/PH4–PH8 仍按各自范围分别验收。
 ## 2026-08-13 Promotion and theme local slice
 
 - DONE-LOCAL：真实 POST /api/v1/attachments/{attachment_id}/promotions；校验 tenant/owner/live KB ACL、路径冲突/回收站保留/幂等/并发；复用 attachment source_object_id 创建 document/version/ingest job，返回 HTTP 202、状态 QUEUED，worker 投影真实状态，不把队列写成成功。

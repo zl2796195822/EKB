@@ -1,15 +1,17 @@
 import {
+  ArrowClockwise,
   ArrowsHorizontal,
   ArrowsLeftRight,
   FileText,
   FolderOpen,
   FunnelSimple,
   MagnifyingGlass,
+  Stop,
   UploadSimple,
   X,
 } from '@phosphor-icons/react'
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
-import { BatchUploadModal, DocumentTable, type DocumentTableRow } from '../components/documents'
+import { BatchUploadModal, DocumentTable, UPLOAD_CENTER_STORAGE_KEY, type DocumentTableRow } from '../components/documents'
 import { StatePanel } from '../components/StatePanel'
 import { StatusPill } from '../components/ui'
 import type {
@@ -20,10 +22,24 @@ import type {
   KnowledgeBaseView,
   PageState,
   SearchHitView,
+  UploadBatchItemView,
+  UploadBatchView,
   V2PageProps,
 } from '../types'
 
 const PAGE_SIZE = 10
+
+function formatBytes(n: number): string {
+  if (n <= 0) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  let value = n
+  let index = 0
+  while (value >= 1024 && index < units.length - 1) {
+    value /= 1024
+    index += 1
+  }
+  return `${value.toFixed(value >= 10 || index === 0 ? 0 : 2)} ${units[index]}`
+}
 
 export function DocumentsPage({ services }: V2PageProps) {
   const [knowledgeState, setKnowledgeState] = useState<PageState>('loading')
@@ -52,6 +68,10 @@ export function DocumentsPage({ services }: V2PageProps) {
   const [diff, setDiff] = useState<DocumentDiffView | null>(null)
   const uploadInputRef = useRef<HTMLInputElement | null>(null)
   const [batchUploadOpen, setBatchUploadOpen] = useState(false)
+  const [uploadCenterState, setUploadCenterState] = useState<PageState>('loading')
+  const [uploadBatches, setUploadBatches] = useState<readonly UploadBatchView[]>([])
+  const [uploadErrors, setUploadErrors] = useState<readonly AdapterError[]>([])
+  const [uploadActionKey, setUploadActionKey] = useState<string | null>(null)
 
   const clearNotice = () => {
     setNotice(null)
@@ -88,15 +108,73 @@ export function DocumentsPage({ services }: V2PageProps) {
     setDocumentsState(merged.length > 0 ? 'ready' : 'empty')
   }, [services.documents, services.knowledge])
 
+  const loadUploadCenter = useCallback(async () => {
+    let batchIds: string[] = []
+    try {
+      const stored = JSON.parse(window.localStorage.getItem(UPLOAD_CENTER_STORAGE_KEY) ?? '[]') as unknown
+      if (Array.isArray(stored)) {
+        batchIds = stored
+          .map((value) => value && typeof value === 'object' && 'batchId' in value ? (value as { batchId?: unknown }).batchId : null)
+          .filter((value): value is string => typeof value === 'string' && value.length > 0 && value.length <= 128)
+      }
+    } catch {
+      setUploadErrors([{ code: 'UPLOAD_CENTER_STORAGE_INVALID', message: '上传中心本地索引不可读，未使用本地样本替代。' }])
+    }
+    const uniqueIds = Array.from(new Set(batchIds)).slice(-30)
+    if (uniqueIds.length === 0) {
+      setUploadBatches([])
+      setUploadCenterState('empty')
+      return
+    }
+    setUploadCenterState('loading')
+    const results = await Promise.all(uniqueIds.map((batchId) => services.documents.getUploadBatch(batchId)))
+    const loaded = results.flatMap((result) => result.data ? [result.data] : [])
+    const errors = results.flatMap((result) => result.error ? [result.error] : [])
+    setUploadBatches(loaded)
+    setUploadErrors(errors)
+    setUploadCenterState(loaded.length > 0 ? 'ready' : errors.length > 0 ? 'error' : 'empty')
+  }, [services.documents])
+
   useEffect(() => {
     void loadDocuments()
   }, [loadDocuments])
+
+  useEffect(() => {
+    void loadUploadCenter()
+  }, [loadUploadCenter])
 
   useEffect(() => {
     if (!documents.some((document) => document.status === 'PROCESSING' || document.status === 'INDEXING')) return
     const timer = window.setInterval(() => void loadDocuments(), 2000)
     return () => window.clearInterval(timer)
   }, [documents, loadDocuments])
+
+  useEffect(() => {
+    if (!uploadBatches.some((batch) => batch.status !== 'ready' && batch.status !== 'failed' && batch.status !== 'cancelled')) return
+    const timer = window.setInterval(() => void loadUploadCenter(), 2500)
+    return () => window.clearInterval(timer)
+  }, [loadUploadCenter, uploadBatches])
+
+  const handleUploadAction = async (item: UploadBatchItemView, action: 'retry' | 'cancel') => {
+    const jobId = item.jobId
+    const itemId = item.id
+    if (action === 'retry' && (!jobId || !item.error?.retryable)) return
+    if (action === 'cancel' && !jobId && !itemId) return
+    const key = `${action}:${jobId ?? itemId}`
+    setUploadActionKey(key)
+    setUploadErrors([])
+    const result = action === 'retry' && jobId
+      ? await services.documents.retryUploadJob(jobId)
+      : action === 'cancel' && jobId
+        ? await services.documents.cancelUploadJob(jobId)
+        : await services.documents.abortUploadItem(itemId)
+    setUploadActionKey(null)
+    if (result.state !== 'ready') {
+      setUploadErrors(result.error ? [result.error] : [{ code: 'UPLOAD_ACTION_FAILED', message: '上传操作失败，服务端状态未改变。' }])
+      return
+    }
+    await loadUploadCenter()
+  }
 
   const filteredDocuments = useMemo(() => {
     const query = documentQuery.trim().toLowerCase()
@@ -214,6 +292,14 @@ export function DocumentsPage({ services }: V2PageProps) {
       </section>
       {notice ? <div className="v2-m3-notice v2-m3-notice--success" role="status">{notice}</div> : null}
       {noticeError ? <div className="v2-m3-notice v2-m3-notice--error" role="alert"><span>{noticeError.message}<small>{formatErrorMeta(noticeError)}</small></span></div> : null}
+      <UploadCenter
+        state={uploadCenterState}
+        batches={uploadBatches}
+        errors={uploadErrors}
+        actionKey={uploadActionKey}
+        onAction={(item, action) => void handleUploadAction(item, action)}
+        onRefresh={() => void loadUploadCenter()}
+      />
       <section className="v2-m3-document-center-card" aria-label="文档列表">
         <div className="v2-m3-document-toolbar v2-m3-document-center-toolbar">
           <label className="v2-m3-search-input"><MagnifyingGlass size={15} aria-hidden="true" /><input value={documentQuery} onChange={(event) => { setDocumentQuery(event.target.value); setCurrentPage(1) }} placeholder="筛选已加载文档名称、类型或状态…" aria-label="筛选已加载文档名称、类型或状态" /><span>本地筛选</span></label>
@@ -230,9 +316,114 @@ export function DocumentsPage({ services }: V2PageProps) {
       </section>
       {detailDocument ? <Modal title="文档详情" onClose={() => setDetailDocument(null)}><DocumentDetail state={detailState} document={detailDocument} /></Modal> : detailState === 'loading' ? <Modal title="文档详情" onClose={() => setDetailState('empty')}><StatePanel state="loading" message="正在获取文档详情。" /></Modal> : null}
       {versionDocument ? <Modal title={`版本与 diff · ${versionDocument.title}`} onClose={() => setVersionDocument(null)}><VersionPanel state={versionState} versions={versions} diffState={diffState} diff={diff} fromVersion={fromVersion} toVersion={toVersion} onFromChange={setFromVersion} onToChange={setToVersion} onDiff={() => void handleDiff()} /></Modal> : null}
-      <BatchUploadModal open={batchUploadOpen} kbId={selectedSearchKbId || null} services={services} onClose={() => setBatchUploadOpen(false)} onSuccess={() => void loadDocuments()} />
+      <BatchUploadModal open={batchUploadOpen} kbId={selectedSearchKbId || null} services={services} onClose={() => setBatchUploadOpen(false)} onSuccess={() => { void loadDocuments(); void loadUploadCenter() }} />
     </div>
   )
+}
+
+function UploadCenter({
+  state,
+  batches,
+  errors,
+  actionKey,
+  onAction,
+  onRefresh,
+}: {
+  readonly state: PageState
+  readonly batches: readonly UploadBatchView[]
+  readonly errors: readonly AdapterError[]
+  readonly actionKey: string | null
+  readonly onAction: (item: UploadBatchItemView, action: 'retry' | 'cancel') => void
+  readonly onRefresh: () => void
+}) {
+  return (
+    <section className="v2-m3-upload-center-card" aria-label="上传中心">
+      <div className="v2-m3-upload-center-heading">
+        <div>
+          <p className="v2-eyebrow">UPLOAD CENTER / SERVER PROJECTION</p>
+          <h2>上传中心</h2>
+          <p>刷新后从服务端重新读取批次；状态、进度、错误、attempt 和 job id 均不使用前端临时成功状态。</p>
+        </div>
+        <button type="button" className="v2-m3-secondary-button" onClick={onRefresh} disabled={state === 'loading'}>
+          <ArrowClockwise size={14} aria-hidden="true" />刷新状态
+        </button>
+      </div>
+      {errors.length > 0 ? <div className="v2-m3-upload-center-errors" role="alert">{errors.map((error, index) => <div key={`${error.code}-${index}`}><strong>{error.code}</strong><span>{error.message}</span></div>)}</div> : null}
+      {state === 'loading' ? <StatePanel state="loading" message="正在从服务端恢复上传批次。" /> : null}
+      {state === 'empty' ? <StatePanel state="empty" message="没有可恢复的上传批次。开始批量上传后，批次会进入这里。" /> : null}
+      {state === 'error' && batches.length === 0 ? <StatePanel state="error" message="上传中心无法读取真实批次，未用本地样本替代。" /> : null}
+      {batches.map((batch) => <UploadBatchCard key={batch.id} batch={batch} actionKey={actionKey} onAction={onAction} />)}
+    </section>
+  )
+}
+
+function UploadBatchCard({
+  batch,
+  actionKey,
+  onAction,
+}: {
+  readonly batch: UploadBatchView
+  readonly actionKey: string | null
+  readonly onAction: (item: UploadBatchItemView, action: 'retry' | 'cancel') => void
+}) {
+  const counts = batch.counts
+  const countText = ['ready', 'processing', 'indexing', 'uploading', 'verifying', 'queued', 'failed', 'cancelled']
+    .filter((status) => Number(counts[status] ?? 0) > 0)
+    .map((status) => `${UPLOAD_STATUS_LABEL[status] ?? status} ${counts[status]}`)
+    .join(' · ')
+  return (
+    <article className="v2-m3-upload-batch" data-batch-id={batch.id}>
+      <header className="v2-m3-upload-batch-heading">
+        <div><strong>批次 {batch.id}</strong><span>知识库 {batch.kbId} · {batch.mode} · {formatBytes(batch.totalBytes)}</span></div>
+        <span className={`v2-m3-upload-status v2-m3-upload-status--${batch.status}`}>{UPLOAD_STATUS_LABEL[batch.status] ?? batch.status}</span>
+      </header>
+      <div className="v2-m3-upload-batch-meta"><span>{countText || '暂无计数'}</span><time dateTime={batch.updatedAt}>更新 {formatDateTime(batch.updatedAt)}</time></div>
+      <ul className="v2-m3-upload-items">
+        {batch.items.map((item) => <UploadItemRow key={item.id} item={item} actionKey={actionKey} onAction={onAction} />)}
+      </ul>
+    </article>
+  )
+}
+
+function UploadItemRow({
+  item,
+  actionKey,
+  onAction,
+}: {
+  readonly item: UploadBatchItemView
+  readonly actionKey: string | null
+  readonly onAction: (item: UploadBatchItemView, action: 'retry' | 'cancel') => void
+}) {
+  const progress = item.progress
+  const current = typeof progress?.current === 'number' ? progress.current : item.uploadedBytes ?? 0
+  const total = typeof progress?.total === 'number' ? progress.total : item.byteSize ?? 0
+  const percent = total > 0 ? Math.max(0, Math.min(100, Math.round((current / total) * 100))) : item.status === 'ready' ? 100 : 0
+  const retryKey = `retry:${item.jobId ?? item.id}`
+  const cancelKey = `cancel:${item.jobId ?? item.id}`
+  return (
+    <li className="v2-m3-upload-item" data-item-status={item.status}>
+      <div className="v2-m3-upload-item-main"><strong title={item.relativePath}>{item.relativePath}</strong><span>{UPLOAD_STATUS_LABEL[item.status] ?? item.status} · {item.stage ?? '等待服务端阶段'} · {percent}%</span></div>
+      <div className="v2-m3-upload-item-progress" role="progressbar" aria-valuenow={percent} aria-valuemin={0} aria-valuemax={100}><span style={{ width: `${percent}%` }} /></div>
+      <div className="v2-m3-upload-item-meta"><span>attempt {item.attemptNo ?? '—'} / {item.attempts} · job {item.jobId ?? '—'}</span><span>item {item.id}</span></div>
+      {item.error ? <div className="v2-m3-upload-item-error"><strong>{item.error.code}</strong><span>{item.error.message}</span></div> : null}
+      <div className="v2-m3-upload-item-actions">
+        {item.status === 'failed' && item.error?.retryable && item.jobId ? <button type="button" className="v2-m3-secondary-button" onClick={() => onAction(item, 'retry')} disabled={actionKey === retryKey}><ArrowClockwise size={13} aria-hidden="true" />{actionKey === retryKey ? '重试中…' : '重试任务'}</button> : null}
+        {(item.status === 'processing' || item.status === 'indexing') && item.jobId ? <button type="button" className="v2-m3-secondary-button" onClick={() => onAction(item, 'cancel')} disabled={actionKey === cancelKey}><Stop size={13} aria-hidden="true" />{actionKey === cancelKey ? '取消中…' : '取消任务'}</button> : null}
+        {item.status === 'uploading' ? <button type="button" className="v2-m3-secondary-button" onClick={() => onAction(item, 'cancel')} disabled={actionKey === cancelKey}><Stop size={13} aria-hidden="true" />{actionKey === cancelKey ? '取消中…' : '取消上传'}</button> : null}
+      </div>
+    </li>
+  )
+}
+
+const UPLOAD_STATUS_LABEL: Record<string, string> = {
+  queued: '排队中',
+  uploading: '上传中',
+  verifying: '校验中',
+  processing: '处理中',
+  indexing: '索引中',
+  ready: '已就绪',
+  failed: '失败',
+  cancelled: '已取消',
 }
 
 function SearchResults({ state, query, hits }: { readonly state: PageState; readonly query: string; readonly hits: readonly SearchHitView[] }) {

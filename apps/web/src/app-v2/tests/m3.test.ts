@@ -1,4 +1,5 @@
 import { createDocumentsAdapter, createKnowledgeAdapter, createSearchAdapter } from '../adapters'
+import { it } from 'vitest'
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message)
@@ -42,6 +43,19 @@ export async function runM3ContractTests(): Promise<void> {
     uploadDocument: async () => ({ doc_id: 'doc-2', job_id: 'job-2', status: 'PROCESSING', trace_id: 'trace-2' }),
     deleteDocument: async () => undefined,
     retryDocument: async () => ({ status: 'accepted', trace_id: 'trace-3' }),
+    getUploadBatch: async () => ({
+      id: 'batch-1', kb_id: 'kb-1', mode: 'FILE', status: 'processing', item_count: 1, total_bytes: 4,
+      created_at: '2026-08-09T00:00:00Z', updated_at: '2026-08-09T00:01:00Z', counts: { processing: 1 },
+      items: [{
+        id: 'item-1', client_item_id: 'client-1', relative_path: 'docs/real.txt', status: 'processing',
+        source_status: 'UPLOADED', byte_size: 4, uploaded_bytes: 4, stage: 'PARSING', attempt_id: 'attempt-1',
+        attempt_no: 1, attempts: 1, progress: { unit: 'pages', current: 2, total: 4 }, version_id: 'version-1',
+        job_id: 'job-1', error: null,
+      }],
+    }),
+    retryIngestJob: async (jobId: string) => ({ success: true, attempt_id: `attempt-retry-${jobId}`, attempt_no: 2 }),
+    cancelIngestJob: async () => ({ status: 'CANCELLED' }),
+    abortUploadItem: async () => ({ success: true, item_id: 'item-1', status: 'ABORTED' }),
     listDocumentVersions: async () => [{ id: 'version-1', doc_id: 'doc-1', version: 1, checksum: 'sha', chunk_count: 1, content_snapshot: [{ section_path: ['正文'], content_hash: 'hash', content_preview: '摘要' }], created_at: '2026-08-09T00:00:00Z' }],
     getDocumentDiff: async () => ({ doc_id: 'doc-1', from_version: 1, to_version: 2, added: [], removed: [], changed: [], unchanged: [] }),
     search: async (_query: string, kbId: string) => [{ chunk_id: 'chunk-1', doc_id: 'doc-1', kb_id: kbId, title: '真实文档', section_path: [], snippet: '真实命中', score: 0.8, updated_at: '2026-08-09T00:00:00Z' }],
@@ -61,6 +75,14 @@ export async function runM3ContractTests(): Promise<void> {
   assert(documentResult.data?.[0]?.kbId === 'kb-1', 'document adapter should map kb id')
   const uploadResult = await documents.upload('kb-1', new File(['data'], 'real.txt', { type: 'text/plain' }))
   assert(uploadResult.data?.docId === 'doc-2' && uploadResult.data.jobId === 'job-2', 'upload adapter should expose accepted metadata')
+  const batchResult = await documents.getUploadBatch('batch-1')
+  assert(batchResult.data?.status === 'processing' && batchResult.data.items[0]?.attemptId === 'attempt-1', 'upload center should map server batch/item metadata')
+  const retried = await documents.retryUploadJob('job-1')
+  assert(retried.data?.attemptNo === 2, 'upload center retry should preserve server attempt number')
+  const cancelled = await documents.cancelUploadJob('job-1')
+  assert(cancelled.data?.status === 'CANCELLED', 'upload center cancel should preserve server status')
+  const aborted = await documents.abortUploadItem('item-1')
+  assert(aborted.data?.status === 'ABORTED', 'upload center abort should preserve server status')
   const versionsResult = await documents.listVersions('kb-1', 'doc-1')
   assert(versionsResult.data?.[0]?.contentSnapshot[0]?.sectionPath[0] === '正文', 'version adapter should map snapshot view model')
   const diffResult = await documents.diff('kb-1', 'doc-1', 1, 2)
@@ -70,4 +92,6 @@ export async function runM3ContractTests(): Promise<void> {
   assert(searchResult.data?.[0]?.knowledgeBaseId === 'kb-1', 'search adapter should preserve selected KB binding')
 }
 
-void runM3ContractTests().then(() => console.log('M3 contract tests: PASS'))
+it('M3 Upload Center contract maps server batch state and actions', async () => {
+  await runM3ContractTests()
+})

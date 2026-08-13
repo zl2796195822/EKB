@@ -78,10 +78,17 @@ export interface UploadBatchProjectionItem {
   client_item_id: string
   relative_path: string
   status: string
+  source_status?: string
+  byte_size?: number
+  uploaded_bytes?: number
+  stage?: string | null
+  attempt_id?: string | null
+  attempt_no?: number | null
+  attempts?: number
   progress: Record<string, unknown> | null
   version_id: string | null
   job_id: string | null
-  error: { code: string; message: string; retryable: boolean } | null
+  error: { code: string; message: string; retryable: boolean; detail?: Record<string, unknown> } | null
 }
 
 export interface UploadBatchProjection {
@@ -94,6 +101,8 @@ export interface UploadBatchProjection {
   created_at: string
   updated_at: string
   items: UploadBatchProjectionItem[]
+  source_status?: string
+  counts?: Record<string, number>
 }
 
 export interface DocumentRetryResponse {

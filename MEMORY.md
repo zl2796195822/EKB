@@ -454,3 +454,10 @@ Nginx 配置：
 - 显式 model 的 unknown、disabled、cross-tenant、no-credential 情形统一 fail closed 为 `MODEL_UNAVAILABLE`；图片选择非 `vision=true` 模型为 `MODEL_NOT_ALLOWED`；显式选择不静默 fallback；普通无 model 请求保留既有 provider fallback。
 - 验证：backend `349 passed, 2 skipped`；web `51 passed`、typecheck/build；定向 `63 passed`；范围 Ruff（忽略既有 E501 等）、compileall、`git diff --check` 通过。真实浏览器此前确认 Profile 模型服务目录、Assistant 添加文件/模型/KB context 可见。
 - 未验证真实 Provider 出网或生产完成；生产 PostgreSQL/pgvector、对象存储、队列/Worker/Scheduler、服务器备份/部署/回滚和生产浏览器仍 `NOT RUN/BLOCKED`。本条不记录任何凭据，且不涉及 Skills/legacy backup/deploy/migrations/theme/Web Search。
+
+## 2026-08-13 Upload Center DONE-LOCAL
+
+- DONE-LOCAL：Upload Center 服务端从持久化 batch/session/item/ingest job 投影 canonical `queued`、`uploading`、`verifying`、`processing`、`indexing`、`ready`、`failed`、`cancelled`，附带 counts、阶段/进度、attempt、job id 和脱敏 error；未知或越权 batch/item fail closed。前端以 `ekb.upload-center.batch-refs.v1` 保存 batch refs，刷新后重新 GET 服务端 projection，不依赖内存状态。
+- retry/cancel/abort：failed 且 retryable item 调用真实 retry，processing/uploading 调用真实 cancel/abort；操作后重新 GET，不写假成功。此前本地真实浏览器上传后显示服务端状态；本地 embedding provider 缺失时真实失败为 `EMBEDDING_UNAVAILABLE`，不伪造 ready。
+- 验证：后端全量 `352 passed, 2 skipped`；Upload Center/ingest/boundary 切片 `34 passed`；前端 `52 passed`、typecheck/build 通过。
+- 生产 PostgreSQL/pgvector、对象存储、可靠队列/Worker/Scheduler、服务器备份、部署/回滚和生产浏览器未执行，原因是当前运行时没有生产目标/受管凭据；本条不记录任何凭据、令牌或私密地址。此条不代表全 PH3/PH0–PH8 完成。

@@ -47,6 +47,11 @@ export type {
   DocumentView,
   DocumentVersionsResult,
   DocumentsServices,
+  UploadBatchActionResult,
+  UploadBatchItemView,
+  UploadBatchResult,
+  UploadBatchView,
+  UploadCenterStatus,
   UploadAcceptedView,
   UploadResult,
 } from './documents'

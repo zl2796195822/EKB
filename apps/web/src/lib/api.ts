@@ -643,6 +643,18 @@ export class ApiClient {
     return this.request<UploadBatchProjection>(`/kb/uploads/batches/${encodeURIComponent(batchId)}`)
   }
 
+  async retryIngestJob(jobId: string): Promise<{ success: boolean; attempt_id: string; attempt_no: number }> {
+    return this.request(`/kb/ingest-jobs/${encodeURIComponent(jobId)}/retry`, { method: 'POST' })
+  }
+
+  async cancelIngestJob(jobId: string): Promise<UploadBatchProjection> {
+    return this.request(`/kb/ingest-jobs/${encodeURIComponent(jobId)}/cancel`, { method: 'POST' })
+  }
+
+  async abortUploadItem(itemId: string): Promise<{ success: boolean; item_id: string; status: string }> {
+    return this.request(`/kb/uploads/items/${encodeURIComponent(itemId)}/abort`, { method: 'POST' })
+  }
+
   async createKnowledgeBase(
     name: string,
     description = '',
