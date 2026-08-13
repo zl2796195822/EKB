@@ -585,3 +585,10 @@ Nginx 配置：
 - DONE-LOCAL：`ConversationGraphService.branch_messages` 现在只返回 `visibility_state` 为 `NULL` 或 `visible` 的消息；隐藏的取消/失败占位不会进入 branch materialization 或 UI。
 - 新增回归测试验证可见祖先与后续保留、hidden 排除；PH4 `33 passed`；Ruff、`compileall`、`git diff --check` passed；本地 `/healthz` `200`；当前浏览器未认证。
 - 生产服务器（`[production host]`）、备份、部署、回滚均 `NOT RUN/BLOCKED`；这是本地切片，不宣称 PH0–PH8 完成。证据见 [`docs/evidence/ekb-core-rebuild/local/2026-08-14-chat-hidden-filter.md`](docs/evidence/ekb-core-rebuild/local/2026-08-14-chat-hidden-filter.md)。不记录密码、token、API key 或私密地址。
+
+## 2026-08-14 Legacy `SqlStore.save_message` parent-chain bridge local closure
+
+- DONE-LOCAL：v4 bridge 对带 `turn_id` 的 `ASSISTANT` 优先选择同 `conversation`/`tenant`/`branch`/`turn` 的 `USER` 作为 parent，避免同秒 UUID 排序导致父子反向；无同 turn `USER` 时保留原 branch head 查询；无 v4 schema 时仍走 legacy 路径。
+- 新增回归测试覆盖真实临时 v4 SQLite；验证：PH4 `34 passed`；Ruff、`compileall`、`git diff --check` passed。
+- 已认证本地浏览器可见真实 Assistant 会话、知识库和 root 分支，但旧会话仍可能是历史数据，不宣称旧数据已批量修复。本地切片不宣称 PH0–PH8 完成。
+- 生产服务器（`[production host]`）、备份、部署、回滚均 `NOT RUN/BLOCKED`；证据见 [`docs/evidence/ekb-core-rebuild/local/2026-08-14-chat-parent-chain.md`](docs/evidence/ekb-core-rebuild/local/2026-08-14-chat-parent-chain.md)。不记录密码、token、API key 或私密地址。

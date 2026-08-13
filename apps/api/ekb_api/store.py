@@ -1460,20 +1460,38 @@ class SqlStore:
                             )
                             branch_id = root_branch.id
                         if branch_id is not None:
-                            parent_row = session.execute(
-                                text(
-                                    "SELECT id FROM messages "
-                                    "WHERE tenant_id=:tenant_id "
-                                    "AND conversation_id=:conversation_id "
-                                    "AND branch_id=:branch_id AND id<>:message_id "
-                                    "ORDER BY created_at DESC, id DESC LIMIT 1"
-                                ),
-                                {
-                                    **params,
-                                    "branch_id": branch_id,
-                                    "message_id": message.id,
-                                },
-                            ).first()
+                            parent_row = None
+                            if role.upper() == "ASSISTANT" and turn_id:
+                                parent_row = session.execute(
+                                    text(
+                                        "SELECT id FROM messages "
+                                        "WHERE tenant_id=:tenant_id "
+                                        "AND conversation_id=:conversation_id "
+                                        "AND branch_id=:branch_id AND turn_id=:turn_id "
+                                        "AND role='USER' "
+                                        "ORDER BY created_at ASC, id ASC LIMIT 1"
+                                    ),
+                                    {
+                                        **params,
+                                        "branch_id": branch_id,
+                                        "turn_id": turn_id,
+                                    },
+                                ).first()
+                            if parent_row is None:
+                                parent_row = session.execute(
+                                    text(
+                                        "SELECT id FROM messages "
+                                        "WHERE tenant_id=:tenant_id "
+                                        "AND conversation_id=:conversation_id "
+                                        "AND branch_id=:branch_id AND id<>:message_id "
+                                        "ORDER BY created_at DESC, id DESC LIMIT 1"
+                                    ),
+                                    {
+                                        **params,
+                                        "branch_id": branch_id,
+                                        "message_id": message.id,
+                                    },
+                                ).first()
                             parent = parent_row[0] if parent_row is not None else None
                             session.execute(
                                 text(

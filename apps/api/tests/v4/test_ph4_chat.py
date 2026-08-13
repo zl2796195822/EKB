@@ -25,6 +25,7 @@ import pytest
 from sqlalchemy import text
 
 from ekb_api.core.db import build_engine, prepare_legacy_schema
+from ekb_api.domain import AuthContext, TenantRole
 from ekb_api.migrations.v4_fullstack import CHAIN
 from ekb_api.services.context import (
     STRATEGY_SUMMARIZE,
@@ -65,6 +66,7 @@ from ekb_api.services.turns import (
     TurnTransitionError,
     is_fallback_allowed,
 )
+from ekb_api.store import SqlStore
 
 TENANT_B = "tenant-b"
 USER_B = "user-b"
@@ -120,6 +122,45 @@ def _fresh(tmp_path: Path, name: str):
     _apply_chain(engine)
     tenant, user = _identity(engine)
     return engine, tenant, user
+
+
+def test_save_message_assistant_prefers_same_turn_user_parent(
+    tmp_path: Path, monkeypatch
+) -> None:
+    engine, tenant, user = _fresh(tmp_path, "same-turn-parent.db")
+    monkeypatch.setattr("ekb_api.core.db._engine", engine)
+    monkeypatch.setattr("ekb_api.core.db._SessionLocal", None)
+
+    store = SqlStore()
+    auth = AuthContext(
+        actor_id=user,
+        tenant_id=tenant,
+        tenant_role=TenantRole.OWNER,
+        platform_role="NONE",
+        capabilities=[],
+        policy_version=1,
+        trace_id="same-turn-parent-test",
+    )
+    conversation = store.create_conversation(auth, "同回合父子关系")
+    user_message = store.save_message(
+        auth, conversation.id, "USER", "问题", turn_id="turn-same"
+    )
+    assistant_message = store.save_message(
+        auth, conversation.id, "ASSISTANT", "回答", turn_id="turn-same"
+    )
+
+    with engine.connect() as connection:
+        rows = connection.execute(
+            text(
+                "SELECT id, role, branch_id, parent_message_id, content_hash "
+                "FROM messages WHERE id IN (:user_id, :assistant_id)"
+            ),
+            {"user_id": user_message.id, "assistant_id": assistant_message.id},
+        ).mappings().all()
+    messages = {row["role"]: row for row in rows}
+    assert messages["ASSISTANT"]["branch_id"] == messages["USER"]["branch_id"]
+    assert messages["ASSISTANT"]["parent_message_id"] == messages["USER"]["id"]
+    assert messages["ASSISTANT"]["content_hash"]
 
 
 def _legacy_conversation(engine, *, tenant: str, user: str) -> dict[str, str]:
