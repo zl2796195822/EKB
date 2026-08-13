@@ -506,3 +506,11 @@ Nginx 配置：
 - worker 处理后两个条目均到达 `CHUNKING · 50%`；解析器未报 `MIME_UNSUPPORTED` 或 `PARSER_CORRUPT`。由于本地没有远程 Embedding provider/profile，两个条目的真实终态均为 `EMBEDDING_UNAVAILABLE/FAILED`；不得写成 `READY`、成功索引或远程 Provider 成功。
 - 浏览器仍有历史 auth-related console errors；不宣称 `console=0`。
 - 生产 PostgreSQL/pgvector、Provider 出网、对象存储、可靠队列/Worker/Scheduler、服务器备份/部署/回滚仍为 `NOT RUN/BLOCKED`。生产目标统一使用 `[production host]`，受管敏感值统一使用 `[REDACTED]`；不记录 token、password 或私密地址。
+
+## 2026-08-13 Local scheduler interval closure
+
+- DONE-LOCAL：已推送 commit `524e51a` 在 `apps/api/ekb_api/main.py` 增加 `EKB_LOCAL_SCHEDULER_INTERVAL` 的 `1–300` 秒有界解析；非法、越界或非十进制值回退 `60` 秒，且只在 development 本地 scheduler 分支生效。新增测试为 `apps/api/tests/test_local_scheduler.py`。
+- 本地 API 以 `interval=2` 启动后，真实 XLSX/PPTX 上传批次由后台 tick 从处理中推进到 `CHUNKING · 50%`，随后进入真实 `EMBEDDING_UNAVAILABLE/FAILED`；未出现 `MIME_UNSUPPORTED`、`PARSER_CORRUPT` 或伪 `READY`。
+- 验证：local scheduler + PH3 office/ingestion/scheduler 定向回归 `34 passed`；Ruff 与代码 diff check 通过。详细证据见 [`docs/evidence/ekb-core-rebuild/local/2026-08-13-local-scheduler.md`](docs/evidence/ekb-core-rebuild/local/2026-08-13-local-scheduler.md)。
+- 本次文档更新的 `git diff --check` 与新增文档 secret scan：通过。
+- NOT RUN/BLOCKED：生产 PostgreSQL/pgvector、Provider/Embedding 出网、生产对象存储、可靠队列、生产 Worker/Scheduler、服务器备份/部署/回滚仍未执行。生产目标统一使用 `[production host]`，受管敏感值统一使用 `[REDACTED]`；不记录凭据、token 或私密地址。本条不代表生产 scheduler 或 PH3/PH8 完成。
