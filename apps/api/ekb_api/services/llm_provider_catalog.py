@@ -819,7 +819,7 @@ PRESET_PROVIDERS: list[dict] = [
     {
         "id": "perplexity",
         "name": "Perplexity",
-        "description": "Perplexity API 提供联网搜索和对话模型。",
+        "description": "Perplexity API 提供远程对话模型。",
         "default_chat_endpoint": "openai-chat-completions",
         "endpoint_configs": {
             "openai-chat-completions": {

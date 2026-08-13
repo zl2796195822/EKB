@@ -321,20 +321,6 @@ CACHE_MISSES = registry.counter(
     "Cache misses by type (embedding, rewrite)",
     ("type",),
 )
-# Tavily 联网搜索指标（Phase 4）
-WEB_SEARCH_CALLS = registry.counter(
-    "web_search_calls_total",
-    "Tavily web search attempts by status (success, auth_error, rate_limited, timeout, network_error, upstream_5xx)",
-    ("status",),
-)
-WEB_SEARCH_DURATION = registry.histogram(
-    "web_search_duration_seconds",
-    "Tavily web search total duration (HTTP + parse)",
-)
-WEB_SEARCH_RESULT_COUNT = registry.histogram(
-    "web_search_result_count",
-    "Tavily web search hit count (0..MAX_RESULTS_CAP) per successful attempt",
-)
 QA_COMPACTION_TRIGGERED = registry.counter(
     "qa_compaction_triggered_total",
     "Number of times conversation history compaction was attempted",

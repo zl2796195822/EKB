@@ -1,4 +1,4 @@
-import { ArrowUp, Brain, CaretDown, Check, Cpu, Globe, Paperclip, PaperPlaneTilt, Stop, X } from '@phosphor-icons/react'
+import { ArrowUp, Brain, CaretDown, Check, Cpu, Paperclip, PaperPlaneTilt, Stop, X } from '@phosphor-icons/react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import type {
@@ -15,7 +15,6 @@ import type {
 export interface ComposerSelectionState {
   readonly attachmentDocIds: readonly string[]
   readonly attachmentLabels: Readonly<Record<string, string>>
-  readonly webSearch: boolean
   /** 旧布尔字段（向后兼容）：实际以 thinkingLevel 为准；light→false，其余→true */
   readonly deepThinking: boolean
   /** 思考程度：light/mild/medium/high/extreme，五档。默认 medium */
@@ -129,7 +128,6 @@ export function AssistantComposer({
   }, [panelOpen])
 
   const attachmentsEnabled = Boolean(capabilities?.attachmentsEnabled)
-  const webSearchEnabled = Boolean(capabilities?.webSearchEnabled)
   const deepThinkingEnabled = Boolean(capabilities?.deepThinkingEnabled)
   const modelChoiceEnabled = Boolean(capabilities?.modelChoiceEnabled) && models.length > 0
 
@@ -150,9 +148,6 @@ export function AssistantComposer({
   const thinkingLabel = thinkingMeta?.label ?? '中等'
 
   const triggerLabel = models.length > 0 ? `${modelNameLabel} · ${thinkingLabel}` : thinkingLabel
-
-  const toggleWebSearch = () =>
-    onSelectionChange({ ...selection, webSearch: !selection.webSearch })
 
   const pickAttachments = async () => {
     if (streaming) return
@@ -345,16 +340,6 @@ export function AssistantComposer({
             添加文件
             {selection.attachmentDocIds.length > 0 ? ` · ${selection.attachmentDocIds.length}` : ''}
           </ToggleButton>
-          <ToggleButton
-            active={selection.webSearch}
-            disabled={panelDisabled || !webSearchEnabled}
-            title={webSearchEnabled ? '开启联网搜索（配合知识库证据一同检索）' : '联网搜索功能暂未启用'}
-            icon={<Globe size={15} aria-hidden="true" />}
-            onClick={toggleWebSearch}
-          >
-            联网搜索
-          </ToggleButton>
-
           {/* 模型 + 思考：参考截图式抽屉（左列两项「模型」「思考强度」，点击哪项右列才显示哪项内容）。
               底部按钮显示「模型名 · 思考强度名」。抽屉默认打开时只显示「模型」的右列。 */}
           <div className="v2-m4-model-menu v2-m4-model-menu--drawer" ref={menuRef}>

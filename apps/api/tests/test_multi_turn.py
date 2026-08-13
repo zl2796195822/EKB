@@ -450,15 +450,6 @@ class TestMultiTurnIntegration:
         def _retrieve(*a, **kw):
             return fake_chunks
 
-        from ekb_api.core import web_search as ws_mod
-
-        def _fake_merge(*a, **kw):
-            return fake_evidences, [
-                {"index": i, "type": "kb", "title": f"t{i}", "doc_id": f"d{i}",
-                 "section_path": [], "version": 1, "updated_at": "2026-01-01T00:00:00Z"}
-                for i in range(len(fake_evidences))
-            ]
-
         def _stream_returns_refusal(question, evidence_texts, **kwargs):
             capture["stream_hist"] = kwargs.get("history_messages")
             yield from _stream_gen("证据不足，无法确认（还需更多信息）")
@@ -469,7 +460,7 @@ class TestMultiTurnIntegration:
 
         monkeypatch.setattr(SqlStore, "list_messages", _list_msgs)
         monkeypatch.setattr(qa_ns, "retrieve", _retrieve)
-        monkeypatch.setattr(qa_ns, "merge_evidence", _fake_merge)
+        monkeypatch.setattr(qa_ns, "_build_kb_evidence", lambda *a, **kw: fake_evidences)
         monkeypatch.setattr(qa_ns, "generate_answer_stream", _stream_returns_refusal)
         monkeypatch.setattr(qa_ns, "generate_answer", _recheck_generate_answer)
 

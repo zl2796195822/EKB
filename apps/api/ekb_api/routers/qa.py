@@ -37,16 +37,6 @@ from ekb_api.core.metrics import (
     QA_RETRIEVAL_DURATION,
     QA_TTFB_DURATION,
     QA_TURN_DURATION,
-    WEB_SEARCH_CALLS,
-    WEB_SEARCH_DURATION,
-    WEB_SEARCH_RESULT_COUNT,
-)
-from ekb_api.core.web_search import (
-    WebSearchResult,
-    WebSearchSummary,
-    merge_evidence,
-    perform_web_search,
-    web_search_enabled,
 )
 from ekb_api.domain import (
     AuthContext,
@@ -81,6 +71,33 @@ from ekb_api.store import SqlStore
 
 router = APIRouter(prefix="/qa", tags=["qa"])
 logger = logging.getLogger(__name__)
+
+
+def _build_kb_evidence(kb_chunks: list, max_citations: int) -> list[str]:
+    """Build generation context from authorized KB chunks only.
+
+    Web search was removed from the QA contract.  Keeping this formatter local
+    to the QA path makes the evidence boundary explicit: only chunks returned
+    by the authorized RAG retrieval can reach the remote LLM.
+    """
+    evidence_texts: list[str] = []
+    budget = max(max_citations, 1)
+    for chunk in kb_chunks:
+        if len(evidence_texts) >= budget:
+            break
+        title = str(
+            getattr(chunk, "doc_title", None)
+            or getattr(chunk, "title", None)
+            or "知识库文档"
+        ).strip()
+        section_path = getattr(chunk, "section_path", None)
+        header = title
+        if section_path:
+            header = f"{header} | 章节：{section_path}"
+        body = str(getattr(chunk, "content", "") or "").strip()
+        if body:
+            evidence_texts.append(f"[证据{len(evidence_texts) + 1} — 知识库]\n{header}\n{body}")
+    return evidence_texts
 
 
 # ---------------------------------------------------------------------------
@@ -203,6 +220,25 @@ async def ask(
 ) -> StreamingResponse:
     settings = get_settings()
 
+    # Compatibility boundary: the removed option is intentionally not an
+    # AskOptions field; stale clients fail closed before retrieval starts.
+    extra_options = getattr(payload.options, "model_extra", None) or {}
+    if "web_search" in extra_options:
+        raise ApiError(
+            400,
+            "FEATURE_REMOVED",
+            "联网搜索能力已移除，请仅使用授权知识库和附件上下文",
+            {"option": "web_search"},
+        )
+    if extra_options:
+        option = next(iter(extra_options))
+        raise ApiError(
+            400,
+            "UNSUPPORTED_FEATURE",
+            f"请求选项不受支持：{option}",
+            {"option": option},
+        )
+
     # SSE v2 feature flag：全局关闭时强制走 v1
     stream_version = payload.options.stream_version if settings.sse_v2_enabled else 1
     # v1 请求仍然保留老协议，避免老前端回归
@@ -230,7 +266,7 @@ async def ask(
             # 兜底：直接用局部变量覆盖，保证后续 route.model 读取优先用请求值
             logger.warning("TenantRoute.replace 失败，回退为不传选模型")
     # 附件 ID 是独立的聊天资源，绝不能当成 KB ID 参与 ACL 或检索。
-    # 3) deep_thinking / web_search 读取供后续 prompt 透传
+    # 3) deep_thinking 读取供后续 prompt 透传
     #    thinking_level 五档：light 才关（=无推理增强），mild/medium/high/extreme 都开
     #    兼容旧三档：off→light，standard→medium，intensive→high
     thinking_level_raw = (payload.options.thinking_level or "medium").lower()
@@ -239,8 +275,6 @@ async def ask(
     if thinking_level not in {"light", "mild", "medium", "high", "extreme"}:
         thinking_level = "medium"
     use_deep_thinking = thinking_level != "light" or bool(payload.options.deep_thinking)
-    use_web_search = bool(payload.options.web_search)  # 当前版本透传占位，未接入 SERP API
-
     # PH6 FR-050：显式 kb_ids 必须全部在授权可见范围内（防伪造 ID 越权检索）。
     validated_kb_ids = rag.validate_kb_scope(store, auth, payload.kb_ids)
     raw_kb_ids = list(validated_kb_ids)
@@ -344,7 +378,6 @@ async def ask(
         ttfbt0 = time.perf_counter()
         first_token_emitted = False
         chunks: list = []
-        web_results: list[WebSearchResult] = []
         citations_sent = False
 
         def emit(event: str, payload_inner: dict) -> str:
@@ -375,8 +408,7 @@ async def ask(
                 return []
             items = rag.build_citations(
                 list(chunks),
-                web_results,
-                max(payload.options.max_citations - attachment_count, 0),
+                max_citations=max(payload.options.max_citations - attachment_count, 0),
             )
             items.extend(
                 rag.build_attachment_citations(
@@ -415,7 +447,6 @@ async def ask(
                 {
                     "authorized_kb_count": len(raw_kb_ids) or 1,
                     "phase": "retrieval",
-                    "web_search": use_web_search,
                     "deep_thinking": use_deep_thinking,
                 },
             )
@@ -438,14 +469,13 @@ async def ask(
                 yield emit("done", {"finish_reason": finish_reason, "last_seq": seq})
                 return
 
-            # ---------- 3. 检索阶段（KB + Tavily 并行，含分段超时）----------
+            # ---------- 3. 检索阶段（授权 KB，含分段超时）----------
             t0 = time.perf_counter()
-            web_summary: WebSearchSummary | None = None
             retrieval_timeout = (
                 settings.sse_v2_retrieval_idle_timeout if use_v2 else settings.qa_timeout_seconds
             )
 
-            # 并行：KB 检索（同步 -> to_thread）+ Tavily 联网搜索（原生 async）
+            # KB 检索（同步 -> to_thread）；联网搜索已从产品合同移除。
             kb_task = asyncio.create_task(
                 asyncio.wait_for(
                     asyncio.to_thread(
@@ -461,34 +491,10 @@ async def ask(
                 )
             )
 
-            # Tavily 搜索：仅当「用户显式开启 & 后端配置了 API Key」时发起
-            should_web_search = use_web_search and web_search_enabled(settings)
-            web_task: asyncio.Task | None = None
-            if should_web_search:
-                # 预留 Tavily 搜索超时：总 retrieval_timeout 的 60%，最少 5s
-                web_timeout = max(5.0, retrieval_timeout * 0.6)
-                web_task = asyncio.create_task(
-                    perform_web_search(
-                        settings,
-                        question=payload.question,
-                        max_results=max(3, payload.options.max_citations // 2),
-                        timeout_s=web_timeout,
-                    )
-                )
-                yield emit(
-                    "web_search_started",
-                    {
-                        "query": payload.question[:200],
-                        "max_results": max(3, payload.options.max_citations // 2),
-                    },
-                )
-
             # 等待 KB 检索完成（必须项）
             try:
                 chunks = await kb_task
             except asyncio.TimeoutError:
-                if web_task is not None:
-                    web_task.cancel()
                 QA_IDLE_TIMEOUTS.inc(phase="retrieval")
                 finish_reason = FinishReason.TIMEOUT.value
                 source_citations = failure_citations()
@@ -511,71 +517,7 @@ async def ask(
             # 再剔除任何撤权/过期的文档 chunk，绝不进入生成上下文。
             chunks = rag.filter_retrievable(list(chunks))
 
-            # 等待 Tavily 搜索（可选项：超时/失败不阻断）
-            if web_task is not None:
-                try:
-                    ws_t0 = time.perf_counter()
-                    web_results, web_summary = await asyncio.wait_for(web_task, timeout=max(5.0, retrieval_timeout * 0.8))
-                    ws_elapsed = time.perf_counter() - ws_t0
-                    # 记录 metrics
-                    if web_summary is not None:
-                        if web_summary.succeeded:
-                            WEB_SEARCH_CALLS.inc(status="success")
-                            WEB_SEARCH_RESULT_COUNT.observe(float(web_summary.result_count))
-                        elif web_summary.error_code in ("WEBS_AUTH_ERROR", "WEBS_UPSTREAM_401", "WEBS_UPSTREAM_403"):
-                            WEB_SEARCH_CALLS.inc(status="auth_error")
-                        elif web_summary.error_code == "WEBS_RATE_LIMITED":
-                            WEB_SEARCH_CALLS.inc(status="rate_limited")
-                        elif web_summary.error_code == "WEBS_TIMEOUT":
-                            WEB_SEARCH_CALLS.inc(status="timeout")
-                        elif web_summary.error_code == "WEBS_NETWORK_ERROR":
-                            WEB_SEARCH_CALLS.inc(status="network_error")
-                        elif web_summary.error_code and web_summary.error_code.startswith("WEBS_UPSTREAM_5"):
-                            WEB_SEARCH_CALLS.inc(status="upstream_5xx")
-                        else:
-                            WEB_SEARCH_CALLS.inc(status=web_summary.error_code or "unknown")
-                        WEB_SEARCH_DURATION.observe(ws_elapsed)
-                    yield emit(
-                        "web_search_completed",
-                        {
-                            "attempted": bool(web_summary and web_summary.attempted),
-                            "succeeded": bool(web_summary and web_summary.succeeded),
-                            "result_count": len(web_results),
-                            "elapsed_ms": int(ws_elapsed * 1000),
-                            "error_code": web_summary.error_code if web_summary else None,
-                            "error_message": web_summary.error_message if web_summary else None,
-                        },
-                    )
-                except asyncio.TimeoutError:
-                    WEB_SEARCH_CALLS.inc(status="timeout")
-                    yield emit(
-                        "web_search_completed",
-                        {
-                            "attempted": True,
-                            "succeeded": False,
-                            "result_count": 0,
-                            "elapsed_ms": int(retrieval_timeout * 1000),
-                            "error_code": "WEBS_TIMEOUT",
-                            "error_message": "联网搜索超时，已跳过",
-                        },
-                    )
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning("web_task unexpected error: %s", repr(exc))
-                    WEB_SEARCH_CALLS.inc(status="network_error")
-                    yield emit(
-                        "web_search_completed",
-                        {
-                            "attempted": True,
-                            "succeeded": False,
-                            "result_count": 0,
-                            "elapsed_ms": 0,
-                            "error_code": "WEBS_NETWORK_ERROR",
-                            "error_message": f"联网搜索内部错误：{type(exc).__name__}",
-                        },
-                    )
-
-            # 合并知识库 + 联网搜索证据（仅需 evidence_texts 作为生成上下文；
-            # citations 元数据改由 rag.build_citations 基于原始 chunks 构造，见 FR-052）。
+            # 仅使用授权 KB chunks 生成上下文；附件证据随后追加。
             # 用户显式选择的附件必须保留上下文配额，不能被 KB 前五条命中挤掉。
             usable_attachment_count = sum(
                 bool(str(attachment.get("text") or "").strip())
@@ -586,11 +528,7 @@ async def ask(
                 payload.options.max_citations - usable_attachment_count,
                 1 if not usable_attachment_count else 0,
             )
-            evidence_texts, _ = merge_evidence(
-                kb_chunks=list(chunks),
-                web_results=web_results,
-                max_citations=evidence_budget,
-            )
+            evidence_texts = _build_kb_evidence(list(chunks), evidence_budget)
             for attachment in attachment_contexts:
                 attachment_text = str(attachment.get("text") or "").strip()
                 if attachment_text:
@@ -631,12 +569,11 @@ async def ask(
                 )
                 return
 
-            # retrieval_completed：暴露命中 chunk 数（含 web），便于前端展示
+            # retrieval_completed：暴露授权 KB 命中 chunk 数，便于前端展示
             yield emit(
                 "retrieval_completed",
                 {
                     "chunk_count": len(chunks),
-                    "web_result_count": len(web_results),
                     "total_evidence_count": total_evidence_count,
                     "elapsed_ms": int((time.perf_counter() - t0) * 1000),
                     "phase": "generation",
@@ -784,11 +721,9 @@ async def ask(
                 {
                     "evidence_count": total_evidence_count,
                     "kb_evidence_count": len(chunks),
-                    "web_evidence_count": len(web_results),
                     "provider": route.provider_name or "default",
                     "model": route.model or settings.llm_model,
                     "deep_thinking": use_deep_thinking,
-                    "web_search": use_web_search,
                 },
             )
 
@@ -824,7 +759,6 @@ async def ask(
                 )
                 citations_payload = rag.build_citations(
                     list(chunks),
-                    web_results,
                     max(payload.options.max_citations - citation_attachment_count, 0),
                 )
                 citations_payload.extend(
@@ -871,7 +805,7 @@ async def ask(
                 )
                 return
             else:
-                # 真流式生成：evidence_texts 已在检索阶段用 merge_evidence 合并好（KB + Web）
+                # 真流式生成：evidence_texts 已由授权 KB chunks 与附件构造。
                 t0 = time.perf_counter()
                 full_answer = ""
                 merger = DeltaMerger(
@@ -1117,8 +1051,7 @@ async def ask(
                 else:
                     store.update_message_content(auth, assistant_message.id, full_answer)
 
-            # ---------- 8. citations 事件：用 merge_evidence 的 citations_merged（KB + Web 统一）----------
-            # citations_merged 结构: [{index, type:"kb"|"web", title, doc_id|None, url|None, section_path|None, published_date|None}]
+            # ---------- 8. citations 事件：使用授权 KB chunks 与附件 ----------
             # PH6 FR-052/FR-053：用 rag.build_citations 构造完整元数据引用（version/page/sheet/
             # paragraph/source_path/updated_at/score），并持久化到消息 metadata_redacted.citations。
             citation_attachment_count = sum(
@@ -1128,7 +1061,6 @@ async def ask(
             )
             citations_payload: list[dict] = rag.build_citations(
                 list(chunks),
-                web_results,
                 max(payload.options.max_citations - citation_attachment_count, 0),
             )
             citations_payload.extend(
@@ -1347,7 +1279,6 @@ async def get_composer_capabilities(
     """返回 Composer 功能按钮能力 + 可选模型列表。
 
     - attachments_enabled：添加文件（上传后为 doc_id，走 attachment_doc_ids），默认 True
-    - web_search_enabled：联网搜索占位，当前版本默认 False（未接 SERP API）
     - deep_thinking_enabled：深度思考（通过 prompt + temperature 生效）默认 True
     - model_choice_enabled：模型选择默认 True；禁用前端下拉
 
@@ -1420,7 +1351,6 @@ async def get_composer_capabilities(
             )
     caps = ComposerCapabilities(
         attachments_enabled=True,
-        web_search_enabled=web_search_enabled(settings),
         deep_thinking_enabled=True,
         model_choice_enabled=len(models_out) > 0,
     )

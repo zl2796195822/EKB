@@ -147,7 +147,7 @@ def test_build_citations_carries_full_metadata():
         paragraph=4,
         source_path="ch1#sec2",
     )
-    items = rag.build_citations([chunk], [], max_citations=5)
+    items = rag.build_citations([chunk], max_citations=5)
     assert len(items) == 1
     it = items[0]
     assert it["type"] == "kb"
@@ -183,7 +183,7 @@ def test_attachment_citations_are_separate_and_budgeted():
     assert items[0]["type"] == "attachment"
     assert items[0]["doc_id"] == "att-1"
     assert items[0]["chunk_id"] == "chunk-1"
-    assert rag.build_citations([_chunk("d1")], [], 0) == []
+    assert rag.build_citations([_chunk("d1")], 0) == []
 
 
 def test_ask_request_default_answer_mode_strict():

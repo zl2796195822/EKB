@@ -45,6 +45,10 @@ CR-PH1-T01 + CR-PH1-T03 的第一真实业务切片已在本地工作树实现�
 ## Local business closure update (2026-08-13)
 
 本地 DONE-LOCAL 已追加附件 promotion 与主题/助手切片证据：真实 `POST /api/v1/attachments/{attachment_id}/promotions` 覆盖租户/owner/live ACL、路径冲突、回收站保留、幂等、并发，复用 `source_object_id` 创建 document/version/job，返回 `202 QUEUED` 并完成 worker 状态投影；前端助手提升入口支持，LLM-only 主题支持 `light/dark/auto` semantic tokens。验证为 backend `343 passed, 2 skipped`、web `51 passed`、typecheck/build、ruff/compileall/diff check，以及真实浏览器登录后 API `202` 与数据库 `source_object_id` 一致。生产 PostgreSQL/对象存储/队列、服务器备份部署重启和生产浏览器仍 `NOT RUN/BLOCKED`，因无运行时 `DEPLOY_HOST`/受管凭据；本地 SQLite 或 `QUEUED` 不代表生产完成。
+
+## CR-PH4-T07 local contract closure (2026-08-13)
+
+联网 Web Search 已从本地 QA UI、API、runtime 和配置移除；旧 `options.web_search` 请求在检索/网络调用前以 `400 FEATURE_REMOVED` fail closed。QA 仍独立保留授权 KB RAG、附件上下文和远程 LLM Provider/Model；Composer 真实浏览器状态不显示联网搜索，添加文件、远程模型和 KB 上下文仍可见。阶段记录：backend `345 passed, 2 skipped`；web `51 passed`、typecheck/build 通过。以上仅为本地证据，不代表生产部署完成。
 ## 2026-08-13 Promotion and theme local slice
 
 - DONE-LOCAL：真实 POST /api/v1/attachments/{attachment_id}/promotions；校验 tenant/owner/live KB ACL、路径冲突/回收站保留/幂等/并发；复用 attachment source_object_id 创建 document/version/ingest job，返回 HTTP 202、状态 QUEUED，worker 投影真实状态，不把队列写成成功。

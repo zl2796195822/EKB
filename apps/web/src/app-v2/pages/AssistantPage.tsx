@@ -44,7 +44,6 @@ const EMPTY_FEEDBACK: FeedbackView = { state: 'idle' }
 const DEFAULT_COMPOSER_SELECTION: ComposerSelectionState = {
   attachmentDocIds: [],
   attachmentLabels: {},
-  webSearch: false,
   // 深度思考默认开启「标准档 standard」；后端 capabilities 返回的 defaults 会覆盖。
   deepThinking: true,
   thinkingLevel: 'standard',
@@ -225,7 +224,6 @@ export function AssistantPage({ services }: V2PageProps) {
       setComposerModels(result.data.models)
       setComposerSelection((prev: ComposerSelectionState) => ({
         ...prev,
-        webSearch: result.data!.defaults.webSearch,
         deepThinking: result.data!.defaults.deepThinking,
         thinkingLevel: result.data!.defaults.thinkingLevel ?? prev.thinkingLevel,
         selectedModelId: result.data!.defaults.model ?? '',
@@ -513,7 +511,6 @@ export function AssistantPage({ services }: V2PageProps) {
     setMessages((current) => [...current, userMessage, assistantMessage])
     // Phase 2：透传 Composer 功能按钮选项
     const composerOptions: ComposerAskOptions = {
-      webSearch: composerSelection.webSearch,
       deepThinking: composerSelection.deepThinking,
       thinkingLevel: composerSelection.thinkingLevel,
       model: composerSelection.selectedModelId || undefined,

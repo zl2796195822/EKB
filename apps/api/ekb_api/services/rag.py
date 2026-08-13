@@ -127,10 +127,9 @@ def filter_retrievable(
 
 def build_citations(
     kb_chunks: list[Chunk],
-    web_results: list[Any],
     max_citations: int,
 ) -> list[dict]:
-    """构造 SSE ``citations`` 事件的 payload，携带完整元数据（FR-052）。
+    """构造 SSE ``citations`` 事件的 KB-only payload（FR-052）。
 
     结构向后兼容现有前端渲染字段（citation_id/index/type/title/section_path/
     doc_id/chunk_id/url/published_date），并补充：
@@ -139,7 +138,7 @@ def build_citations(
       - ``updated_at`` ← Chunk.updated_at（生成时版本时间戳）
       - ``score``     ← 检索得分
 
-    顺序约定：先知识库后联网搜索，超 ``max_citations`` 时优先保留知识库。
+    只接受已经通过授权 RAG 检索的知识库 chunks；EKB QA 不使用外部搜索结果。
     """
     items: list[dict] = []
     budget = int(max_citations)
@@ -175,33 +174,6 @@ def build_citations(
                 "chunk_id": f"{getattr(chunk, 'doc_id', '')}:{getattr(chunk, 'id', '')}",
                 "url": None,
                 "published_date": None,
-            }
-        )
-
-    web_budget = max(budget - idx, 0)
-    for wr in web_results:
-        if idx >= budget or web_budget <= 0:
-            break
-        web_budget -= 1
-        idx += 1
-        items.append(
-            {
-                "citation_id": f"web-{idx}",
-                "index": idx,
-                "type": "web",
-                "title": str(getattr(wr, "title", None) or getattr(wr, "url", "") or "联网结果"),
-                "section_path": [],
-                "version": 1,
-                "page": None,
-                "sheet": None,
-                "paragraph": None,
-                "source_path": None,
-                "updated_at": str(getattr(wr, "published_date", "") or ""),
-                "score": 0.0,
-                "doc_id": None,
-                "chunk_id": f"web-{idx}",
-                "url": str(getattr(wr, "url", "") or ""),
-                "published_date": getattr(wr, "published_date", None),
             }
         )
 

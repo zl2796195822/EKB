@@ -105,8 +105,6 @@ export type ThinkingLevel =
   | 'extreme'
 
 export interface ComposerAskOptions {
-  /** 联网搜索：当前版本透传占位，取决于后端 capabilities.web_search_enabled */
-  readonly webSearch?: boolean
   /** 深度思考（老布尔字段，已由 thinkingLevel 主导）：保留向后兼容 */
   readonly deepThinking?: boolean
   /** 思考程度：off 关闭（快速回答）/ standard 标准推理（默认，推荐）/ intensive 深度推理（慢，更严谨） */
@@ -139,7 +137,6 @@ export interface ComposerModelInfo {
 
 export interface ComposerCapabilitiesInfo {
   readonly attachmentsEnabled: boolean
-  readonly webSearchEnabled: boolean
   readonly deepThinkingEnabled: boolean
   readonly modelChoiceEnabled: boolean
 }
@@ -148,7 +145,7 @@ export interface ComposerCapabilitiesView {
   readonly capabilities: ComposerCapabilitiesInfo
   readonly models: readonly ComposerModelInfo[]
   readonly defaults: Required<
-    Pick<ComposerAskOptions, 'webSearch' | 'deepThinking' | 'thinkingLevel' | 'maxCitations' | 'streamVersion'>
+    Pick<ComposerAskOptions, 'deepThinking' | 'thinkingLevel' | 'maxCitations' | 'streamVersion'>
   > & {
     readonly model?: string
     readonly attachmentDocIds: readonly string[]

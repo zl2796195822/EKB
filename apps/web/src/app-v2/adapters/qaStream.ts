@@ -144,7 +144,6 @@ export function createQaStreamAdapter(client: QaStreamApiClient): QaStreamServic
     const thinkingLevel = tlRaw === 'off' || tlRaw === 'standard' || tlRaw === 'intensive' ? tlRaw : 'standard'
     const composerOptions: AskStreamComposerOptions | undefined = opts
       ? {
-          webSearch: opts.webSearch,
           deepThinking: thinkingLevel !== 'off' || Boolean(opts.deepThinking),
           thinkingLevel,
           model: opts.model,
@@ -191,7 +190,6 @@ export function createQaStreamAdapter(client: QaStreamApiClient): QaStreamServic
       const resp = await client.fetchQaCapabilities()
       const capabilities: ComposerCapabilitiesInfo = {
         attachmentsEnabled: Boolean(resp.capabilities?.attachments_enabled),
-        webSearchEnabled: Boolean(resp.capabilities?.web_search_enabled),
         deepThinkingEnabled: Boolean(resp.capabilities?.deep_thinking_enabled),
         modelChoiceEnabled: Boolean(resp.capabilities?.model_choice_enabled),
       }
@@ -207,7 +205,6 @@ export function createQaStreamAdapter(client: QaStreamApiClient): QaStreamServic
       const thinkingLevel =
         tlRaw === 'off' || tlRaw === 'standard' || tlRaw === 'intensive' ? tlRaw : 'standard'
       const defaults: ComposerCapabilitiesView['defaults'] = {
-        webSearch: Boolean(d.web_search),
         deepThinking: thinkingLevel !== 'off' || Boolean(d.deep_thinking),
         thinkingLevel,
         maxCitations: Number.isFinite(d.max_citations) ? d.max_citations : 5,
@@ -236,8 +233,8 @@ export const QA_STREAM_CAPABILITIES = [
     status: 'available',
   },
   {
-    id: 'qa.web-search-deep-thinking-model-choice',
+    id: 'qa.deep-thinking-model-choice',
     status: 'available',
-    reason: '通过 GET /qa/capabilities 获取能力；AskOptions.web_search / deep_thinking / model / attachment_doc_ids 均已打通到后端路由。',
+    reason: '通过 GET /qa/capabilities 获取远程模型与思考能力；检索范围仅来自授权知识库和附件。',
   },
 ] as const satisfies readonly AdapterCapability[]

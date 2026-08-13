@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from ekb_api.domain import DocumentStatus, KbRole, KbVisibility, SourceType
 
@@ -193,12 +193,13 @@ class SearchResponse(BaseModel):
 
 
 class AskOptions(BaseModel):
+    # Keep unknown options available to the route for an explicit fail-closed
+    # compatibility response; removed Web Search is not part of this schema.
+    model_config = ConfigDict(extra="allow")
     stream: bool = True
     max_citations: int = Field(default=5, ge=1, le=10)
     # SSE v2: 1=legacy SSE, 2=Conversation Stream v2（envelope+seq+turn_id）
     stream_version: int = Field(default=2, ge=1, le=2)
-    # Phase 2: Composer 功能按钮参数
-    web_search: bool = False       # 联网搜索：v1 透传占位；后续接入 Tavily/SerpAPI 时生效
     # 深度思考：默认开启（medium 档）。关闭则走 thinking_level=light。
     # thinking_level 五档（与前端 UI 「轻度/中度/中/高/极高」一一对应），真实控制：
     #   - 传给 DeepSeek V4 原生 reasoning_effort（low/medium/high/max）
@@ -241,7 +242,6 @@ class ModelInfo(BaseModel):
 class ComposerCapabilities(BaseModel):
     """Composer 功能按钮是否可用。"""
     attachments_enabled: bool = True       # 添加文件（上传后为 doc_id，走 attachment_doc_ids）
-    web_search_enabled: bool = False       # 联网搜索：当前版本透传占位（未接 SERP 引擎时为 False）
     deep_thinking_enabled: bool = True     # 深度思考：通过 prompt + 温度 模拟，LLM 支持即启用
     model_choice_enabled: bool = True      # 模型选择：通过覆盖 route.model_name 生效
 

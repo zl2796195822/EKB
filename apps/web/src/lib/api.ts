@@ -193,7 +193,6 @@ function normalizeDiffChunk(chunk: NonNullable<DocumentDiff['added']>[number]) {
 
 /** Phase 2：Composer 功能按钮对应的 ask options（前端内部类型，会在 askStream 中映射成后端 snake_case 字段） */
 export interface AskStreamComposerOptions {
-  webSearch?: boolean
   /** 老布尔字段，保留兼容；实际由 thinkingLevel 主导 */
   deepThinking?: boolean
   /** 思考程度：off/standard/intensive；不传默认 standard */
@@ -243,7 +242,6 @@ export interface QaModelInfo {
 }
 export interface QaCapabilitiesInfo {
   attachments_enabled: boolean
-  web_search_enabled: boolean
   deep_thinking_enabled: boolean
   model_choice_enabled: boolean
 }
@@ -251,7 +249,6 @@ export interface QaCapabilitiesDefaults {
   stream: boolean
   max_citations: number
   stream_version: number
-  web_search: boolean
   deep_thinking: boolean
   thinking_level: string
   model: string | null
@@ -846,7 +843,6 @@ export class ApiClient {
       stream: true,
       max_citations: composerOptions?.maxCitations ?? 5,
       stream_version: composerOptions?.streamVersion ?? 2,
-      web_search: Boolean(composerOptions?.webSearch),
       deep_thinking: deepThinking,
       thinking_level: thinkingLevel,
       model: composerOptions?.model && composerOptions.model.trim() ? composerOptions.model.trim() : null,

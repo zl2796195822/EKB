@@ -93,7 +93,6 @@ class FakeQaClient implements QaStreamApiClient {
     return {
       capabilities: {
         attachments_enabled: true,
-        web_search_enabled: false,
         deep_thinking_enabled: true,
         model_choice_enabled: true,
       },
@@ -110,7 +109,6 @@ class FakeQaClient implements QaStreamApiClient {
         stream: true,
         max_citations: 5,
         stream_version: 2,
-        web_search: false,
         deep_thinking: false,
         thinking_level: 'standard',
         model: null,

@@ -29,7 +29,7 @@ M3 在并行边界内接通知识库、文档中心和知识库内语义搜索�
 
 `#/assistant` 使用专用顶栏、左会话栏、中聊天区和右上下文栏。会话列表、消息、删除、授权知识库、SSE v2、取消、当前引用、当前 KB 搜索、文档元数据预览和回答反馈都只通过 `AppV2` 注入的 adapters 使用现有 `ApiClient`。
 
-- 会话按真实 `updatedAt` 分为今天、昨天、过去 7 天和更早；收藏、项目、分享、重命名、导出、添加文件、联网搜索、深度思考和模型选择因无端点保持 disabled/unavailable。
+- 会话按真实 `updatedAt` 分为今天、昨天、过去 7 天和更早；收藏、项目、分享、重命名和导出因无端点保持 disabled/unavailable。Composer 当前支持真实添加文件（可提升到授权知识库）、深度思考和远程模型选择；不提供联网搜索能力。
 - `qaStream` 保留 `askStream` 的动态 `turnId`、`messageId` 和 `conversationId` getter；`SseStreamParser` 负责旧 turn、重复/倒序 seq 和协议错误隔离，页面只展示真实可得的 seq。
 - 首 token 前或部分输出后停止都会优先调用真实幂等 cancel；尚未得到 `turn_id` 时仅本地 abort，并明确显示服务端未收到 cancel。错误可把最后一次真实问题恢复到 composer，等待用户手动重试。
 - 引用只来自当前 SSE citations，相关知识只来自当前授权 KB 的真实 search；文档预览只加载真实元数据，正文打开和加入引用保持 disabled。

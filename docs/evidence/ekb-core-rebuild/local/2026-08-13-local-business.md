@@ -78,3 +78,10 @@ API 五步链已实际返回成功状态：登录、知识库列表、batch 创�
 - 前端已补助手提升入口；LLM-only 主题支持 `light/dark/auto` semantic tokens。
 - 验证：backend `343 passed, 2 skipped`；web `51 passed`、typecheck/build 通过；ruff/compileall/diff check 通过；真实浏览器登录后 API 返回 `202`，数据库 `source_object_id` 一致。
 - `NOT RUN/BLOCKED`：生产 PostgreSQL/对象存储/队列、服务器备份/部署/重启、生产浏览器未执行，原因是没有运行时 `DEPLOY_HOST`/受管凭据。不得把本地 SQLite 或 `QUEUED` 写成生产完成。`git diff --check` 通过。
+
+## 2026-08-13 CR-PH4-T07 contract closure
+
+- Web Search 已从本地 QA UI/API/runtime/config 移除；旧 `options.web_search` 在 retrieval 前返回 `400 FEATURE_REMOVED`，没有 retrieval 或网络调用。
+- QA 保留授权 KB RAG、附件上下文和远程 LLM Provider/Model；真实浏览器 Composer 不显示联网搜索，添加文件、远程模型和 KB 上下文仍可见。
+- 验证：backend `345 passed, 2 skipped`；web `51 passed`、typecheck/build；定向 API `28 passed`、RAG/多轮回归 `21 passed`、`git diff --check` 通过。
+- 生产 PostgreSQL/pgvector、对象存储、队列/Worker/Scheduler、服务器备份/部署/回滚和生产浏览器仍未执行；本证据只代表本地 DONE-LOCAL。

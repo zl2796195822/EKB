@@ -137,6 +137,44 @@ def test_qa_stream_contains_request_evidence_and_done_events() -> None:
     assert "event: done" in response.text
 
 
+def test_qa_rejects_removed_web_search_option_before_retrieval(monkeypatch) -> None:
+    """旧客户端的联网搜索字段必须 fail closed，且不得触发任何检索/网络调用。"""
+    token = login()
+    from ekb_api.routers import qa as qa_router
+
+    monkeypatch.setattr(
+        qa_router,
+        "retrieve",
+        lambda *args, **kwargs: pytest.fail("removed web search option reached retrieval"),
+    )
+    response = client.post(
+        "/api/v1/qa/ask",
+        headers={"Authorization": f"Bearer {token}", "Accept": "text/event-stream"},
+        json={
+            "question": "不应联网",
+            "options": {"web_search": True},
+        },
+    )
+
+    assert response.status_code == 400
+    body = response.json()["error"]
+    assert body["code"] == "FEATURE_REMOVED"
+    assert body["details"]["option"] == "web_search"
+
+
+def test_qa_capabilities_do_not_advertise_removed_web_search() -> None:
+    token = login()
+    response = client.get(
+        "/api/v1/qa/capabilities",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert "web_search_enabled" not in body["capabilities"]
+    assert "web_search" not in body["defaults"]
+
+
 def test_qa_continues_within_same_conversation() -> None:
     """追问携带首轮返回的 conversation_id，消息写入同一会话。"""
     token = login()

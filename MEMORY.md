@@ -441,3 +441,9 @@ Nginx 配置：
 - DONE-LOCAL：助手附件“提升”入口和真实错误/状态/ID 显示；主题支持 semantic tokens、light/dark/auto、系统主题和 storage 同步、reduced-motion；LLM-only，不使用本地模型/mock。
 - 验证：后端 343 passed, 2 skipped；前端 51 passed、typecheck/build 通过；ruff、compileall、git diff --check 通过；真实浏览器登录后实调 KB 与 promotion API 返回 202，数据库确认 document_version.source_object_id 与 attachment 一致。
 - NOT RUN/BLOCKED：生产 PostgreSQL/pgvector、对象存储、可靠队列/Worker/Scheduler、服务器备份/部署/重启/生产浏览器；运行时 DEPLOY_HOST 和受管凭据未配置，不猜测、不输出、不落盘。生产未完成，不能标记 PH0–PH8 全部完成。
+
+## 2026-08-13 CR-PH4-T07 contract closure
+
+- DONE-LOCAL：联网 Web Search 已从本地 QA UI/API/runtime/config 移除；旧 `options.web_search` 在检索前返回 `400 FEATURE_REMOVED`，不触发 retrieval 或外部网络调用。
+- QA 继续使用授权 KB RAG、独立附件上下文和远程 LLM Provider/Model；Composer 浏览器状态不显示联网搜索，但添加文件、远程模型和 KB 上下文保持可见。
+- 验证记录：backend `345 passed, 2 skipped`；web `51 passed`、typecheck/build；定向 API `28 passed`、RAG/多轮 `21 passed`、`git diff --check` 通过。生产部署、备份、回滚和生产浏览器仍未完成。
