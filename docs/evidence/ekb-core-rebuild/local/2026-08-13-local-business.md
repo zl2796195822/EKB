@@ -52,7 +52,7 @@ API 五步链已实际返回成功状态：登录、知识库列表、batch 创�
 真实 Chrome 已完成两条链路：
 
 1. 登录 → 打开文档中心 → 选择本地文件 → 批次上传 → 文档列表刷新。文档中心显示服务端返回的真实文档行，并同时呈现 `已就绪` 与 `失败 / EMBEDDING_UNAVAILABLE` 状态。首次加载状态缺口已修复，页面不再永久停留在加载态。
-2. 登录 → AI 助手 → 添加真实本地 TXT → 创建 upload session → 受保护对象 PUT → 处理 → 带附件提问。浏览器网络记录确认 session/PUT/process/ask 全部 `200`；页面显示 `阶段：完成`、真实 `seq=10`，回答读取附件内容并显示附件引用。
+2. 登录 → AI 助手 → 添加真实本地 TXT → 创建 upload session → 受保护对象 PUT → 处理 → 带附件提问。最新浏览器网络记录确认 session/PUT/process/ask 全部 `200`；页面显示 `阶段：完成`、真实 `seq=22`，回答准确读取附件两行内容并显示附件引用。
 
 浏览器首次发送暴露了前端 `standard` thinking level 与 API canonical enum 不一致的真实契约错误（400）；已在 API client 边界归一化为 `off→light`、`standard→medium`、`intensive→high`，修复后重跑同一浏览器流程通过。期间出现的旧登录 500 属于 API 重启期间的运行时断连，不是最终链路结果。
 

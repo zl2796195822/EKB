@@ -434,4 +434,4 @@ Nginx 配置：
 - 证据：`docs/evidence/ekb-core-rebuild/local/2026-08-13-local-business.md`。生产 PostgreSQL/pgvector、对象存储、可靠队列/Worker/Scheduler、Provider 凭据、服务器备份部署回滚仍未执行；不得用 mock 代替，也未在此记录凭据或私密地址。
 - 本次续作补齐真实附件聊天链路：浏览器可完成 session → 受保护对象 PUT → process → 带 attachment_doc_ids 的 SSE ask；附件按 tenant/owner/conversation/status 校验，独立于 KB ID，并持久化附件引用。前端 thinking level 在 API 边界归一化为 canonical `light/medium/high`，避免旧 UI 值触发 400。全量后端 `331 passed, 2 skipped`；前端 typecheck、49 tests、build、npm production audit 通过；Playwright 真实附件问答显示阶段完成、seq=10 和附件引用。生产 PostgreSQL/pgvector、对象存储、可靠队列/Worker/Scheduler、Provider 凭据、服务器备份部署回滚仍未执行。
 - 又收紧图片真实性：Vision 仅使用当前用户配置且 capability 明确支持 Vision 的远程模型，发送 typed image content；无远程 Vision/OCR 时 fail closed，不写本地占位文本；远程 S3 session 返回 presigned PUT，本地开发才走受保护 PUT。回归 `333 passed, 2 skipped`，无凭据写入。
-- 服务器部署入口检查因未提供运行时 `DEPLOY_HOST` 以退出码 64 fail closed；未执行 SSH、备份、迁移、重启或线上写入。提交 `dac4d96` 已推送并与远端 SHA 一致。
+- 服务器部署入口检查因未提供运行时 `DEPLOY_HOST` 以退出码 64 fail closed；未执行 SSH、备份、迁移、重启或线上写入。最新浏览器附件问答 session/PUT/process/ask 全部 200，阶段完成、seq=22。提交 `ebc0c3e` 已推送并与远端 SHA 一致。
