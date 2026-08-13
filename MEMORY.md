@@ -547,3 +547,9 @@ Nginx 配置：
 - 后端 `/admin/users` 使用 `team:user:manage`，兼容旧 OWNER/ADMIN，普通 MEMBER 拒绝并审计；`SqlStore.create_user` 同事务写入 v3 `tenant_memberships` / `user_profiles`，测试确认邀请后可见且租户隔离。
 - 验证：当前后端定向回归报告 `17 passed`；前端 `v3.team-directory.test.ts` 定向 `4 passed`，覆盖按钮状态、邀请 adapter 成功/失败、校验与 CSV 防注入；完整 Web/后端收尾结果见对应证据文件。
 - 边界：这是本地成员账户创建与 CSV 导出，不是邮件投递、生产身份平台、角色/权限 CRUD、SCIM 或 PH0–PH8 完成；服务器与生产仍 `NOT RUN/BLOCKED`，统一使用 `[production host]` / `[REDACTED]`，不记录秘密。
+
+## 2026-08-14 Assistant 会话导出
+
+- DONE-LOCAL：导出仅在 ready、非流式且有非 transient 消息时启用；只导出当前服务端已持久化消息，过滤流式 transient 内容。
+- Share 保持 disabled；生产、部署、备份、回滚和 PH0–PH8 全部完成仍 `NOT RUN/BLOCKED`。
+- 证据：`docs/evidence/ekb-core-rebuild/local/2026-08-14-conversation-export.md`。不保存密码、token、API key 或私密地址。

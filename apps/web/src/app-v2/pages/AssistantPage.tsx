@@ -10,6 +10,7 @@ import {
   type ConversationGroup,
 } from '../components/assistant'
 import { StatePanel } from '../components/StatePanel'
+import { buildConversationMarkdown, canExportConversation } from './conversationExport'
 import type {
   AdapterError,
   CitationView,
@@ -597,6 +598,20 @@ export function AssistantPage({ services }: V2PageProps) {
     await loadConversations()
   }, [isStreaming, loadConversations, selectedConversation, services.conversations])
 
+  const handleExportConversation = useCallback(() => {
+    if (!selectedConversationId || !canExportConversation(messagesState, messages, isStreaming)) return
+    const markdown = buildConversationMarkdown(messages, selectedConversation?.title ?? '')
+    const blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = 'conversation.md'
+    document.body.appendChild(anchor)
+    anchor.click()
+    anchor.remove()
+    window.setTimeout(() => URL.revokeObjectURL(url), 0)
+  }, [isStreaming, messages, messagesState, selectedConversation?.title, selectedConversationId])
+
   const handleSearch = useCallback(async () => {
     if (!selectedKbId || !searchQuery.trim()) return
     setSearchState('loading')
@@ -695,9 +710,13 @@ export function AssistantPage({ services }: V2PageProps) {
               <Star size={15} weight={currentConvFavorited ? 'fill' : 'regular'} />
               {currentConvFavorited ? '已收藏' : '收藏'}
             </button>
-            <button type="button" disabled title="v4 P2 Assistant：会话导出端点（JSON/MD/PDF）与附件打包规划中，当前不触发下载。">
+            <button
+              type="button"
+              onClick={handleExportConversation}
+              disabled={!selectedConversationId || !canExportConversation(messagesState, messages, isStreaming)}
+              title="导出当前服务端已加载的持久消息"
+            >
               <Export size={15} />导出
-              <small aria-hidden="true" style={{ marginLeft: 6, padding: '1px 6px', borderRadius: 999, fontSize: 10, fontWeight: 500, background: '#FEF3C7', color: '#92400E' }}>v4 P2</small>
             </button>
             <button type="button" className="v2-m4-delete-button" disabled={!selectedConversationId || isStreaming} onClick={() => void handleDeleteConversation()} title="删除当前会话"><Trash size={15} /></button>
           </div>

@@ -117,3 +117,10 @@ CR-PH1-T01 + CR-PH1-T03 的第一真实业务切片已在本地工作树实现�
 - DONE-LOCAL：Jobs runtime 后端/前端展示真实 worker heartbeat、retention lease 和 scheduler runs；legacy Office 已接入隔离 `soffice` 转换并复用 OOXML parser。FR-015、CR-PH2 runtime/jobs、CR-PH3 legacy parser 仍仅标记 `DONE-LOCAL`。
 - 本地证据：[`2026-08-14-jobs-runtime.md`](evidence/ekb-core-rebuild/local/2026-08-14-jobs-runtime.md)、[`2026-08-14-legacy-office.md`](evidence/ekb-core-rebuild/local/2026-08-14-legacy-office.md)。证据记录真实浏览器与 XLS→XLSX smoke 边界，不记录凭据、token 或私网地址。
 - 未完成：生产 PostgreSQL/pgvector、远程 Provider/Embedding、对象存储、可靠队列/生产 Worker、服务器备份、部署和回滚仍 `NOT RUN/BLOCKED`；生产目标统一写作 `[production host]`，敏感值统一写作 `[REDACTED]`。
+
+## Assistant conversation export local closure (2026-08-14)
+
+- DONE-LOCAL：Assistant 导出只在 ready、非流式且存在非 transient 消息时可用；只导出当前服务端已持久化消息，流式 transient 内容不会进入 Markdown。
+- Share 保持 disabled；未新增分享链接、公开访问或服务端导出存储。
+- 证据见 [`evidence/ekb-core-rebuild/local/2026-08-14-conversation-export.md`](./evidence/ekb-core-rebuild/local/2026-08-14-conversation-export.md)。生产、部署、备份、回滚和 PH0–PH8 全部完成仍 `NOT RUN/BLOCKED`。
+- 文档不记录密码、token、API key 或私密地址；生产统一使用 `[production host]` / `[REDACTED]`。
