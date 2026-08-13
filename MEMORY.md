@@ -553,3 +553,9 @@ Nginx 配置：
 - DONE-LOCAL：导出仅在 ready、非流式且有非 transient 消息时启用；只导出当前服务端已持久化消息，过滤流式 transient 内容。
 - Share 保持 disabled；生产、部署、备份、回滚和 PH0–PH8 全部完成仍 `NOT RUN/BLOCKED`。
 - 证据：`docs/evidence/ekb-core-rebuild/local/2026-08-14-conversation-export.md`。不保存密码、token、API key 或私密地址。
+
+## 2026-08-14 会话重命名本地切片
+
+- 已完成真实会话重命名：后端已有 `PATCH /api/v1/chat/conversations/{id}` 接入前端 `ApiClient`、adapter、受控 UI 和服务端刷新；未知客户端异常不泄漏原始 `message`。Share/Projects 仍 disabled。
+- 验证：定向 Vitest `2 passed`；Web `12 files / 68 tests passed`；typecheck/build passed（build 有既有 `>500KB` warning）。
+- 仅为本地 `DONE-LOCAL`；PH0–PH8、服务器、备份、部署和回滚未执行，仍 `NOT RUN/BLOCKED`；不记录秘密。

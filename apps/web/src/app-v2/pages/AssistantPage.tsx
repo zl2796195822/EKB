@@ -1,4 +1,4 @@
-import { Archive, Export, Funnel, SidebarSimple, ShareNetwork, Star, Trash } from '@phosphor-icons/react'
+import { Archive, Export, Funnel, Pencil, SidebarSimple, ShareNetwork, Star, Trash } from '@phosphor-icons/react'
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import {
   AssistantComposer,
@@ -112,6 +112,9 @@ export function AssistantPage({ services }: V2PageProps) {
   const [latestRealSequence, setLatestRealSequence] = useState<number | null>(null)
   const [protocolErrors, setProtocolErrors] = useState<readonly string[]>([])
   const [operationNotice, setOperationNotice] = useState<string | null>(null)
+  const [renameOpen, setRenameOpen] = useState(false)
+  const [renameValue, setRenameValue] = useState('')
+  const [renameBusy, setRenameBusy] = useState(false)
   const [feedbackByMessage, setFeedbackByMessage] = useState<Readonly<Record<string, FeedbackView>>>({})
   const [searchQuery, setSearchQuery] = useState('')
   const [searchState, setSearchState] = useState<PageState>('empty')
@@ -598,6 +601,46 @@ export function AssistantPage({ services }: V2PageProps) {
     await loadConversations()
   }, [isStreaming, loadConversations, selectedConversation, services.conversations])
 
+  const handleOpenRename = useCallback(() => {
+    if (!selectedConversation || isStreaming || renameBusy) return
+    setRenameValue(selectedConversation.title)
+    setRenameOpen(true)
+    setOperationNotice(null)
+  }, [isStreaming, renameBusy, selectedConversation])
+
+  const handleCancelRename = useCallback(() => {
+    if (renameBusy) return
+    setRenameOpen(false)
+    setRenameValue('')
+  }, [renameBusy])
+
+  const handleRename = useCallback(async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!selectedConversationId || isStreaming || renameBusy) return
+    const title = renameValue.trim()
+    if (!title) {
+      setOperationNotice('会话标题不能为空。')
+      return
+    }
+    setRenameBusy(true)
+    try {
+      const result = await services.conversations.rename(selectedConversationId, title)
+      if (result.state !== 'ready') {
+        const error = result.error
+        setOperationNotice(`${error?.code ?? 'CONVERSATION_RENAME_FAILED'}：${error?.message ?? '会话重命名失败。'}${error?.requestId ? `（request_id：${error.requestId}）` : ''}`)
+        return
+      }
+      setRenameOpen(false)
+      setRenameValue(title)
+      await loadConversations(selectedConversationId)
+      setOperationNotice(`会话已重命名为「${title}」。`)
+    } catch {
+      setOperationNotice('CONVERSATION_RENAME_FAILED：会话重命名失败。')
+    } finally {
+      setRenameBusy(false)
+    }
+  }, [isStreaming, loadConversations, renameBusy, renameValue, selectedConversationId, services.conversations])
+
   const handleExportConversation = useCallback(() => {
     if (!selectedConversationId || !canExportConversation(messagesState, messages, isStreaming)) return
     const markdown = buildConversationMarkdown(messages, selectedConversation?.title ?? '')
@@ -692,6 +735,9 @@ export function AssistantPage({ services }: V2PageProps) {
               <ShareNetwork size={15} />分享
               <small aria-hidden="true" style={{ marginLeft: 6, padding: '1px 6px', borderRadius: 999, fontSize: 10, fontWeight: 500, background: '#FEF3C7', color: '#92400E' }}>v4 P2</small>
             </button>
+            <button type="button" onClick={handleOpenRename} disabled={!selectedConversationId || isStreaming || renameBusy} title="重命名当前会话">
+              <Pencil size={15} />重命名
+            </button>
             <button
               type="button"
               onClick={() => void handleToggleCurrentFavorite()}
@@ -721,6 +767,14 @@ export function AssistantPage({ services }: V2PageProps) {
             <button type="button" className="v2-m4-delete-button" disabled={!selectedConversationId || isStreaming} onClick={() => void handleDeleteConversation()} title="删除当前会话"><Trash size={15} /></button>
           </div>
         </header>
+        {renameOpen ? (
+          <form className="v2-m4-rename-form" onSubmit={(event) => void handleRename(event)} aria-label="重命名当前会话">
+            <label htmlFor="v2-m4-rename-input">会话名称</label>
+            <input id="v2-m4-rename-input" aria-label="会话名称" value={renameValue} onChange={(event) => setRenameValue(event.target.value)} disabled={renameBusy} autoFocus />
+            <button type="button" onClick={handleCancelRename} disabled={renameBusy} aria-label="取消重命名">取消</button>
+            <button type="submit" disabled={renameBusy} aria-label={renameBusy ? '保存中' : '保存重命名'}>{renameBusy ? '保存中…' : '保存'}</button>
+          </form>
+        ) : null}
         <div className="v2-m4-stream-bar" data-state={streamState}>
           <div className="v2-m4-stream-stage"><span className="v2-m4-stage-dot" />{assistantStateMessage ?? '等待你的问题'}</div>
           <div className="v2-m4-stream-meta">

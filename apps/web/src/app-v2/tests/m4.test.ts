@@ -18,6 +18,8 @@ interface ControlledStream {
 }
 
 class FakeConversationClient {
+  shouldFailRename = false
+
   async listConversations() {
     return [{ id: 'conversation-1', title: '真实会话', created_at: '2026-08-09T00:00:00Z', updated_at: '2026-08-09T01:00:00Z', archived_at: null }]
   }
@@ -28,6 +30,11 @@ class FakeConversationClient {
 
   async deleteConversation(): Promise<void> {
     return undefined
+  }
+
+  async renameConversation(_conversationId: string, title: string): Promise<{ conversation_id: string; title: string; title_locked: boolean }> {
+    if (this.shouldFailRename) throw new Error('rename unavailable')
+    return { conversation_id: 'conversation-1', title, title_locked: true }
   }
 }
 
@@ -129,12 +136,19 @@ class FakeFeedbackClient {
 }
 
 export async function runM4ContractTests(): Promise<void> {
-  const conversations = createConversationsAdapter(new FakeConversationClient())
+  const conversationClient = new FakeConversationClient()
+  const conversations = createConversationsAdapter(conversationClient)
   const conversationList = await conversations.list()
   expectEqual(conversationList.data?.[0]?.updatedAt, '2026-08-09T01:00:00Z', 'conversation adapter maps updatedAt')
   const messages = await conversations.messages('conversation-1')
   expectEqual(messages.data?.[0]?.role, 'assistant', 'conversation adapter normalizes assistant role')
   expectEqual((await conversations.remove('conversation-1')).state, 'ready', 'conversation delete uses real client')
+  const renamed = await conversations.rename('conversation-1', '新标题')
+  expectEqual(renamed.state, 'ready', 'conversation rename uses real client')
+  conversationClient.shouldFailRename = true
+  const failedRename = await conversations.rename('conversation-1', '失败标题')
+  expectEqual(failedRename.state, 'error', 'conversation rename failure maps to error state')
+  expectEqual(failedRename.error?.code, 'CLIENT_ERROR', 'conversation rename failure maps error safely')
 
   const client = new FakeQaClient()
   const events: QaStreamEvent[] = []

@@ -1,3 +1,4 @@
+import { ApiClientError } from '../../lib/api'
 import type { ApiClient } from '../../lib/api'
 import type { AdapterCapability, AdapterError } from '../types'
 import type {
@@ -14,6 +15,7 @@ export interface ConversationsApiClient {
   listConversations: ApiClient['listConversations']
   getConversationMessages: ApiClient['getConversationMessages']
   deleteConversation: ApiClient['deleteConversation']
+  renameConversation: ApiClient['renameConversation']
 }
 
 function errorResult(error: unknown, fallbackMessage: string): { state: 'error' | 'permission-denied'; error: AdapterError } {
@@ -73,6 +75,20 @@ export function createConversationsAdapter(client: ConversationsApiClient): Conv
         return errorResult(error, '会话删除失败')
       }
     },
+    rename: async (conversationId, title): Promise<ConversationMutationResult> => {
+      try {
+        await client.renameConversation(conversationId, title)
+        return { state: 'ready' }
+      } catch (error) {
+        if (error instanceof ApiClientError) {
+          return errorResult(error, '会话重命名失败')
+        }
+        return {
+          state: 'error',
+          error: { code: 'CLIENT_ERROR', message: '会话重命名失败' },
+        }
+      }
+    },
   }
 }
 
@@ -83,8 +99,13 @@ export const CONVERSATION_CAPABILITIES = [
     reason: '列表、消息读取和当前会话删除使用现有授权端点。',
   },
   {
-    id: 'conversations.favorite-projects-rename-export-share',
+    id: 'conversations.rename',
+    status: 'available',
+    reason: '会话重命名使用现有真实 PATCH 端点。',
+  },
+  {
+    id: 'conversations.favorite-projects-export-share',
     status: 'disabled',
-    reason: '当前 API 未提供收藏、项目、重命名、导出或分享端点。',
+    reason: '当前项目仍禁用收藏、项目、导出或分享能力。',
   },
 ] as const satisfies readonly AdapterCapability[]

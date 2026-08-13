@@ -969,6 +969,19 @@ export class ApiClient {
     })
   }
 
+  async renameConversation(
+    conversationId: string,
+    title: string,
+  ): Promise<{ conversation_id: string; title: string; title_locked: boolean }> {
+    return this.request<{ conversation_id: string; title: string; title_locked: boolean }>(
+      `/chat/conversations/${encodeURIComponent(conversationId)}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ title }),
+      },
+    )
+  }
+
   // ---- M6 治理/运营：仅封装现有 /admin 端点，不新增路径或字段 ----
 
   async getOpsDashboard(days = 7): Promise<OpsDashboardResponse> {

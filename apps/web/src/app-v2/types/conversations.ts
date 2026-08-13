@@ -39,4 +39,5 @@ export interface ConversationsServices {
   readonly list: () => Promise<ConversationListResult>
   readonly messages: (conversationId: string) => Promise<ConversationMessagesResult>
   readonly remove: (conversationId: string) => Promise<ConversationMutationResult>
+  readonly rename: (conversationId: string, title: string) => Promise<ConversationMutationResult>;
 }

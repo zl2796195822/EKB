@@ -124,3 +124,9 @@ CR-PH1-T01 + CR-PH1-T03 的第一真实业务切片已在本地工作树实现�
 - Share 保持 disabled；未新增分享链接、公开访问或服务端导出存储。
 - 证据见 [`evidence/ekb-core-rebuild/local/2026-08-14-conversation-export.md`](./evidence/ekb-core-rebuild/local/2026-08-14-conversation-export.md)。生产、部署、备份、回滚和 PH0–PH8 全部完成仍 `NOT RUN/BLOCKED`。
 - 文档不记录密码、token、API key 或私密地址；生产统一使用 `[production host]` / `[REDACTED]`。
+
+## Conversation rename local closure (2026-08-14)
+
+- DONE-LOCAL：已有 `PATCH /api/v1/chat/conversations/{id}` 已被前端真实接入，覆盖 `ApiClient`、conversation adapter、受控 UI 和服务端刷新；未知客户端异常不泄漏原始 `message`。
+- Share 和 Projects 仍保持 disabled。验证为定向 `2 passed`、全量 Web `12 files / 68 tests passed`、typecheck/build passed；build 保留既有 `>500KB` chunk warning。
+- 证据见 [`evidence/ekb-core-rebuild/local/2026-08-14-conversation-rename.md`](./evidence/ekb-core-rebuild/local/2026-08-14-conversation-rename.md)。本地切片不代表 PH0–PH8 或生产完成；服务器、备份、部署和回滚仍 `NOT RUN/BLOCKED`，生产统一使用 `[production host]` / `[REDACTED]`。
