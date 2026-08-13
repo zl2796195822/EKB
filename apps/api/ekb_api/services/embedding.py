@@ -15,16 +15,40 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
-from typing import Any, Optional, Protocol, runtime_checkable
+from typing import Any, Callable, Optional, Protocol, runtime_checkable
+from urllib.parse import urlparse
 
 from sqlalchemy import Engine, text
 
 from ekb_api.domain import utc_now
 
 
-class EmbeddingUnavailable(RuntimeError):
-    """Raised when no embedding provider is configured; ingestion fails closed."""
+class EmbeddingError(RuntimeError):
+    """Base class for sanitized remote embedding failures."""
+
+    code = "EMBEDDING_UNAVAILABLE"
+
+
+class EmbeddingUnavailable(EmbeddingError):
+    """Raised when no usable remote embedding provider is configured."""
+
+
+class EmbeddingProviderError(EmbeddingError):
+    """Raised when a configured remote provider returns an unusable result."""
+
+    def __init__(
+        self,
+        message: str = "remote embedding provider failed",
+        *,
+        code: str | None = None,
+    ):
+        super().__init__(message)
+        if code is not None:
+            self.code = code
 
 
 @dataclass(frozen=True)
@@ -46,18 +70,210 @@ class EmbeddingClient(Protocol):
     def embed(self, *, texts: list[str], profile: EmbeddingProfile) -> list[list[float]]: ...
 
 
-def build_embedding_client() -> EmbeddingClient:
+RemotePost = Callable[[str, bytes, dict[str, str], float], bytes]
+
+
+def _post_json(url: str, body: bytes, headers: dict[str, str], timeout: float) -> bytes:
+    """POST JSON through the standard library without exposing response details."""
+
+    request = urllib.request.Request(url, data=body, headers=headers, method="POST")
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return response.read(8 * 1024 * 1024)
+    except urllib.error.HTTPError as exc:
+        if exc.code == 429:
+            raise EmbeddingProviderError(code="EMBEDDING_RATE_LIMITED") from exc
+        raise EmbeddingProviderError(code="EMBEDDING_PROVIDER_ERROR") from exc
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        raise EmbeddingProviderError(code="EMBEDDING_UNAVAILABLE") from exc
+
+
+def _is_safe_remote_endpoint(value: str) -> bool:
+    """Accept only remote HTTP(S) URLs; never allow local or credentialed URLs."""
+
+    parsed = urlparse((value or "").strip())
+    host = (parsed.hostname or "").lower().rstrip(".")
+    if parsed.scheme not in {"http", "https"} or not host:
+        return False
+    if parsed.username or parsed.password:
+        return False
+    return host not in {"localhost", "127.0.0.1", "::1", "0.0.0.0"}
+
+
+def _provider_for_profile(
+    engine: Engine,
+    *,
+    tenant_id: str,
+    user_id: str,
+    profile: EmbeddingProfile,
+):
+    """Resolve the exact actor-scoped runtime model referenced by a profile."""
+
+    from ekb_api.core.config import get_runtime_embedding_providers
+
+    with engine.connect() as connection:
+        row = connection.execute(
+            text(
+                "SELECT p.provider_key, m.model_id "
+                "FROM llm_providers p JOIN llm_models m ON m.provider_id=p.id "
+                "WHERE p.id=:provider AND p.tenant_id=:tenant AND p.user_id=:user "
+                "AND m.id=:model AND m.tenant_id=:tenant AND m.user_id=:user "
+                "AND p.is_enabled=1 AND m.is_enabled=1"
+            ),
+            {
+                "provider": profile.llm_provider_id,
+                "model": profile.model_id,
+                "tenant": tenant_id,
+                "user": user_id,
+            },
+        ).first()
+    if row is None:
+        raise EmbeddingUnavailable("embedding provider is not available for this actor")
+
+    expected_name = f"{row.provider_key}/{row.model_id}"
+    providers = get_runtime_embedding_providers(tenant_id=tenant_id, user_id=user_id)
+    for provider in providers:
+        if provider.name == expected_name and provider.kind == "embedding":
+            return provider
+    raise EmbeddingUnavailable("embedding provider is not available for this actor")
+
+
+class OpenAICompatibleEmbeddingClient:
+    """Real OpenAI-compatible remote embeddings client.
+
+    ``http_post`` exists only as a narrow protocol seam for deterministic tests;
+    production construction uses :func:`_post_json` and never fabricates vectors.
+    """
+
+    def __init__(self, provider: Any, *, http_post: RemotePost | None = None):
+        self.provider = provider
+        self._http_post = http_post or _post_json
+
+    def embed(self, *, texts: list[str], profile: EmbeddingProfile) -> list[list[float]]:
+        if not texts:
+            return []
+        endpoint = str(self.provider.base_url or "").strip()
+        if not _is_safe_remote_endpoint(endpoint):
+            raise EmbeddingUnavailable("embedding endpoint is not a remote http(s) URL")
+        model = str(self.provider.model or "").strip()
+        if not model:
+            raise EmbeddingUnavailable("embedding model is not configured")
+        api_key = str(self.provider.api_key or "").strip()
+        if not api_key:
+            raise EmbeddingUnavailable("embedding provider credential is unavailable")
+
+        from ekb_api.core.config import get_settings
+
+        batch_size = max(1, int(get_settings().embedding_batch_size))
+        vectors: list[list[float]] = []
+        for start in range(0, len(texts), batch_size):
+            batch = texts[start : start + batch_size]
+            payload = json.dumps(
+                {"input": batch, "model": model}, ensure_ascii=False
+            ).encode("utf-8")
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {api_key}",
+            }
+            try:
+                raw = self._http_post(
+                    endpoint, payload, headers, float(self.provider.timeout_seconds)
+                )
+                body = json.loads(raw.decode("utf-8"))
+                batch_vectors = _parse_vectors(
+                    body, expected_count=len(batch), dimensions=profile.dimensions
+                )
+            except EmbeddingError:
+                raise
+            except (
+                UnicodeDecodeError,
+                json.JSONDecodeError,
+                TypeError,
+                ValueError,
+                KeyError,
+                IndexError,
+            ) as exc:
+                raise EmbeddingProviderError(code="EMBEDDING_INVALID_RESPONSE") from exc
+            vectors.extend(batch_vectors)
+
+        if len(vectors) != len(texts):
+            raise EmbeddingProviderError(code="EMBEDDING_DIMENSION_MISMATCH")
+        return vectors
+
+
+def _parse_vectors(body: Any, *, expected_count: int, dimensions: int) -> list[list[float]]:
+    if not isinstance(body, dict) or not isinstance(body.get("data"), list):
+        raise EmbeddingProviderError(code="EMBEDDING_INVALID_RESPONSE")
+    data = body["data"]
+    if len(data) != expected_count:
+        raise EmbeddingProviderError(code="EMBEDDING_DIMENSION_MISMATCH")
+
+    indexed = all(isinstance(item, dict) and isinstance(item.get("index"), int) for item in data)
+    if indexed:
+        indexes = [int(item["index"]) for item in data]
+        if sorted(indexes) != list(range(expected_count)):
+            raise EmbeddingProviderError(code="EMBEDDING_INVALID_RESPONSE")
+        data = sorted(data, key=lambda item: int(item["index"]))
+
+    vectors: list[list[float]] = []
+    for item in data:
+        if not isinstance(item, dict) or not isinstance(item.get("embedding"), list):
+            raise EmbeddingProviderError(code="EMBEDDING_INVALID_RESPONSE")
+        vector = item["embedding"]
+        if len(vector) != dimensions:
+            raise EmbeddingProviderError(code="EMBEDDING_DIMENSION_MISMATCH")
+        if any(
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(float(value))
+            for value in vector
+        ):
+            raise EmbeddingProviderError(code="EMBEDDING_INVALID_RESPONSE")
+        vectors.append([float(value) for value in vector])
+    return vectors
+
+
+def build_embedding_client(
+    *,
+    engine: Engine | None = None,
+    tenant_id: str | None = None,
+    user_id: str | None = None,
+    profile: EmbeddingProfile | None = None,
+    http_post: RemotePost | None = None,
+) -> EmbeddingClient:
     """Construct the configured embedding client.
 
     Fails closed with :class:`EmbeddingUnavailable` when no embedding provider
     is configured — vector generation must never silently succeed.
     """
-    from ekb_api.core.config import get_settings
+    from ekb_api.core.config import get_runtime_embedding_providers, get_settings
 
     settings = get_settings()
-    if not getattr(settings, "embedding_enabled", False):
+    if (tenant_id is None) != (user_id is None):
+        raise EmbeddingUnavailable("embedding actor scope is incomplete")
+    if profile is not None and (engine is None or tenant_id is None or user_id is None):
+        raise EmbeddingUnavailable("embedding profile requires tenant and actor scope")
+
+    if profile is not None:
+        provider = _provider_for_profile(
+            engine,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            profile=profile,
+        )
+    elif tenant_id is not None and user_id is not None:
+        providers = get_runtime_embedding_providers(tenant_id=tenant_id, user_id=user_id)
+        provider = providers[0] if providers else None
+    else:
+        provider = settings.embedding_providers[0] if settings.embedding_providers else None
+
+    if provider is None:
         raise EmbeddingUnavailable("embedding is not configured; ingestion cannot proceed")
-    raise EmbeddingUnavailable("embedding client construction is unavailable")
+    if provider.kind != "embedding" or not _is_safe_remote_endpoint(str(provider.base_url)):
+        raise EmbeddingUnavailable("embedding provider is not a remote http(s) provider")
+    if not str(provider.api_key or "").strip():
+        raise EmbeddingUnavailable("embedding provider credential is unavailable")
+    return OpenAICompatibleEmbeddingClient(provider, http_post=http_post)
 
 
 def _fingerprint(

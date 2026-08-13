@@ -461,3 +461,9 @@ Nginx 配置：
 - retry/cancel/abort：failed 且 retryable item 调用真实 retry，processing/uploading 调用真实 cancel/abort；操作后重新 GET，不写假成功。此前本地真实浏览器上传后显示服务端状态；本地 embedding provider 缺失时真实失败为 `EMBEDDING_UNAVAILABLE`，不伪造 ready。
 - 验证：后端全量 `352 passed, 2 skipped`；Upload Center/ingest/boundary 切片 `34 passed`；前端 `52 passed`、typecheck/build 通过。
 - 生产 PostgreSQL/pgvector、对象存储、可靠队列/Worker/Scheduler、服务器备份、部署/回滚和生产浏览器未执行，原因是当前运行时没有生产目标/受管凭据；本条不记录任何凭据、令牌或私密地址。此条不代表全 PH3/PH0–PH8 完成。
+
+## 2026-08-13 本地 Embedding 切片交付记录
+
+- DONE-LOCAL：`services/embedding.py` 使用真实 OpenAI-compatible 远程客户端；worker 绑定 `tenant+actor+KB ACTIVE profile/generation`。无配置或无 ACTIVE profile/generation 时保持 `EMBEDDING_UNAVAILABLE` fail-closed，不写 READY。
+- 远程响应校验 `count`、向量 dimension 与非有限值；不使用本地模型或伪向量。真实外部 Provider 未调用。
+- 验证：Embedding 定向 `40 passed`；全量后端 `358 passed, 2 skipped`；Ruff、compileall、`git diff --check` 通过。生产 Provider 出网/凭据、PostgreSQL/pgvector、部署仍 `NOT RUN/BLOCKED`；不记录凭据、token 或私密地址，不代表全 PH3/PH8 完成。

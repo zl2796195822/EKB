@@ -16,7 +16,12 @@ from sqlalchemy import Engine, text
 
 from ekb_api.chunking import split_sections
 from ekb_api.domain import utc_now
-from ekb_api.embedding import EmbeddingError, embed_batch
+from ekb_api.services.embedding import (
+    EmbeddingError,
+    EmbeddingUnavailable,
+    build_embedding_client,
+    resolve_profile,
+)
 from ekb_api.services.ingestion import (
     STAGES,
     IngestService,
@@ -83,6 +88,42 @@ def _object_key(engine: Engine, *, tenant_id: str, source_id: str) -> str:
     if row is None:
         raise ParserError("OBJECT_CHECKSUM_MISMATCH", "源对象不存在")
     return str(row.object_key)
+
+
+def _active_profile(
+    engine: Engine, *, tenant_id: str, kb_id: str, owner_user_id: str | None
+):
+    if not owner_user_id:
+        raise EmbeddingUnavailable("embedding actor scope is missing")
+    with engine.connect() as connection:
+        row = connection.execute(
+            text(
+                "SELECT embedding_profile_id, active_index_generation_id "
+                "FROM knowledge_bases WHERE id=:kb AND tenant_id=:tenant "
+                "AND purged_at IS NULL"
+            ),
+            {"kb": kb_id, "tenant": tenant_id},
+        ).first()
+        if row is None or not row.embedding_profile_id or not row.active_index_generation_id:
+            raise EmbeddingUnavailable("embedding profile is not active for this knowledge base")
+        generation = connection.execute(
+            text(
+                "SELECT embedding_profile_id, state FROM index_generations "
+                "WHERE id=:generation AND knowledge_base_id=:kb AND tenant_id=:tenant"
+            ),
+            {
+                "generation": row.active_index_generation_id,
+                "kb": kb_id,
+                "tenant": tenant_id,
+            },
+        ).first()
+    if (
+        generation is None
+        or str(generation.state) != "ACTIVE"
+        or str(generation.embedding_profile_id) != str(row.embedding_profile_id)
+    ):
+        raise EmbeddingUnavailable("embedding index generation is not active")
+    return resolve_profile(engine, tenant_id=tenant_id, profile_id=str(row.embedding_profile_id))
 
 
 def _write_chunks(
@@ -236,19 +277,26 @@ def process_claimed_job(
             metrics={"chunk_count": len(chunks)},
         )
         inputs = [" / ".join(chunk.section_path) + " " + chunk.content for chunk in chunks]
+        owner_user_id = job.payload.get("owner_user_id")
+        profile = _active_profile(
+            engine,
+            tenant_id=tenant_id,
+            kb_id=kb_id,
+            owner_user_id=str(owner_user_id) if owner_user_id else None,
+        )
+        embedding_client = build_embedding_client(
+            engine=engine,
+            tenant_id=tenant_id,
+            user_id=str(owner_user_id),
+            profile=profile,
+        )
         vectors = (
-            embed_batch(
-                inputs,
-                tenant_id=tenant_id,
-                user_id=job.payload.get("owner_user_id"),
-            )
+            embedding_client.embed(texts=inputs, profile=profile)
             if inputs
             else []
         )
         if len(vectors) != len(chunks):
-            raise ParserError(
-                "EMBEDDING_DIMENSION_MISMATCH", "Embedding 返回数量与 chunk 数量不一致"
-            )
+            raise EmbeddingError("embedding response count does not match chunks")
         _stage(
             ingest,
             tenant_id=tenant_id,
@@ -294,7 +342,7 @@ def process_claimed_job(
         _fail_claim(engine, claimed, jobs, ingest, str(exc.code), exc.detail, owner)
         return IngestWorkResult(job.id, "FAILED", exc.code)
     except EmbeddingError as exc:
-        code = "EMBEDDING_RATE_LIMITED" if "rate" in str(exc).lower() else "EMBEDDING_UNAVAILABLE"
+        code = getattr(exc, "code", "EMBEDDING_UNAVAILABLE")
         _set_upload_item_status(
             engine,
             tenant_id=tenant_id,

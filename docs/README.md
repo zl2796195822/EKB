@@ -72,3 +72,9 @@ CR-PH1-T01 + CR-PH1-T03 的第一真实业务切片已在本地工作树实现�
 - DONE-LOCAL：显式选择的 unknown/disabled/cross-tenant/no-credential model 返回 `MODEL_UNAVAILABLE`；图片 + 非 `vision=true` model 返回 `MODEL_NOT_ALLOWED`；显式选择不静默 fallback；普通无 model 请求保留 provider fallback。
 - 验证：backend `349 passed, 2 skipped`；web `51 passed`、typecheck/build；定向 Provider/Model 回归 `63 passed`；范围 Ruff（忽略既有 E501 等）、compileall、`git diff --check` 通过。真实浏览器此前已确认 Profile 模型服务目录、Assistant 添加文件/模型/KB context 可见。
 - 边界：未验证真实 Provider 出网或生产完成；生产 PostgreSQL/pgvector、对象存储、队列/Worker/Scheduler、服务器备份/部署/回滚和生产浏览器仍 `NOT RUN/BLOCKED`。未改 Skills、legacy backup、deploy、migration、theme 或 Web Search。
+
+## Local Embedding boundary closure (2026-08-13)
+
+本地 Embedding 切片使用 `services/embedding.py` 的真实 OpenAI-compatible 远程客户端；worker 绑定当前 `tenant+actor`、KB ACTIVE embedding profile 与 ACTIVE index generation。无配置或无 ACTIVE profile/generation 时以 `EMBEDDING_UNAVAILABLE` fail-closed，不写 READY。远程响应校验 `count`、dimension 和非有限值；不使用本地模型或伪向量，真实外部 Provider 未调用。
+
+验证：Embedding 定向 `40 passed`；全量后端 `358 passed, 2 skipped`；Ruff、compileall、`git diff --check` 通过。生产 Provider 出网/凭据、PostgreSQL/pgvector、部署仍 `NOT RUN/BLOCKED`；本条不代表全 PH3/PH8 或 PH0–PH8 完成。
