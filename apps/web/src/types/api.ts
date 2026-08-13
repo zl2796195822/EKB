@@ -587,6 +587,39 @@ export interface JobsCleanupResponse {
   recent: JobViewResponse[]
 }
 
+export interface JobsRuntimeWorkerResponse {
+  worker_id: string
+  worker_type: string
+  queues: string[]
+  version: string
+  heartbeat_at: string
+  started_at: string
+}
+
+export interface JobsRuntimeLeaseResponse {
+  schedule_name: string
+  owner_id: string
+  lease_expires_at: string
+  fencing_token: number
+}
+
+export interface JobsRuntimeRunResponse {
+  id: string
+  schedule_name: string
+  scope_type: string
+  started_at: string
+  ended_at: string | null
+  status: string
+}
+
+export interface JobsRuntimeResponse {
+  status: 'available' | 'unavailable' | string
+  workers: JobsRuntimeWorkerResponse[]
+  leases: JobsRuntimeLeaseResponse[]
+  recent_runs: JobsRuntimeRunResponse[]
+  checked_at: string
+}
+
 // ---- Phase 1: Profile / Preferences / Sessions / API Keys / Notifications ----
 
 export interface MeProfileResponse {

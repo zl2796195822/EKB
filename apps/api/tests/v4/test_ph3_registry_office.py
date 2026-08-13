@@ -2,23 +2,50 @@
 
 from __future__ import annotations
 
+import subprocess
 from io import BytesIO
+from pathlib import Path
 
 import pytest
+from docx import Document
 from openpyxl import Workbook
 from pptx import Presentation
 from pptx.util import Inches
 
 from ekb_api.services.parsers.registry import (
+    CONVERSION_FAILED,
     FILE_EMPTY,
-    MIME_UNSUPPORTED,
     PARSER_CORRUPT,
+    DocxParser,
+    ParsedSection,
     ParserError,
+    ParseResult,
     ParserRegistry,
 )
 
+DOC_MIME = "application/msword"
 XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+LEGACY_MIMES = {
+    DOC_MIME: ("docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+    "application/vnd.ms-excel": (
+        "xlsx",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ),
+    "application/vnd.ms-powerpoint": (
+        "pptx",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    ),
+}
+
+
+def _docx_bytes() -> bytes:
+    document = Document()
+    document.add_heading("旧版文档", level=1)
+    document.add_paragraph("转换后由现有 DOCX parser 读取")
+    output = BytesIO()
+    document.save(output)
+    return output.getvalue()
 
 
 def _xlsx_bytes() -> bytes:
@@ -121,11 +148,124 @@ def test_empty_ooxml_is_file_empty(mime: str) -> None:
     assert caught.value.code == FILE_EMPTY
 
 
+@pytest.mark.parametrize("mime", LEGACY_MIMES)
+def test_registry_resolves_legacy_office_mimes(mime: str) -> None:
+    parser = ParserRegistry().resolve(mime)
+    assert parser.parser_id == "legacy-office"
+    assert parser.supports(mime)
+
+
 @pytest.mark.parametrize(
-    "mime",
-    ["application/msword", "application/vnd.ms-excel", "application/vnd.ms-powerpoint"],
+    ("reason", "failure"),
+    [
+        ("soffice-not-found", FileNotFoundError("soffice")),
+        (
+            "conversion-timeout",
+            subprocess.TimeoutExpired(cmd=["soffice"], timeout=30, output=b"secret"),
+        ),
+        (
+            "conversion-nonzero-exit",
+            subprocess.CompletedProcess(["soffice"], 1, stdout=b"secret", stderr=b"secret"),
+        ),
+    ],
 )
-def test_legacy_office_mimes_remain_fail_closed(mime: str) -> None:
+def test_legacy_conversion_failures_are_stable_and_redacted(
+    monkeypatch: pytest.MonkeyPatch, reason: str, failure: BaseException
+) -> None:
+    def fail_run(*args: object, **kwargs: object) -> object:
+        if isinstance(failure, BaseException):
+            raise failure
+        return failure
+
+    monkeypatch.setattr(subprocess, "run", fail_run)
     with pytest.raises(ParserError) as caught:
-        ParserRegistry().parse(b"legacy-bytes", filename="legacy.office", mime=mime)
-    assert caught.value.code == MIME_UNSUPPORTED
+        ParserRegistry().parse(
+            b"legacy-secret-content",
+            filename="../../private/secret.doc",
+            mime=DOC_MIME,
+        )
+    error = caught.value
+    assert error.code == CONVERSION_FAILED
+    assert error.to_sanitized_error()["detail"]["reason"] == reason
+    assert set(error.detail) <= {
+        "reason",
+        "detected_mime",
+        "parser_id",
+        "parser_version",
+        "byte_size",
+    }
+    assert "legacy-secret-content" not in error.message
+    assert "secret.doc" not in str(error.detail)
+
+
+def test_legacy_conversion_calls_target_parser_and_preserves_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append({"command": command, "kwargs": kwargs})
+        outdir = Path(command[command.index("--outdir") + 1])
+        (outdir / "quarterly.docx").write_bytes(b"converted-ooxml")
+        return subprocess.CompletedProcess(command, 0, stdout="source", stderr="")
+
+    def fake_docx_parse(
+        self: DocxParser, raw_bytes: bytes, *, filename: str, mime: str
+    ) -> ParseResult:
+        calls.append(
+            {
+                "target": self.parser_id,
+                "bytes": raw_bytes,
+                "filename": filename,
+                "mime": mime,
+            }
+        )
+        return ParseResult(
+            sections=[ParsedSection(section_path=[filename], content="真实转换内容")],
+            metadata={"format": "docx", "sections": 1},
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(DocxParser, "parse", fake_docx_parse)
+
+    result = ParserRegistry().parse(
+        b"legacy-secret-content", filename="../../quarterly.doc", mime=DOC_MIME
+    )
+
+    assert result.metadata == {
+        "format": "legacy-converted",
+        "sections": 1,
+        "source_mime": DOC_MIME,
+        "converter": "libreoffice",
+        "target_mime": LEGACY_MIMES[DOC_MIME][1],
+    }
+    assert result.sections[0].content == "真实转换内容"
+    target_call = next(call for call in calls if call.get("target") == "docx")
+    assert target_call["bytes"] == b"converted-ooxml"
+    assert target_call["filename"] == "quarterly.doc"
+    assert target_call["mime"] == LEGACY_MIMES[DOC_MIME][1]
+
+    process_call = next(call for call in calls if "command" in call)
+    command = process_call["command"]
+    kwargs = process_call["kwargs"]
+    assert isinstance(command, list)
+    assert command[0] == "soffice"
+    assert "--safe-mode" in command
+    assert command[command.index("--convert-to") + 1] == "docx"
+    assert Path(command[-1]).name == "quarterly.doc"
+    assert Path(command[-1]).parent.name == "input"
+    assert kwargs["shell"] is False
+    assert kwargs["timeout"] == 30
+
+
+def test_legacy_target_parser_error_is_not_masked(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        outdir = Path(command[command.index("--outdir") + 1])
+        (outdir / "broken.docx").write_bytes(b"not-an-ooxml-document")
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    with pytest.raises(ParserError) as caught:
+        ParserRegistry().parse(b"legacy-bytes", filename="broken.doc", mime=DOC_MIME)
+    assert caught.value.code == PARSER_CORRUPT
+    assert caught.value.to_sanitized_error()["detail"]["reason"] == "docx-read-error"

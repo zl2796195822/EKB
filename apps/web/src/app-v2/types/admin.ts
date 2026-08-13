@@ -269,6 +269,45 @@ export interface JobsCleanupView {
   readonly recent: readonly JobView[]
 }
 
+export interface JobsRuntimeWorkerView {
+  readonly workerId: string
+  readonly workerType: string
+  readonly queues: readonly string[]
+  readonly version: string
+  readonly heartbeatAt: string
+  readonly startedAt: string
+}
+
+export interface JobsRuntimeLeaseView {
+  readonly scheduleName: string
+  readonly ownerId: string
+  readonly leaseExpiresAt: string
+  readonly fencingToken: number
+}
+
+export interface JobsRuntimeRunView {
+  readonly id: string
+  readonly scheduleName: string
+  readonly scopeType: string
+  readonly startedAt: string
+  readonly endedAt: string | null
+  readonly status: string
+}
+
+export interface JobsRuntimeView {
+  readonly status: 'available' | 'unavailable' | string
+  readonly workers: readonly JobsRuntimeWorkerView[]
+  readonly leases: readonly JobsRuntimeLeaseView[]
+  readonly recentRuns: readonly JobsRuntimeRunView[]
+  readonly checkedAt: string
+}
+
+export interface JobsRuntimeResult {
+  readonly state: PageState
+  readonly data?: JobsRuntimeView
+  readonly error?: AdapterError
+}
+
 export interface JobsCleanupResult {
   readonly state: PageState
   readonly data?: JobsCleanupView
@@ -295,4 +334,5 @@ export interface AdminServices {
   readonly getJob: (jobId: string) => Promise<JobResult>
   readonly cancelJob: (jobId: string) => Promise<JobResult>
   readonly getJobsCleanup: (recentLimit?: number) => Promise<JobsCleanupResult>
+  readonly getJobsRuntime: (recentRunsLimit?: number) => Promise<JobsRuntimeResult>
 }

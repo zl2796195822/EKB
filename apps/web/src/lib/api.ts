@@ -71,6 +71,7 @@ import type {
   JobsCleanupResponse,
   JobsListQuery,
   JobsListResponse,
+  JobsRuntimeResponse,
   AppInstallResponse,
   AppsCatalogResponse,
   AppsInstalledResponse,
@@ -1049,6 +1050,15 @@ export class ApiClient {
       : 10
     return this.request<JobsCleanupResponse>(
       `/jobs/cleanup${buildQuery({ recent_limit: safeRecentLimit })}`,
+    )
+  }
+
+  async getJobsRuntime(recentRunsLimit = 20): Promise<JobsRuntimeResponse> {
+    const safeRecentRunsLimit = Number.isFinite(recentRunsLimit)
+      ? Math.min(100, Math.max(1, Math.trunc(recentRunsLimit)))
+      : 20
+    return this.request<JobsRuntimeResponse>(
+      `/jobs/runtime${buildQuery({ recent_runs_limit: safeRecentRunsLimit })}`,
     )
   }
 

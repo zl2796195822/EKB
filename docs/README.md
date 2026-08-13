@@ -103,3 +103,11 @@ CR-PH1-T01 + CR-PH1-T03 的第一真实业务切片已在本地工作树实现�
 本地浏览器证据（2026-08-13）：使用现有本地开发账号重新建立登录后，删除 `ekb.upload-center.batch-refs.v1` 并 reload `/#/documents`，真实服务端 batch 被恢复并显示，包含真实文件 `HANDOFF-2026-08-12.md`、失败阶段 `CHUNKING / 50%`、attempt `1/1`、job id 和 `EMBEDDING_UNAVAILABLE`。不记录 access/refresh token、密码、私有地址或 opaque secret。
 
 验证：backend full pytest `361 passed, 2 skipped`；web `52 passed`；web typecheck/build 通过。生产/服务器工作因当前运行时没有生产目标（统一写作 `[production host]`）或受管凭据（统一写作 `[REDACTED]`）仍 `NOT RUN/BLOCKED`；不代表生产部署完成，也不代表全 PH3/PH8 完成。
+
+## Current local business closure (2026-08-14)
+
+本节是当前本地实现的 authority/evidence 索引，不是 Phase exit 证明：
+
+- DONE-LOCAL：Jobs runtime 后端/前端展示真实 worker heartbeat、retention lease 和 scheduler runs；legacy Office 已接入隔离 `soffice` 转换并复用 OOXML parser。FR-015、CR-PH2 runtime/jobs、CR-PH3 legacy parser 仍仅标记 `DONE-LOCAL`。
+- 本地证据：[`2026-08-14-jobs-runtime.md`](evidence/ekb-core-rebuild/local/2026-08-14-jobs-runtime.md)、[`2026-08-14-legacy-office.md`](evidence/ekb-core-rebuild/local/2026-08-14-legacy-office.md)。证据记录真实浏览器与 XLS→XLSX smoke 边界，不记录凭据、token 或私网地址。
+- 未完成：生产 PostgreSQL/pgvector、远程 Provider/Embedding、对象存储、可靠队列/生产 Worker、服务器备份、部署和回滚仍 `NOT RUN/BLOCKED`；生产目标统一写作 `[production host]`，敏感值统一写作 `[REDACTED]`。

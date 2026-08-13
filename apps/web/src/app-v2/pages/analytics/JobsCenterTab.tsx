@@ -7,7 +7,7 @@ import {
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { StatePanel } from '../../components/StatePanel'
 import type { AdapterError, PageState, V2Services } from '../../types'
-import type { JobView, JobsCleanupView } from '../../types/admin'
+import type { JobView, JobsCleanupView, JobsRuntimeView } from '../../types/admin'
 
 const JOB_STATES = [
   'QUEUED',
@@ -101,6 +101,9 @@ export function JobsCenterTab({ services }: JobsCenterTabProps) {
   const [cleanupState, setCleanupState] = useState<PageState>('loading')
   const [cleanup, setCleanup] = useState<JobsCleanupView | null>(null)
   const [cleanupError, setCleanupError] = useState<AdapterError | undefined>()
+  const [runtimeState, setRuntimeState] = useState<PageState>('loading')
+  const [runtime, setRuntime] = useState<JobsRuntimeView | null>(null)
+  const [runtimeError, setRuntimeError] = useState<AdapterError | undefined>()
   const [pendingJobId, setPendingJobId] = useState<string | null>(null)
   const [cancelNotice, setCancelNotice] = useState<string | null>(null)
   const [cancelError, setCancelError] = useState<AdapterError | undefined>()
@@ -108,15 +111,19 @@ export function JobsCenterTab({ services }: JobsCenterTabProps) {
   const load = useCallback(async () => {
     setJobsState('loading')
     setCleanupState('loading')
+    setRuntimeState('loading')
     setJobs([])
     setJobsCount(0)
     setCleanup(null)
+    setRuntime(null)
     setJobsError(undefined)
     setCleanupError(undefined)
+    setRuntimeError(undefined)
 
-    const [jobsResult, cleanupResult] = await Promise.all([
+    const [jobsResult, cleanupResult, runtimeResult] = await Promise.all([
       services.admin.listJobs({ states: JOB_STATES, limit: JOB_LIST_LIMIT }),
       services.admin.getJobsCleanup(CLEANUP_RECENT_LIMIT),
+      services.admin.getJobsRuntime(),
     ])
 
     setJobsState(jobsResult.state)
@@ -127,6 +134,10 @@ export function JobsCenterTab({ services }: JobsCenterTabProps) {
     setCleanupState(cleanupResult.state)
     setCleanup(cleanupResult.data ?? null)
     setCleanupError(cleanupResult.error)
+
+    setRuntimeState(runtimeResult.state)
+    setRuntime(runtimeResult.data ?? null)
+    setRuntimeError(runtimeResult.error)
   }, [services.admin])
 
   useEffect(() => {
@@ -158,7 +169,7 @@ export function JobsCenterTab({ services }: JobsCenterTabProps) {
     <div id="gov-panel-jobs" className="v2-m5-tab-panel v2-jobs-center" role="tabpanel" aria-labelledby="gov-tab-jobs">
       <div className="v2-m6-tab-toolbar">
         <span>租户作用域 Jobs Center：队列、租约、错误与清理投影均来自真实 API</span>
-        <button type="button" className="v2-m5-secondary-button" onClick={() => void load()} disabled={jobsState === 'loading' || cleanupState === 'loading'}>
+        <button type="button" className="v2-m5-secondary-button" onClick={() => void load()} disabled={jobsState === 'loading' || cleanupState === 'loading' || runtimeState === 'loading'}>
           <ArrowClockwise size={14} aria-hidden="true" />
           刷新
         </button>
@@ -176,6 +187,63 @@ export function JobsCenterTab({ services }: JobsCenterTabProps) {
           <span>取消作业失败。{errorMeta(cancelError)}</span>
         </div>
       ) : null}
+
+      <section className="v2-jobs-runtime" aria-labelledby="jobs-runtime-title">
+        <div className="v2-jobs-section-heading">
+          <div>
+            <h3 id="jobs-runtime-title">Worker / Scheduler 运行时</h3>
+            <p>仅展示服务端真实心跳、租约和调度运行记录；空投影保持 unavailable。</p>
+          </div>
+          <Pulse size={20} aria-hidden="true" />
+        </div>
+        {runtimeState === 'loading' ? <StatePanel state="loading" message="正在读取真实 worker 与 scheduler 状态。" /> : null}
+        {runtimeState === 'permission-denied' ? <StatePanel state="permission-denied" message="当前主体没有运行时状态读取能力。" reason={errorMeta(runtimeError)} /> : null}
+        {runtimeState === 'error' ? <StatePanel state="error" message="运行时状态加载失败。" reason={errorMeta(runtimeError)} /> : null}
+        {runtimeState === 'unavailable' || runtime?.status === 'unavailable' ? (
+          <div className="v2-m5-notice" data-status="unavailable" role="status">
+            <WarningCircle size={15} aria-hidden="true" />
+            <span>运行时状态：unavailable。服务端当前没有 worker heartbeat、scheduler lease 或 scheduler run 记录。</span>
+          </div>
+        ) : null}
+        {runtimeState === 'ready' && runtime?.status === 'available' ? (
+          <>
+            <div className="v2-jobs-state-grid" aria-label="运行时状态计数">
+              <div className="v2-jobs-state-card" data-state="RUNNING"><span>Workers</span><strong>{runtime.workers.length}</strong><small>真实心跳</small></div>
+              <div className="v2-jobs-state-card" data-state="QUEUED"><span>Leases</span><strong>{runtime.leases.length}</strong><small>Retention lease</small></div>
+              <div className="v2-jobs-state-card" data-state="SUCCEEDED"><span>Scheduler runs</span><strong>{runtime.recentRuns.length}</strong><small>最近记录</small></div>
+              <div className="v2-jobs-state-card" data-state="RETRY_WAIT"><span>Checked at</span><strong>{formatTime(runtime.checkedAt)}</strong><small>服务端时间</small></div>
+            </div>
+            <div className="v2-jobs-table-wrap">
+              <table className="v2-jobs-table">
+                <caption>运行时协调明细</caption>
+                <thead>
+                  <tr><th scope="col">类型</th><th scope="col">标识</th><th scope="col">状态 / 队列</th><th scope="col">时间</th></tr>
+                </thead>
+                <tbody>
+                  {runtime.workers.map((worker) => (
+                    <tr key={`worker-${worker.workerId}`}>
+                      <td>Worker</td><td><strong>{safeLeaseOwner(worker.workerId)}</strong><small>{worker.workerType} · {worker.version}</small></td>
+                      <td>{worker.queues.length > 0 ? worker.queues.join(', ') : '未声明队列'}</td><td><small>心跳：{formatTime(worker.heartbeatAt)}</small><small>启动：{formatTime(worker.startedAt)}</small></td>
+                    </tr>
+                  ))}
+                  {runtime.leases.map((lease) => (
+                    <tr key={`lease-${lease.scheduleName}`}>
+                      <td>Lease</td><td><strong>{lease.scheduleName}</strong><small>owner：{safeLeaseOwner(lease.ownerId)}</small></td>
+                      <td>fencing token：{lease.fencingToken}</td><td>到期：{formatTime(lease.leaseExpiresAt)}</td>
+                    </tr>
+                  ))}
+                  {runtime.recentRuns.map((run) => (
+                    <tr key={`run-${run.id}`}>
+                      <td>Scheduler run</td><td><strong>{run.scheduleName}</strong><small>{run.scopeType} · {run.id}</small></td>
+                      <td><span className="v2-jobs-state-pill" data-state={run.status}>{run.status}</span></td><td><small>开始：{formatTime(run.startedAt)}</small><small>结束：{formatTime(run.endedAt)}</small></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        ) : null}
+      </section>
 
       {jobsState !== 'loading' && jobsState !== 'error' && jobsState !== 'permission-denied' ? (
         <section className="v2-jobs-summary" aria-labelledby="jobs-summary-title">

@@ -183,6 +183,12 @@ Embedding 不可用时 job 进入可重试失败；不得将词法检索标为�
 
 Worker 不继承用户无限权限；job 保存发起人和授权快照，同时在激活版本前检查资源仍存在且 job generation 仍有效。
 
+## 2026-08-14 implementation evidence — FR-015 legacy conversion (DONE-LOCAL)
+
+FR-015 legacy Office conversion is implemented locally as an isolated `soffice` conversion boundary feeding the existing OOXML parsers. The conversion process uses `shell=False`, an isolated temporary input/output/profile directory, safe basenames, and a 30-second hard timeout. Missing executable, timeout, non-zero exit, or missing/empty output fail closed as `CONVERSION_FAILED`; a target parser failure is propagated with its original stable classification and is not converted into a success claim.
+
+This is `DONE-LOCAL` evidence only. A real local XLS → XLSX → `XlsxParser` smoke was executed; this record does not claim that DOC or PPT were successfully parsed in a real smoke, and it does not pass the production or Phase exit gates.
+
 ## 11. 验收证据
 
 必须至少证明 TXT、PDF、10+ 文件批次和多级目录的对象、版本、Chunk、Embedding、pgvector 数量与 UI 状态一致；详细矩阵在 `12-testing-plan.md` 与 `13-acceptance-criteria.md` 中定义。

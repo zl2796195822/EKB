@@ -529,3 +529,14 @@ Nginx 配置：
 - 本地浏览器：`127.0.0.1:5173/#/documents` 的真实服务端文档列表显示“已选择 6 项”和已启用的“批量删除 (6)”；本次未点击删除，未误删本地真实文档。浏览器存在既存 console 错误，不声称 `console=0`。
 - 验证：`npm test -- --run` 为 `58 passed`；typecheck、build、`git diff --check` 通过；build 保留已有 chunk `>500KB` warning。未记录凭据、token 或私有地址。
 - 生产 PostgreSQL/对象存储/队列/Worker/Provider/服务器部署、备份和回滚仍 `NOT RUN`；统一使用 `[production host]` / `[REDACTED]`，本地切片不代表生产完成或 PH0–PH8 全部完成。详见 [`docs/evidence/ekb-core-rebuild/local/2026-08-13-document-bulk-delete.md`](docs/evidence/ekb-core-rebuild/local/2026-08-13-document-bulk-delete.md)。
+
+## 2026-08-14 Jobs runtime 与 legacy Office 本地收口
+
+- DONE-LOCAL：Jobs runtime 后端/前端真实展示 worker heartbeat、retention lease 和 scheduler runs；legacy Office 通过隔离 `soffice` 转换复用 OOXML parser，采用 `shell=False`、独立临时目录/profile 和 30 秒超时，目标 parser 错误透传。
+- 验证：后端 `390 passed, 2 skipped`；Web `60 passed`；typecheck/build、相关 Ruff、`git diff --check` 通过；Office 定向 `14 passed`；真实本地 XLS→XLSX→`XlsxParser` smoke 已执行。浏览器作业中心看到真实 worker/lease/最近 `SUCCEEDED` run；历史 auth console errors 仍存在，不宣称 `console=0`。
+- 决策与边界：FR-015、CR-PH2 runtime/jobs、CR-PH3 legacy parser 仅记 `DONE-LOCAL`，不改历史 Spec 合同；生产 PostgreSQL/pgvector、远程 Provider/Embedding、对象存储、可靠队列/生产 Worker、服务器备份/部署/回滚仍 `NOT RUN/BLOCKED`。不保存凭据、token、密码或私网地址，生产统一使用 `[production host]` / `[REDACTED]`。
+
+## 2026-08-14 Jobs runtime stale heartbeat 修复
+
+- scheduler 默认 `owner_id` 使用稳定进程标识；runtime projection 对 `local-scheduler` 仅展示当前 `scheduler_leases.owner_id`，历史替换 worker heartbeat 保留但不作为当前 worker展示。
+- 测试、Ruff、`git diff --check` 通过；浏览器复验为 `1 worker / 1 lease / 真实 SUCCEEDED run`。生产仍未执行，使用 `[production host]` / `[REDACTED]`，不保存凭据、token、私网地址或完整 opaque ID。

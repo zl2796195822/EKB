@@ -272,3 +272,9 @@ CR-PH1-T01 + CR-PH1-T03 第一真实业务切片已在本地工作树执行：�
 ## Local business closure record (2026-08-13)
 
 本地真实上传批次、开发对象存储、checksum complete、后台 ingest worker、远程 Embedding 缺失时的 `EMBEDDING_UNAVAILABLE` fail-closed、附件问答与引用、远程 Vision/OCR 缺失时的 fail-closed、文档中心真实浏览器验收和回归结果见 [`docs/evidence/ekb-core-rebuild/local/2026-08-13-local-business.md`](../../evidence/ekb-core-rebuild/local/2026-08-13-local-business.md)。该记录仅标记已执行的本地切片，不改变 PH1–PH8 的生产阻塞状态；生产 PostgreSQL/pgvector、对象存储、可靠队列、Provider 凭据、部署、备份和回滚仍未执行。
+
+## 2026-08-14 progress evidence — local-only closure
+
+- `CR-PH2 runtime/jobs`：`DONE-LOCAL` only. The backend runtime projection and Analytics Jobs Center display real worker heartbeat, retention lease and scheduler-run data, with unavailable/error boundaries preserved. Backend `390 passed, 2 skipped`; Web `60 passed`; typecheck/build and relevant Ruff passed.
+- `CR-PH3 legacy parser` / FR-015：`DONE-LOCAL` only. Legacy DOC/XLS/PPT MIME handling uses isolated `soffice` conversion into the existing OOXML parser path with `shell=False`, temporary directories/profile and a 30-second timeout; Office targeted tests `14 passed`, and the real local smoke covered XLS → XLSX → `XlsxParser` only.
+- Exit/deploy gates are not passed: production PostgreSQL/pgvector, remote Provider/Embedding, object storage, reliable queue/production Worker, server backup, deployment and rollback remain `NOT RUN/BLOCKED`. See [`2026-08-14-jobs-runtime.md`](../../evidence/ekb-core-rebuild/local/2026-08-14-jobs-runtime.md) and [`2026-08-14-legacy-office.md`](../../evidence/ekb-core-rebuild/local/2026-08-14-legacy-office.md).

@@ -9,8 +9,11 @@ response leaks into the API envelope.
 from __future__ import annotations
 
 import re
+import subprocess
+import tempfile
 from dataclasses import dataclass, field
 from io import BytesIO
+from pathlib import Path
 from typing import Optional, Protocol, runtime_checkable
 
 # ---- Stable error codes (04-knowledge-base.md §8) -------------------------
@@ -277,7 +280,7 @@ class DocxParser(_LibreOfficeBackedParser):
                 detail={"detected_mime": mime, "reason": "dependency-missing"},
             ) from exc
         try:
-            doc = DocxDocument(raw_bytes)
+            doc = DocxDocument(BytesIO(raw_bytes))
         except Exception as exc:
             raise ParserError(
                 PARSER_CORRUPT,
@@ -506,6 +509,168 @@ class PptxParser:
             ) from exc
 
 
+class LegacyOfficeParser:
+    """Convert legacy binary Office files in an isolated LibreOffice process.
+
+    The input is written only to a private temporary directory and the
+    converted bytes are passed to the existing OOXML parser.  Conversion and
+    parsing are deliberately separate stages: a successful conversion never
+    masks a target parser error.
+    """
+
+    parser_id = "legacy-office"
+    parser_version = "legacy-office-v1.0"
+    _timeout_seconds = 30
+    _targets = {
+        "application/msword": (
+            ".doc",
+            "docx",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            DocxParser,
+        ),
+        "application/vnd.ms-excel": (
+            ".xls",
+            "xlsx",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            XlsxParser,
+        ),
+        "application/vnd.ms-powerpoint": (
+            ".ppt",
+            "pptx",
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            PptxParser,
+        ),
+    }
+
+    def supports(self, mime: str) -> bool:
+        return mime in self._targets
+
+    def parse(self, raw_bytes: bytes, *, filename: str, mime: str) -> ParseResult:
+        if not raw_bytes:
+            raise ParserError(
+                FILE_EMPTY,
+                "文件内容为空",
+                detail={"detected_mime": mime, "byte_size": 0},
+            )
+
+        target = self._targets.get(mime)
+        if target is None:  # pragma: no cover - ParserRegistry resolves first
+            raise ParserError(
+                MIME_UNSUPPORTED,
+                "不支持的旧版 Office 类型",
+                detail={"detected_mime": mime},
+            )
+
+        source_suffix, target_extension, target_mime, parser_type = target
+        safe_stem = _safe_legacy_stem(filename)
+        safe_filename = f"{safe_stem}{source_suffix}"
+
+        with tempfile.TemporaryDirectory(prefix="ekb-office-") as temp_root:
+            root = Path(temp_root)
+            input_dir = root / "input"
+            output_dir = root / "output"
+            profile_dir = root / "profile"
+            input_dir.mkdir()
+            output_dir.mkdir()
+            profile_dir.mkdir()
+            input_path = input_dir / safe_filename
+            output_path = output_dir / f"{safe_stem}.{target_extension}"
+            input_path.write_bytes(raw_bytes)
+
+            command = [
+                "soffice",
+                "--headless",
+                "--safe-mode",
+                "--nologo",
+                "--nodefault",
+                "--nolockcheck",
+                "--norestore",
+                "--nofirststartwizard",
+                f"-env:UserInstallation={profile_dir.as_uri()}",
+                "--convert-to",
+                target_extension,
+                "--outdir",
+                str(output_dir),
+                str(input_path),
+            ]
+            try:
+                completed = subprocess.run(
+                    command,
+                    shell=False,
+                    check=False,
+                    capture_output=True,
+                    stdin=subprocess.DEVNULL,
+                    timeout=self._timeout_seconds,
+                )
+            except FileNotFoundError as exc:
+                raise self._conversion_error(
+                    mime, len(raw_bytes), "soffice-not-found"
+                ) from exc
+            except subprocess.TimeoutExpired as exc:
+                raise self._conversion_error(
+                    mime, len(raw_bytes), "conversion-timeout"
+                ) from exc
+            except OSError as exc:
+                raise self._conversion_error(
+                    mime, len(raw_bytes), "soffice-launch-error"
+                ) from exc
+
+            if completed.returncode != 0:
+                raise self._conversion_error(
+                    mime, len(raw_bytes), "conversion-nonzero-exit"
+                )
+            if not output_path.is_file() or output_path.is_symlink():
+                raise self._conversion_error(mime, len(raw_bytes), "output-missing")
+            if output_path.resolve().parent != output_dir.resolve():
+                raise self._conversion_error(mime, len(raw_bytes), "output-path-invalid")
+            if output_path.stat().st_size <= 0:
+                raise self._conversion_error(mime, len(raw_bytes), "output-empty")
+
+            converted_bytes = output_path.read_bytes()
+            target_parser = parser_type()
+            # Deliberately do not catch ParserError here.  The target parser's
+            # stable PARSER_CORRUPT/PARSER_ENCRYPTED/etc. contract must remain
+            # visible when conversion output cannot be parsed.
+            result = target_parser.parse(
+                converted_bytes,
+                filename=safe_filename,
+                mime=target_mime,
+            )
+            result.metadata = {
+                **result.metadata,
+                "format": "legacy-converted",
+                "source_mime": mime,
+                "converter": "libreoffice",
+                "target_mime": target_mime,
+            }
+            return result
+
+    def _conversion_error(self, mime: str, byte_size: int, reason: str) -> ParserError:
+        return ParserError(
+            CONVERSION_FAILED,
+            "旧版 Office 文档转换失败",
+            detail={
+                "reason": reason,
+                "detected_mime": mime,
+                "parser_id": self.parser_id,
+                "parser_version": self.parser_version,
+                "byte_size": byte_size,
+            },
+        )
+
+
+def _safe_legacy_stem(filename: str) -> str:
+    """Return a bounded basename stem suitable for a private temp file."""
+
+    normalized = str(filename or "").replace("\\", "/")
+    basename = normalized.rsplit("/", 1)[-1]
+    basename = re.sub(r"[\x00-\x1f\x7f]", "_", basename).strip()
+    stem = Path(basename).stem
+    if not stem or stem in {".", ".."}:
+        stem = "legacy-office"
+    return stem[:120]
+
+
 def _render_office_value(value: object) -> str:
     """Render a cell value without putting it in an error or metadata field."""
 
@@ -581,6 +746,7 @@ class ParserRegistry:
         self.register(DocxParser())
         self.register(XlsxParser())
         self.register(PptxParser())
+        self.register(LegacyOfficeParser())
 
     def register(self, parser: Parser) -> None:
         self._parsers.insert(0, parser)

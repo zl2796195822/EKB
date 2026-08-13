@@ -92,6 +92,43 @@ class CleanupProjection:
     recent: list[JobView]
 
 
+@dataclass(frozen=True)
+class WorkerHeartbeatView:
+    worker_id: str
+    worker_type: str
+    queues: list[str]
+    version: str
+    heartbeat_at: str
+    started_at: str
+
+
+@dataclass(frozen=True)
+class SchedulerLeaseView:
+    schedule_name: str
+    owner_id: str
+    lease_expires_at: str
+    fencing_token: int
+
+
+@dataclass(frozen=True)
+class SchedulerRunView:
+    id: str
+    schedule_name: str
+    scope_type: str
+    started_at: str
+    ended_at: Optional[str]
+    status: str
+
+
+@dataclass(frozen=True)
+class RuntimeSnapshot:
+    status: str
+    workers: list[WorkerHeartbeatView]
+    leases: list[SchedulerLeaseView]
+    recent_runs: list[SchedulerRunView]
+    checked_at: str
+
+
 # Job types the Jobs Center surfaces as "cleanup" operations.
 CLEANUP_JOB_TYPES = ("retention_purge",)
 
@@ -175,6 +212,39 @@ def _row_to_outbox(row: Any) -> OutboxEvent:
         payload=_as_json(row.payload, fallback={}),
         published_at=None if row.published_at is None else str(row.published_at),
         created_at=str(row.created_at),
+    )
+
+
+def _row_to_worker_heartbeat(row: Any) -> WorkerHeartbeatView:
+    raw_queues = _as_json(row.queues, fallback=[])
+    queues = raw_queues if isinstance(raw_queues, list) else []
+    return WorkerHeartbeatView(
+        worker_id=str(row.worker_id),
+        worker_type=str(row.worker_type),
+        queues=[str(queue) for queue in queues],
+        version=str(row.version),
+        heartbeat_at=str(row.heartbeat_at),
+        started_at=str(row.started_at),
+    )
+
+
+def _row_to_scheduler_lease(row: Any) -> SchedulerLeaseView:
+    return SchedulerLeaseView(
+        schedule_name=str(row.schedule_name),
+        owner_id=str(row.owner_id),
+        lease_expires_at=str(row.lease_expires_at),
+        fencing_token=int(row.fencing_token),
+    )
+
+
+def _row_to_scheduler_run(row: Any) -> SchedulerRunView:
+    return SchedulerRunView(
+        id=str(row.id),
+        schedule_name=str(row.schedule_name),
+        scope_type=str(row.scope_type),
+        started_at=str(row.started_at),
+        ended_at=None if row.ended_at is None else str(row.ended_at),
+        status=str(row.status),
     )
 
 
@@ -823,6 +893,71 @@ class JobService:
             recent=recent,
         )
 
+    def runtime_snapshot(
+        self,
+        *,
+        tenant_id: str,
+        worker_limit: int = 50,
+        lease_limit: int = 10,
+        recent_runs_limit: int = 20,
+    ) -> RuntimeSnapshot:
+        """Return a redacted, tenant-safe snapshot of runtime coordination state.
+
+        Worker heartbeats and scheduler leases are platform coordination rows.
+        Scheduler runs are visible when they are platform-wide or belong to the
+        caller's tenant.  Payloads, counters, errors, and tenant identifiers
+        are intentionally never selected into this projection.
+        """
+        if not tenant_id:
+            raise ValueError("tenant_id is required")
+        worker_limit = max(1, min(worker_limit, 100))
+        lease_limit = max(1, min(lease_limit, 50))
+        recent_runs_limit = max(1, min(recent_runs_limit, 100))
+        with self.engine.connect() as connection:
+            workers = connection.execute(
+                text(
+                    "SELECT worker_id, worker_type, queues, version, heartbeat_at, started_at "
+                    "FROM worker_heartbeats "
+                    "WHERE worker_type <> 'local-scheduler' OR "
+                    "worker_id IN (SELECT owner_id FROM scheduler_leases) "
+                    "ORDER BY heartbeat_at DESC LIMIT :limit"
+                ),
+                {"limit": worker_limit},
+            ).all()
+            leases = connection.execute(
+                text(
+                    "SELECT schedule_name, owner_id, lease_expires_at, fencing_token "
+                    "FROM scheduler_leases WHERE schedule_name='retention_purge' "
+                    "ORDER BY schedule_name ASC LIMIT :limit"
+                ),
+                {"limit": lease_limit},
+            ).all()
+            runs = connection.execute(
+                text(
+                    "SELECT id, schedule_name, scope_type, started_at, ended_at, status "
+                    "FROM scheduler_runs "
+                    "WHERE scope_type='PLATFORM' OR "
+                    "(scope_type='TENANT' AND tenant_id=:tenant) "
+                    "ORDER BY started_at DESC LIMIT :limit"
+                ),
+                {"tenant": tenant_id, "limit": recent_runs_limit},
+            ).all()
+        snapshot_workers = [_row_to_worker_heartbeat(row) for row in workers]
+        snapshot_leases = [_row_to_scheduler_lease(row) for row in leases]
+        snapshot_runs = [_row_to_scheduler_run(row) for row in runs]
+        status = (
+            "available"
+            if snapshot_workers or snapshot_leases or snapshot_runs
+            else "unavailable"
+        )
+        return RuntimeSnapshot(
+            status=status,
+            workers=snapshot_workers,
+            leases=snapshot_leases,
+            recent_runs=snapshot_runs,
+            checked_at=utc_now(),
+        )
+
     def cancel(
         self,
         *,
@@ -888,5 +1023,9 @@ __all__ = [
     "JobStateConflict",
     "JobView",
     "OutboxEvent",
+    "RuntimeSnapshot",
+    "SchedulerLeaseView",
+    "SchedulerRunView",
+    "WorkerHeartbeatView",
     "get_job_service",
 ]

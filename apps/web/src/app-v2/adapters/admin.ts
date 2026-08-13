@@ -7,6 +7,7 @@ import type {
   JobsCleanupResponse,
   JobsListQuery,
   JobsListResponse,
+  JobsRuntimeResponse,
   OpsDashboardResponse,
   ReviewItemListResponse,
   ReviewItemQuery,
@@ -42,6 +43,8 @@ import type {
   JobListQueryInput,
   JobView,
   JobsCleanupView,
+  JobsRuntimeResult,
+  JobsRuntimeView,
 } from '../types/admin'
 import { stateForData, stateForError, toAdapterError } from './index'
 
@@ -62,6 +65,7 @@ export interface AdminApiClient {
   getJob?: (jobId: string) => Promise<JobViewResponse>
   cancelJob?: (jobId: string) => Promise<JobViewResponse>
   getJobsCleanup?: (recentLimit?: number) => Promise<JobsCleanupResponse>
+  getJobsRuntime?: (recentRunsLimit?: number) => Promise<JobsRuntimeResponse>
 }
 
 export type AdminAdapter = AdminServices
@@ -258,6 +262,44 @@ function mapCleanup(input: JobsCleanupResponse): JobsCleanupView {
     total: Number.isFinite(input.total) ? Math.max(0, Math.trunc(input.total)) : 0,
     byState,
     recent: Array.isArray(input.recent) ? input.recent.map(mapJob) : [],
+  }
+}
+
+function mapRuntime(input: JobsRuntimeResponse): JobsRuntimeView {
+  const workers = Array.isArray(input.workers) ? input.workers.map((worker) => ({
+    workerId: boundedText(worker.worker_id, 128) ?? '—',
+    workerType: boundedText(worker.worker_type, 128) ?? '—',
+    queues: Array.isArray(worker.queues)
+      ? worker.queues
+        .filter((queue): queue is string => typeof queue === 'string')
+        .map((queue) => queue.trim().slice(0, 128))
+        .filter(Boolean)
+        .slice(0, 32)
+      : [],
+    version: boundedText(worker.version, 128) ?? '—',
+    heartbeatAt: worker.heartbeat_at,
+    startedAt: worker.started_at,
+  })) : []
+  const leases = Array.isArray(input.leases) ? input.leases.map((lease) => ({
+    scheduleName: boundedText(lease.schedule_name, JOBS_TYPE_MAX_LENGTH) ?? '—',
+    ownerId: boundedText(lease.owner_id, 128) ?? '—',
+    leaseExpiresAt: lease.lease_expires_at,
+    fencingToken: Number.isFinite(lease.fencing_token) ? Math.trunc(lease.fencing_token) : 0,
+  })) : []
+  const recentRuns = Array.isArray(input.recent_runs) ? input.recent_runs.map((run) => ({
+    id: boundedText(run.id, 128) ?? '—',
+    scheduleName: boundedText(run.schedule_name, JOBS_TYPE_MAX_LENGTH) ?? '—',
+    scopeType: boundedText(run.scope_type, 32) ?? '—',
+    startedAt: run.started_at,
+    endedAt: run.ended_at,
+    status: boundedText(run.status, 32) ?? '—',
+  })) : []
+  return {
+    status: boundedText(input.status, 32) ?? 'unavailable',
+    workers,
+    leases,
+    recentRuns,
+    checkedAt: input.checked_at,
   }
 }
 
@@ -481,6 +523,16 @@ export function createAdminAdapter(client: AdminApiClient): AdminServices {
         return { state: data.total > 0 ? 'ready' : 'empty', data }
       } catch (error) {
         return errorResult(error, '清理投影加载失败')
+      }
+    },
+    getJobsRuntime: async (recentRunsLimit = 20): Promise<JobsRuntimeResult> => {
+      if (!client.getJobsRuntime) return errorResult(new Error('Jobs Center runtime API client unavailable'), '运行时状态加载失败')
+      const safeRecentRunsLimit = boundedInteger(recentRunsLimit, 20, 1, 100)
+      try {
+        const data = mapRuntime(await client.getJobsRuntime(safeRecentRunsLimit))
+        return { state: data.status === 'available' ? 'ready' : 'unavailable', data }
+      } catch (error) {
+        return errorResult(error, '运行时状态加载失败')
       }
     },
   }

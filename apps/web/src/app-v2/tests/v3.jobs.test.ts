@@ -9,6 +9,7 @@ import type {
   JobsCleanupResponse,
   JobsListQuery,
   JobsListResponse,
+  JobsRuntimeResponse,
 } from '../../types/api'
 
 const job: JobViewResponse = {
@@ -48,6 +49,33 @@ const cleanupResponse: JobsCleanupResponse = {
   recent: [job],
 }
 
+const runtimeResponse: JobsRuntimeResponse = {
+  status: 'available',
+  workers: [{
+    worker_id: 'worker-1',
+    worker_type: 'retention',
+    queues: ['retention_purge'],
+    version: 'local',
+    heartbeat_at: '2026-08-14T00:04:00Z',
+    started_at: '2026-08-14T00:00:00Z',
+  }],
+  leases: [{
+    schedule_name: 'retention_purge',
+    owner_id: 'worker-1',
+    lease_expires_at: '2026-08-14T00:05:00Z',
+    fencing_token: 4,
+  }],
+  recent_runs: [{
+    id: 'run-1',
+    schedule_name: 'retention_purge',
+    scope_type: 'PLATFORM',
+    started_at: '2026-08-14T00:03:00Z',
+    ended_at: '2026-08-14T00:03:01Z',
+    status: 'SUCCEEDED',
+  }],
+  checked_at: '2026-08-14T00:04:00Z',
+}
+
 function noCall(name: string): () => Promise<never> {
   return async () => {
     throw new Error(`${name} must not be called by Jobs Center tests`)
@@ -72,6 +100,7 @@ function stubClient(overrides: Partial<AdminApiClient> = {}): AdminApiClient {
     getJob: async () => job,
     cancelJob: async () => job,
     getJobsCleanup: async () => cleanupResponse,
+    getJobsRuntime: async () => runtimeResponse,
     ...overrides,
   }
 }
@@ -88,6 +117,8 @@ describe('Jobs Center · API contract and adapter boundary', () => {
       const path = new URL(String(input), 'http://example.test').pathname
       const responseBody = path.endsWith('/cleanup')
         ? cleanupResponse
+        : path.endsWith('/runtime')
+          ? runtimeResponse
         : path.endsWith('/cancel')
           ? job
           : { items: [], count: 0 }
@@ -104,6 +135,7 @@ describe('Jobs Center · API contract and adapter boundary', () => {
       limit: 999,
     })
     await client.getJobsCleanup(999)
+    await client.getJobsRuntime(999)
     await client.cancelJob('job/1')
 
     const url = new URL(requests[0]!.url, 'http://example.test')
@@ -113,8 +145,9 @@ describe('Jobs Center · API contract and adapter boundary', () => {
     expect(url.searchParams.get('limit')).toBe('500')
     expect(requests[0]?.method).toBe('GET')
     expect(new URL(requests[1]!.url, 'http://example.test').searchParams.get('recent_limit')).toBe('100')
-    expect(new URL(requests[2]!.url, 'http://example.test').pathname).toContain('/jobs/job%2F1/cancel')
-    expect(requests[2]?.method).toBe('POST')
+    expect(new URL(requests[2]!.url, 'http://example.test').searchParams.get('recent_runs_limit')).toBe('100')
+    expect(new URL(requests[3]!.url, 'http://example.test').pathname).toContain('/jobs/job%2F1/cancel')
+    expect(requests[3]?.method).toBe('POST')
   })
 
   it('maps list and cleanup responses without exposing tenant or payload fields', async () => {
@@ -166,6 +199,47 @@ describe('Jobs Center · API contract and adapter boundary', () => {
       byState: { SUCCEEDED: 2, FAILED: 1, RETRY_WAIT: 1 },
     })
     expect(cleanup.data?.recent[0]?.jobType).toBe('document_ingest')
+  })
+
+  it('calls and maps the real runtime projection without tenant or payload fields', async () => {
+    const seenLimits: number[] = []
+    const adapter = createAdminAdapter(stubClient({
+      getJobsRuntime: async (limit) => {
+        seenLimits.push(limit ?? -1)
+        return runtimeResponse
+      },
+    }))
+
+    const result = await adapter.getJobsRuntime(999)
+
+    expect(result.state).toBe('ready')
+    expect(seenLimits).toEqual([100])
+    expect(result.data).toMatchObject({
+      status: 'available',
+      workers: [{ workerId: 'worker-1', queues: ['retention_purge'] }],
+      leases: [{ scheduleName: 'retention_purge', fencingToken: 4 }],
+      recentRuns: [{ id: 'run-1', status: 'SUCCEEDED' }],
+    })
+    expect(result.data).not.toHaveProperty('tenantId')
+    expect(result.data).not.toHaveProperty('payload')
+  })
+
+  it('preserves an explicit unavailable runtime projection', async () => {
+    const result = await createAdminAdapter(stubClient({
+      getJobsRuntime: async () => ({
+        ...runtimeResponse,
+        status: 'unavailable',
+        workers: [],
+        leases: [],
+        recent_runs: [],
+      }),
+    })).getJobsRuntime()
+
+    expect(result.state).toBe('unavailable')
+    expect(result.data?.status).toBe('unavailable')
+    expect(result.data?.workers).toEqual([])
+    expect(result.data?.leases).toEqual([])
+    expect(result.data?.recentRuns).toEqual([])
   })
 
   it('calls the real cancel endpoint through the adapter and maps the returned state', async () => {

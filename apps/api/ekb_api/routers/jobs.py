@@ -21,6 +21,7 @@ from ekb_api.services.jobs import (
     JobService,
     JobStateConflict,
     JobView,
+    RuntimeSnapshot,
     get_job_service,
 )
 
@@ -127,6 +128,64 @@ def cleanup_projection(
         "total": proj.total,
         "by_state": proj.by_state,
         "recent": [JobViewResponse.from_view(v).model_dump() for v in proj.recent],
+    }
+
+
+@router.get("/runtime")
+def runtime_snapshot(
+    auth: Annotated[AuthContext, Depends(get_live_auth_context)],
+    recent_runs_limit: int = Query(default=20, ge=1, le=100),
+) -> dict:
+    """Return real worker/retention scheduler coordination state.
+
+    An empty database projection is explicitly ``unavailable``.  This route
+    never synthesizes a healthy worker or scheduler state and never returns
+    tenant identifiers, job payloads, counters, sanitized errors, or secrets.
+    """
+    assert_capability(auth, CAP_AUDIT_READ)
+    service = _service()
+    snapshot = service.runtime_snapshot(
+        tenant_id=auth.tenant_id,
+        recent_runs_limit=recent_runs_limit,
+    )
+    return _runtime_snapshot_response(snapshot)
+
+
+def _runtime_snapshot_response(snapshot: RuntimeSnapshot) -> dict:
+    return {
+        "status": snapshot.status,
+        "workers": [
+            {
+                "worker_id": worker.worker_id,
+                "worker_type": worker.worker_type,
+                "queues": worker.queues,
+                "version": worker.version,
+                "heartbeat_at": worker.heartbeat_at,
+                "started_at": worker.started_at,
+            }
+            for worker in snapshot.workers
+        ],
+        "leases": [
+            {
+                "schedule_name": lease.schedule_name,
+                "owner_id": lease.owner_id,
+                "lease_expires_at": lease.lease_expires_at,
+                "fencing_token": lease.fencing_token,
+            }
+            for lease in snapshot.leases
+        ],
+        "recent_runs": [
+            {
+                "id": run.id,
+                "schedule_name": run.schedule_name,
+                "scope_type": run.scope_type,
+                "started_at": run.started_at,
+                "ended_at": run.ended_at,
+                "status": run.status,
+            }
+            for run in snapshot.recent_runs
+        ],
+        "checked_at": snapshot.checked_at,
     }
 
 
