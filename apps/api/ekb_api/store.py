@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import logging
 from dataclasses import dataclass
 from typing import Optional
 
@@ -1640,7 +1639,7 @@ class SqlStore:
         auth: AuthContext,
         message_id: str,
         citations: list[dict],
-    ) -> Optional["Message"]:
+    ) -> Optional[Message]:
         """PH6 FR-053：把本次回答的引用（含生成时文档版本/时间戳）持久化到消息元数据。
 
         写入消息的 ``citations`` 列，便于刷新/分支/版本回溯时复核引用指向的版本。
@@ -1832,7 +1831,9 @@ class SqlStore:
         SessionLocal = get_session_local()
         # 时间窗口下界：created_at 存为 ISO-8601 Z 字符串，字典序与时间序一致，
         # 因此可以直接用字符串比较而不必解析每一行。
-        from datetime import datetime as _datetime, timedelta as _timedelta, timezone as _timezone
+        from datetime import datetime as _datetime
+        from datetime import timedelta as _timedelta
+        from datetime import timezone as _timezone
 
         since = (
             (_datetime.now(_timezone.utc) - _timedelta(days=days))

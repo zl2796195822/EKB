@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Literal, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -221,10 +221,14 @@ class AskOptions(BaseModel):
     deep_thinking: bool = True
     thinking_level: str = Field(
         default="medium",
-        description="思考程度五档：light=轻度（快速回答） / mild=中度 / medium=中（默认，推荐） / high=高 / extreme=极高（更慢、更严谨、消耗更多额度）",
+        description=(
+            "思考程度五档：light=轻度（快速回答） / mild=中度 / "
+            "medium=中（默认，推荐） / high=高 / extreme=极高（更慢、更严谨、消耗更多额度）"
+        ),
         pattern=r"^(light|mild|medium|high|extreme)$",
     )
-    model: Optional[str] = None    # 用户选择的模型覆盖（None 则使用 settings.llm_model + route 默认）
+    # 用户选择的模型覆盖（None 则使用 settings.llm_model + route 默认）
+    model: Optional[str] = None
     attachment_doc_ids: list[str] = Field(
         default_factory=list,
         max_length=50,
@@ -425,4 +429,4 @@ class TurnCancelResponse(BaseModel):
     message: Optional[str] = None
 
 
-JsonDict = Dict[str, Any]
+JsonDict = dict[str, Any]

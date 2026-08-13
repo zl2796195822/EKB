@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Annotated, List, Optional
+from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, Query, Request
 from pydantic import ValidationError
@@ -176,7 +176,7 @@ def create_tenant(
     )
 
 
-@router.get("/tenants", response_model=List[TenantResponse])
+@router.get("/tenants", response_model=list[TenantResponse])
 def list_tenants(
     auth: Annotated[AuthContext, Depends(get_auth_context)],
     store: Annotated[SqlStore, Depends(get_store)],
@@ -418,7 +418,7 @@ def create_sync_source(
     return _to_sync_response(src)
 
 
-@router.get("/sync/sources", response_model=List[SyncSourceResponse])
+@router.get("/sync/sources", response_model=list[SyncSourceResponse])
 def list_sync_sources(
     auth: Annotated[AuthContext, Depends(get_auth_context)],
     store: Annotated[SqlStore, Depends(get_store)],
