@@ -29,6 +29,7 @@ from ekb_api.migrations import (
     v4_006_storage_ingestion,
     v4_007_chat_graph,
     v4_008_attachments,
+    v4_009_qa_route_audit,
 )
 
 
@@ -276,6 +277,13 @@ CHAIN = (
         apply_name="apply_v4_008",
         verify_name="verify_v4_008",
         rollback_name="rollback_v4_008_dry_run",
+    ),
+    _step(
+        v4_009_qa_route_audit.VERSION,
+        v4_009_qa_route_audit,
+        apply_name="apply_v4_009",
+        verify_name="verify_v4_009",
+        rollback_name="rollback_v4_009_dry_run",
     ),
 )
 

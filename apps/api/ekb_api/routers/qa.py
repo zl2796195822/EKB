@@ -78,6 +78,10 @@ from ekb_api.services.conversations import (
     ConversationGraphService,
     ConversationNotFound,
 )
+from ekb_api.services.llm_route_audit import (
+    build_route_audit_context,
+    write_route_audit,
+)
 from ekb_api.store import SqlStore
 
 router = APIRouter(prefix="/qa", tags=["qa"])
@@ -440,6 +444,30 @@ async def ask(
             )
         except Exception as exc:  # noqa: BLE001
             raise ApiError(400, "MODEL_UNAVAILABLE", "所选远程模型当前不可用") from exc
+
+    # FR-046: resolve a display snapshot plus only actor/tenant-owned database
+    # ids.  A default/env route may legitimately have no database ids.
+    try:
+        route_audit_providers = get_runtime_chat_providers(
+            tenant_id=auth.tenant_id,
+            user_id=auth.actor_id,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "qa route audit provider resolution failed error_type=%s",
+            type(exc).__name__,
+        )
+        route_audit_providers = []
+    if selected_model is not None and not route_audit_providers:
+        route_audit_providers = [selected_model]
+    route_audit_context = build_route_audit_context(
+        get_engine(),
+        tenant_id=auth.tenant_id,
+        actor_id=auth.actor_id,
+        requested_model=requested_model,
+        route=route,
+        providers=route_audit_providers,
+    )
     # 附件 ID 是独立的聊天资源，绝不能当成 KB ID 参与 ACL 或检索。
     # 3) deep_thinking 读取供后续 prompt 透传
     #    thinking_level 五档：light 才关（=无推理增强），mild/medium/high/extreme 都开
@@ -529,32 +557,39 @@ async def ask(
         turn_id=turn_id,
     )
 
-    # v2: 创建 Turn Registry 记录（defensive：失败不阻断问答，仅记录 warning）
-    if use_v2:
-        try:
+    # Keep a real turn row for both SSE versions so route audits retain their FK.
+    turn_registered = False
+    try:
+        turn_registered = (
             store.create_turn(
                 auth,
                 turn_id=turn_id,
                 request_id=request_id,
                 conversation_id=conversation.id,
                 assistant_message_id=assistant_message.id,
-                stream_version=2,
+                stream_version=2 if use_v2 else 1,
             )
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "create_turn failed request_id=%s conv_id=%s: %s",
-                request_id,
-                conversation.id,
-                exc,
-            )
+            is not None
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "create_turn failed request_id=%s conv_id=%s error_type=%s",
+            request_id,
+            conversation.id,
+            type(exc).__name__,
+        )
 
     ip_hash, ua_hash = extract_fingerprints(request)
     question_preview = payload.question[:80]
     turn_started = time.perf_counter()
+    input_tokens_estimate: int | None = None
+    generated_output_text = ""
+    usage_source = "UNAVAILABLE"
 
     # --- 事件生成器 ---
     async def event_stream_v2() -> AsyncIterator[str]:
-        nonlocal seq
+        nonlocal generated_output_text, input_tokens_estimate
+        nonlocal route_audit_context, seq, usage_source
         finish_reason = FinishReason.ERROR.value
         phase: str = "retrieval"  # retrieval -> generation，供分段空闲超时判定
         last_event_at = time.perf_counter()
@@ -576,6 +611,18 @@ async def ask(
             if use_v2:
                 return _sse_v2(event, turn_id, request_id, seq, payload_inner)
             return _sse_v1(event, payload_inner)
+
+        def observe_actual_provider(provider, fallback_occurred: bool) -> None:
+            """Capture only the provider confirmed by the streaming adapter."""
+
+            nonlocal route_audit_context
+            route_audit_context = route_audit_context.with_actual_provider(
+                get_engine(),
+                tenant_id=auth.tenant_id,
+                actor_id=auth.actor_id,
+                provider=provider,
+                fallback_occurred=fallback_occurred,
+            )
 
         def failure_citations() -> list[dict]:
             """Expose verified attachment sources even when remote generation fails."""
@@ -720,6 +767,16 @@ async def ask(
                         f"{attachment_text}"
                     )
             total_evidence_count = len(evidence_texts)
+
+            # The provider streaming adapter currently exposes deltas only, so
+            # use a deterministic estimate and label it explicitly.
+            if input_tokens_estimate is None:
+                estimate_input = [{"role": "user", "content": payload.question}]
+                estimate_input.extend(
+                    {"role": "system", "content": evidence} for evidence in evidence_texts
+                )
+                input_tokens_estimate = estimate_messages_tokens(estimate_input)
+                usage_source = "DETERMINISTIC_ESTIMATE"
 
             # ---------- PH6 FR-051：STRICT 证据门禁 ----------
             # 选中了知识库但检索不到任何证据时，直接拒答：不调用 LLM、不编造任何引用。
@@ -1003,6 +1060,7 @@ async def ask(
                         tenant_id=auth.tenant_id,
                         user_id=auth.actor_id,
                         image_attachments=image_attachments,
+                        observer=observe_actual_provider,
                     )
                     # 同一 gen 实例共享锁，避免 wait_for(timeout=2s) 放弃线程后，
                     # in-flight 的 next(gen) 与下一轮新 to_thread 并发重入。
@@ -1086,6 +1144,7 @@ async def ask(
                         if token is _STREAM_END:
                             break
                         full_answer += token
+                        generated_output_text = full_answer
 
                         if await request.is_disconnected():
                             finish_reason = FinishReason.CANCELLED.value
@@ -1176,6 +1235,7 @@ async def ask(
                         prefix = "（补充确认：当前证据中存在相关信息，以下为修正后的结论——）"
                         delta_text = prefix + rechecked
                         full_answer = rechecked
+                        generated_output_text = full_answer
                         if use_v2:
                             yield emit("content_delta", {"text": delta_text, "delta": delta_text, "citations": []})
                         else:
@@ -1306,7 +1366,7 @@ async def ask(
             yield emit("done", {"finish_reason": finish_reason, "last_seq": seq})
         finally:
             # 写回 turn 最终状态（Step 1.2/1.5：全部 defensive，避免审计/记录失败影响主流程）
-            if use_v2:
+            if turn_registered:
                 status_map = {
                     FinishReason.STOP.value: TurnStatus.COMPLETED.value,
                     FinishReason.REFUSAL.value: TurnStatus.COMPLETED.value,
@@ -1323,6 +1383,7 @@ async def ask(
                     )
                 except Exception as exc2:  # noqa: BLE001
                     logger.warning("complete_turn failed turn_id=%s: %s", turn_id, exc2)
+            if use_v2:
                 # 取消/超时/错误的占位消息：若内容为空则隐藏，避免历史遗留空 assistant bubble
                 if finish_reason in {FinishReason.CANCELLED.value, FinishReason.TIMEOUT.value, FinishReason.ERROR.value}:
                     try:
@@ -1361,6 +1422,36 @@ async def ask(
                 )
             except Exception as exc2:  # noqa: BLE001
                 logger.warning("_audit_qa failed conv_id=%s: %s", conversation.id, exc2)
+            if input_tokens_estimate is None:
+                input_tokens_estimate = estimate_messages_tokens(
+                    [{"role": "user", "content": payload.question}]
+                )
+                usage_source = "DETERMINISTIC_ESTIMATE"
+            output_tokens_estimate = (
+                estimate_messages_tokens([{"role": "assistant", "content": generated_output_text}])
+                if generated_output_text
+                else None
+            )
+            audit_status = {
+                FinishReason.STOP.value: "completed",
+                FinishReason.REFUSAL.value: "refused",
+                FinishReason.CANCELLED.value: "cancelled",
+                FinishReason.TIMEOUT.value: "timeout",
+                FinishReason.ERROR.value: "error",
+            }.get(finish_reason, "error")
+            write_route_audit(
+                get_engine(),
+                tenant_id=auth.tenant_id,
+                actor_id=auth.actor_id,
+                turn_id=turn_id,
+                context=route_audit_context,
+                input_tokens=input_tokens_estimate,
+                output_tokens=output_tokens_estimate,
+                usage_source=usage_source,
+                latency_ms=int((time.perf_counter() - turn_started) * 1000),
+                status=audit_status,
+                finish_reason=finish_reason,
+            )
             if finish_reason == FinishReason.REFUSAL.value:
                 try:
                     store.create_review_item(

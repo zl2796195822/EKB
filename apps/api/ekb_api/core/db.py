@@ -215,6 +215,7 @@ def init_db() -> None:
         from ekb_api.migrations.v4_006_storage_ingestion import apply_v4_006
         from ekb_api.migrations.v4_007_chat_graph import apply_v4_007
         from ekb_api.migrations.v4_008_attachments import apply_v4_008
+        from ekb_api.migrations.v4_009_qa_route_audit import apply_v4_009
 
         apply_v4_001(engine)
         apply_v4_002(engine)
@@ -228,6 +229,7 @@ def init_db() -> None:
         apply_v4_006(engine)
         apply_v4_007(engine)
         apply_v4_008(engine)
+        apply_v4_009(engine)
 
 
 def _init_pgvector(engine, *, settings=None) -> None:

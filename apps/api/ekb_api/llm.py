@@ -19,7 +19,7 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
-from typing import Optional
+from typing import Callable, Optional
 
 from ekb_api.core.cache import query_rewrite_cache, text_hash
 from ekb_api.core.circuit_breaker import get_circuit_breaker
@@ -31,6 +31,27 @@ from ekb_api.core.config import (
 from ekb_api.core.metrics import CACHE_HITS, CACHE_MISSES, LLM_CALLS, LLM_DURATION
 
 logger = logging.getLogger(__name__)
+
+ProviderObserver = Callable[[ModelProvider, bool], None]
+
+
+def _notify_provider_observer(
+    observer: ProviderObserver | None,
+    provider: ModelProvider,
+    fallback_occurred: bool,
+) -> None:
+    """Report a confirmed provider without making observation part of the stream."""
+
+    if observer is None:
+        return
+    try:
+        observer(provider, fallback_occurred)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "LLM provider observer failed provider=%s error_type=%s",
+            provider.name,
+            type(exc).__name__,
+        )
 
 
 def _is_cjk_char(cp: int) -> bool:
@@ -657,6 +678,7 @@ def chat_stream(
     reasoning_effort: Optional[str] = None,
     tenant_id: str | None = None,
     user_id: str | None = None,
+    observer: ProviderObserver | None = None,
 ):
     """流式 chat completions：yield content delta 字符串。
 
@@ -672,6 +694,7 @@ def chat_stream(
     has_image_content = _contains_image_content(messages)
     if has_image_content:
         providers = [provider for provider in providers if provider.supports_vision]
+    requested_provider_matched = True
     if provider_name:
         preferred = [p for p in providers if p.name == provider_name]
         if not preferred:
@@ -679,6 +702,7 @@ def chat_stream(
                 p for p in providers
                 if "/" in p.name and p.name.split("/", 1)[0] == provider_name
             ]
+        requested_provider_matched = bool(preferred)
         providers = preferred or providers
     if has_image_content and model:
         providers = [
@@ -696,7 +720,7 @@ def chat_stream(
     settings = get_settings()
     effective_temperature = settings.llm_temperature if temperature is None else temperature
     last_exc: Optional[Exception] = None
-    for provider in providers:
+    for provider_index, provider in enumerate(providers):
         t0 = time.perf_counter()
         try:
             gen = _call_provider_stream(
@@ -709,6 +733,11 @@ def chat_stream(
             try:
                 first = next(gen)
             except StopIteration:
+                _notify_provider_observer(
+                    observer,
+                    provider,
+                    provider_index > 0 or not requested_provider_matched,
+                )
                 breaker.track_success()
                 LLM_CALLS.inc(provider=provider.name, status="success")
                 LLM_DURATION.observe(time.perf_counter() - t0, provider=provider.name)
@@ -717,6 +746,12 @@ def chat_stream(
             breaker.track_success()
             LLM_CALLS.inc(provider=provider.name, status="success")
             LLM_DURATION.observe(time.perf_counter() - t0, provider=provider.name)
+
+            _notify_provider_observer(
+                observer,
+                provider,
+                provider_index > 0 or not requested_provider_matched,
+            )
 
             yield first
             yield from gen
@@ -742,6 +777,7 @@ def generate_answer_stream(
     tenant_id: str | None = None,
     user_id: str | None = None,
     image_attachments: list[dict] | None = None,
+    observer: ProviderObserver | None = None,
 ):
     """流式生成答案：yield content delta。
 
@@ -807,6 +843,7 @@ def generate_answer_stream(
             model=route.model if route else None,
             tenant_id=tenant_id,
             user_id=user_id,
+            observer=observer,
         )
     else:
         has_evidence = bool(evidence_texts)
@@ -830,6 +867,7 @@ def generate_answer_stream(
             model=route.model if route else None,
             tenant_id=tenant_id,
             user_id=user_id,
+            observer=observer,
         )
 
 
