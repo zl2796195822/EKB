@@ -335,6 +335,46 @@ def test_branch_materialisation_cuts_ancestors_at_fork(tmp_path: Path) -> None:
     assert a1.id not in fork_ids and a2.id not in fork_ids
 
 
+def test_branch_materialisation_excludes_hidden_messages(tmp_path: Path) -> None:
+    engine, tenant, user = _fresh(tmp_path, "hidden-graph.db")
+    graph = ConversationGraphService(engine)
+    conversation_id, root = graph.create_conversation(tenant_id=tenant, user_id=user)
+
+    ancestor = graph.append_message(
+        tenant_id=tenant,
+        conversation_id=conversation_id,
+        branch_id=root,
+        role="user",
+        content="可见祖先",
+    )
+    hidden = graph.append_message(
+        tenant_id=tenant,
+        conversation_id=conversation_id,
+        branch_id=root,
+        role="assistant",
+        content="隐藏占位",
+    )
+    following = graph.append_message(
+        tenant_id=tenant,
+        conversation_id=conversation_id,
+        branch_id=root,
+        role="user",
+        content="可见后续",
+        parent_message_id=ancestor.id,
+    )
+
+    with engine.begin() as connection:
+        connection.execute(
+            text("UPDATE messages SET visibility_state='hidden' WHERE id=:id"),
+            {"id": hidden.id},
+        )
+
+    materialized = graph.branch_messages(tenant_id=tenant, branch_id=root)
+
+    assert [message.id for message in materialized] == [ancestor.id, following.id]
+    assert hidden.id not in {message.id for message in materialized}
+
+
 def test_fork_rejects_message_from_another_conversation(tmp_path: Path) -> None:
     engine, tenant, user = _fresh(tmp_path, "forkguard.db")
     graph = ConversationGraphService(engine)

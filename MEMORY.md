@@ -579,3 +579,9 @@ Nginx 配置：
 - DONE-LOCAL：`/api/v1/qa/ask` 多轮 history 优先按 `tenant + actor` 读取 active branch materialization，过滤 `HIDDEN` 消息和当前 turn；branch graph 或旧 schema 不可用时回退 `store.list_messages`。
 - 验证：tests/test_multi_turn.py：11 passed（包含 active-branch regression）；PH4 `32 passed`；隔离临时 SQLite API `28 passed`；`compileall` passed；`git diff --check` passed；本地 `/healthz` `200`。
 - 当前浏览器未认证；本地业务切片不宣称 PH0–PH8 全部完成。生产服务器（`[production host]`）、备份、部署、回滚仍 `NOT RUN/BLOCKED`。证据见 [`docs/evidence/ekb-core-rebuild/local/2026-08-14-qa-active-branch-history.md`](./docs/evidence/ekb-core-rebuild/local/2026-08-14-qa-active-branch-history.md)。不记录密码、token、API key 或私密地址。
+
+## 2026-08-14 chat branch materialization hidden-message filter local slice
+
+- DONE-LOCAL：`ConversationGraphService.branch_messages` 现在只返回 `visibility_state` 为 `NULL` 或 `visible` 的消息；隐藏的取消/失败占位不会进入 branch materialization 或 UI。
+- 新增回归测试验证可见祖先与后续保留、hidden 排除；PH4 `33 passed`；Ruff、`compileall`、`git diff --check` passed；本地 `/healthz` `200`；当前浏览器未认证。
+- 生产服务器（`[production host]`）、备份、部署、回滚均 `NOT RUN/BLOCKED`；这是本地切片，不宣称 PH0–PH8 完成。证据见 [`docs/evidence/ekb-core-rebuild/local/2026-08-14-chat-hidden-filter.md`](docs/evidence/ekb-core-rebuild/local/2026-08-14-chat-hidden-filter.md)。不记录密码、token、API key 或私密地址。

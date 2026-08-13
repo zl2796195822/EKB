@@ -467,6 +467,7 @@ class ConversationGraphService:
                         "SELECT id, conversation_id, branch_id, parent_message_id, role,"
                         " status, content, content_hash, turn_id, created_at FROM messages "
                         "WHERE tenant_id=:tenant_id AND branch_id=:branch_id "
+                        "AND (visibility_state IS NULL OR visibility_state='visible') "
                         "ORDER BY created_at, id"
                     ),
                     {"tenant_id": tenant_id, "branch_id": current_branch},
