@@ -163,3 +163,12 @@ CR-PH1-T01 + CR-PH1-T03 的第一真实业务切片已在本地工作树实现�
 - 新增回归测试覆盖真实临时 v4 SQLite；验证为 PH4 `34 passed`、Ruff passed、`compileall` passed、`git diff --check` passed。
 - 已认证本地浏览器可见真实 Assistant 会话、知识库和 root 分支，但现有旧会话仍可能是历史数据；不宣称旧数据已批量修复。本地切片不宣称 PH0–PH8 完成。
 - 生产服务器（`[production host]`）、备份、部署、回滚仍 `NOT RUN/BLOCKED`。详细证据见 [`evidence/ekb-core-rebuild/local/2026-08-14-chat-parent-chain.md`](./evidence/ekb-core-rebuild/local/2026-08-14-chat-parent-chain.md)，不记录秘密。
+
+## 2026-08-14 重启后真实浏览器 parent-chain 验证
+
+- 本地 API 重启后 `/healthz` 为 `200`，使最新 `store.save_message` bridge 生效。
+- 真实 Playwright 浏览器本地登录后新建 Assistant 会话并发送“重启后父链验证：请简短回答”；真实 SSE v2 返回远程 LLM + 当前授权 KB RAG 的回答。页面显示 branch selector=`root`，消息顺序为 `USER` → `ASSISTANT`。
+- SQLite 核对同一 `turn` 的 `USER`/`ASSISTANT` 同 branch，且 `assistant.parent_message_id` 指向 `USER`。
+- 验证快照：后端全量 `401 passed, 2 skipped`；前端 `72 passed`；typecheck/build passed；`npm audit` 为 `0 vulnerabilities`。浏览器本次 snapshot 未显示 console 错误，但 console 未作为零错误验收，不声称 `console=0`。
+- 这是本地切片，不宣称 PH0–PH8 全部完成；生产 PostgreSQL/pgvector、对象存储、队列/Worker/Scheduler、服务器备份、部署、回滚仍 `NOT RUN/BLOCKED`，生产服务器统一写作 `[production host]`。
+- 详细证据见 [`evidence/ekb-core-rebuild/local/2026-08-14-browser-parent-chain.md`](./evidence/ekb-core-rebuild/local/2026-08-14-browser-parent-chain.md)。不记录密码、token、私密地址或 Provider 密钥。
