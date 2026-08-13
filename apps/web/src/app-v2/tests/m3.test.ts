@@ -41,7 +41,7 @@ export async function runM3ContractTests(): Promise<void> {
     listDocuments: async () => [{ id: 'doc-1', kb_id: 'kb-1', title: '真实文档', status: 'PROCESSING' as const, version: 1, mime_type: 'text/plain', checksum: 'sha', chunk_count: 1, file_size: 4, failure_reason: null, created_at: '2026-08-09T00:00:00Z', updated_at: '2026-08-09T00:00:00Z' }],
     getDocument: async () => ({ id: 'doc-1', kb_id: 'kb-1', title: '真实文档', status: 'READY' as const, version: 1, mime_type: 'text/plain', checksum: 'sha', chunk_count: 1, file_size: 4, failure_reason: null, created_at: '2026-08-09T00:00:00Z', updated_at: '2026-08-09T00:00:00Z' }),
     uploadDocument: async () => ({ doc_id: 'doc-2', job_id: 'job-2', status: 'PROCESSING', trace_id: 'trace-2' }),
-    deleteDocument: async () => undefined,
+    deleteDocument: async (kbId: string, docId: string) => { calls.push(`delete:${kbId}:${docId}`) },
     retryDocument: async () => ({ status: 'accepted', trace_id: 'trace-3' }),
     getUploadBatch: async () => ({
       id: 'batch-1', kb_id: 'kb-1', mode: 'FILE', status: 'processing', item_count: 1, total_bytes: 4,
@@ -86,6 +86,8 @@ export async function runM3ContractTests(): Promise<void> {
 
   const documentResult = await documents.list('kb-1')
   assert(documentResult.data?.[0]?.kbId === 'kb-1', 'document adapter should map kb id')
+  const deleteResult = await documents.remove('kb-1', 'doc-1')
+  assert(deleteResult.state === 'ready' && calls.includes('delete:kb-1:doc-1'), 'document delete should call the real service with kb and document ids')
   const uploadResult = await documents.upload('kb-1', new File(['data'], 'real.txt', { type: 'text/plain' }))
   assert(uploadResult.data?.docId === 'doc-2' && uploadResult.data.jobId === 'job-2', 'upload adapter should expose accepted metadata')
   const batchResult = await documents.getUploadBatch('batch-1')

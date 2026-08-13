@@ -408,7 +408,7 @@ export const DOCUMENT_CAPABILITIES = [
   },
   {
     id: 'documents.bulk-delete',
-    status: 'disabled',
-    reason: '批量删除端点仍在后续治理阶段；单文档删除已接入真实回收站。',
+    status: 'available',
+    reason: '使用现有真实单文档 DELETE 逐条执行并支持部分失败反馈。',
   },
 ] as const satisfies readonly AdapterCapability[]

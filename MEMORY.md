@@ -521,3 +521,11 @@ Nginx 配置：
 - 本地真实浏览器：在 `127.0.0.1:5173/#/knowledge` 创建“回收站本地验收-20260813”，删除后在 `#/recycle` 看到真实条目和 30 天保留，点击“还原”显示“已还原…”且知识库重新出现在授权列表。浏览器 console 有既存错误，不宣称 `console=0`。
 - 限制：Document 删除历史状态缺失时 restore 安全 fallback 为 `READY`，不代表历史状态完全恢复；对象/向量分阶段清理由其他 worker/service 负责。
 - NOT RUN：生产 PostgreSQL、对象存储、可靠队列、Worker/Scheduler、Provider 凭据/外部出网、服务器备份、部署、回滚和生产浏览器均未运行。统一使用 `[production host]` / `[REDACTED]`，不保存凭据；本地结果不代表 PH0–PH8 全部完成。详细证据见 `docs/evidence/ekb-core-rebuild/local/2026-08-13-recycle-restore.md`。
+
+## 2026-08-13 文档中心批量删除本地切片
+
+- DONE-LOCAL：文档中心已支持真实行选择、表头/当前可见页全选、选中数展示、二次确认和批量删除结果反馈。实现文件为 `apps/web/src/app-v2/pages/DocumentsPage.tsx`、`apps/web/src/app-v2/components/documents/DocumentTable.tsx`、`apps/web/src/app-v2/adapters/documents.ts`、`apps/web/src/app-v2/tests/m3.test.ts`。
+- 删除语义保持真实边界：前端按选中项逐条调用既有真实单文档 `DELETE`；成功项进入既有回收站，失败项保留并显示部分失败；完成后刷新服务端列表并清理 stale selection。能力投影 `documents.bulk-delete=available`，但没有宣称新增真实批量删除 API。
+- 本地浏览器：`127.0.0.1:5173/#/documents` 的真实服务端文档列表显示“已选择 6 项”和已启用的“批量删除 (6)”；本次未点击删除，未误删本地真实文档。浏览器存在既存 console 错误，不声称 `console=0`。
+- 验证：`npm test -- --run` 为 `58 passed`；typecheck、build、`git diff --check` 通过；build 保留已有 chunk `>500KB` warning。未记录凭据、token 或私有地址。
+- 生产 PostgreSQL/对象存储/队列/Worker/Provider/服务器部署、备份和回滚仍 `NOT RUN`；统一使用 `[production host]` / `[REDACTED]`，本地切片不代表生产完成或 PH0–PH8 全部完成。详见 [`docs/evidence/ekb-core-rebuild/local/2026-08-13-document-bulk-delete.md`](docs/evidence/ekb-core-rebuild/local/2026-08-13-document-bulk-delete.md)。

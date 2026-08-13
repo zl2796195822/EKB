@@ -46,6 +46,7 @@ export function DocumentsPage({ services }: V2PageProps) {
   const [knowledgeBases, setKnowledgeBases] = useState<readonly KnowledgeBaseView[]>([])
   const [documentsState, setDocumentsState] = useState<PageState>('loading')
   const [documents, setDocuments] = useState<readonly DocumentTableRow[]>([])
+  const [selectedDocumentKeys, setSelectedDocumentKeys] = useState<ReadonlySet<string>>(new Set())
   const [documentQuery, setDocumentQuery] = useState('')
   const [typeFilter, setTypeFilter] = useState('ALL')
   const [spaceFilter, setSpaceFilter] = useState('ALL')
@@ -207,6 +208,14 @@ export function DocumentsPage({ services }: V2PageProps) {
     setCurrentPage((page) => Math.min(page, totalPages))
   }, [totalPages])
 
+  useEffect(() => {
+    const existingKeys = new Set(documents.map(documentSelectionKey))
+    setSelectedDocumentKeys((current) => {
+      const retained = new Set(Array.from(current).filter((key) => existingKeys.has(key)))
+      return retained.size === current.size ? current : retained
+    })
+  }, [documents])
+
   const handleUpload = async (file: File) => {
     if (!selectedSearchKbId) return
     setBusy(true)
@@ -235,6 +244,71 @@ export function DocumentsPage({ services }: V2PageProps) {
     setSearchState('empty')
     setSearchHits([])
     await loadDocuments()
+  }
+
+  const toggleDocumentSelection = (document: DocumentTableRow) => {
+    if (busy) return
+    const key = documentSelectionKey(document)
+    setSelectedDocumentKeys((current) => {
+      const next = new Set(current)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
+
+  const toggleAllVisibleDocuments = () => {
+    if (busy || visibleDocuments.length === 0) return
+    const visibleKeys = visibleDocuments.map(documentSelectionKey)
+    const allSelected = visibleKeys.every((key) => selectedDocumentKeys.has(key))
+    setSelectedDocumentKeys((current) => {
+      const next = new Set(current)
+      for (const key of visibleKeys) {
+        if (allSelected) next.delete(key)
+        else next.add(key)
+      }
+      return next
+    })
+  }
+
+  const handleBulkDelete = async () => {
+    if (busy) return
+    const targets = documents.filter((document) => selectedDocumentKeys.has(documentSelectionKey(document)))
+    if (targets.length === 0 || !window.confirm(`确认删除选中的 ${targets.length} 个文档？删除后文档会进入回收站。`)) return
+    setBusy(true)
+    clearNotice()
+    const succeeded: DocumentTableRow[] = []
+    const failed: Array<{ readonly document: DocumentTableRow; readonly error: AdapterError }> = []
+    try {
+      for (const document of targets) {
+        const result = await services.documents.remove(document.kbId, document.id)
+        if (result.state === 'ready') {
+          succeeded.push(document)
+        } else {
+          failed.push({
+            document,
+            error: result.error ?? { code: 'DOCUMENT_DELETE_FAILED', message: '服务端未接受删除请求。' },
+          })
+        }
+      }
+      const succeededKeys = new Set(succeeded.map(documentSelectionKey))
+      setSelectedDocumentKeys((current) => new Set(Array.from(current).filter((key) => !succeededKeys.has(key))))
+      setSearchState('empty')
+      setSearchHits([])
+      await loadDocuments()
+      if (failed.length === 0) {
+        setNotice(`已删除 ${succeeded.length} 个文档，真实列表已刷新；文档已进入回收站。`)
+      } else {
+        const firstFailure = failed[0]
+        setNotice(`批量删除完成：成功 ${succeeded.length} 个，失败 ${failed.length} 个。失败文档保留在真实列表中。`)
+        setNoticeError({
+          ...firstFailure.error,
+          message: `失败项「${firstFailure.document.title}」：${firstFailure.error.message}`,
+        })
+      }
+    } finally {
+      setBusy(false)
+    }
   }
 
   const handleRetry = async (document: DocumentTableRow) => {
@@ -302,7 +376,7 @@ export function DocumentsPage({ services }: V2PageProps) {
           <h1 id="documents-page-title">文档中心</h1>
           <p>集中查看当前主体已授权知识库中的文档，并保留真实状态、版本和错误信息。</p>
         </div>
-        <div className="v2-m3-heading-actions"><button type="button" className="v2-m3-secondary-button" disabled title="批量删除端点仍在后续治理阶段"><FunnelSimple size={15} aria-hidden="true" />批量删除（后续开放）</button><button type="button" className="v2-m3-secondary-button" onClick={() => setBatchUploadOpen(true)} disabled={busy} title={!selectedSearchKbId ? '打开弹窗后选择目标知识库' : '批量/目录上传到已选知识库'}><FolderOpen size={15} aria-hidden="true" />批量/目录上传</button><button type="button" className="v2-m3-primary-button" onClick={() => uploadInputRef.current?.click()} disabled={!selectedSearchKbId || busy}><UploadSimple size={15} aria-hidden="true" />上传文档</button><input ref={uploadInputRef} className="v2-m3-hidden-input" type="file" accept=".txt,.md,.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void handleUpload(file) }} /></div>
+        <div className="v2-m3-heading-actions"><button type="button" className="v2-m3-secondary-button" onClick={handleBulkDelete} disabled={busy || selectedDocumentKeys.size === 0} title={selectedDocumentKeys.size === 0 ? '先选择要删除的真实文档' : '逐条调用服务端删除接口'}><FunnelSimple size={15} aria-hidden="true" />批量删除{selectedDocumentKeys.size > 0 ? ` (${selectedDocumentKeys.size})` : ''}</button><button type="button" className="v2-m3-secondary-button" onClick={() => setBatchUploadOpen(true)} disabled={busy} title={!selectedSearchKbId ? '打开弹窗后选择目标知识库' : '批量/目录上传到已选知识库'}><FolderOpen size={15} aria-hidden="true" />批量/目录上传</button><button type="button" className="v2-m3-primary-button" onClick={() => uploadInputRef.current?.click()} disabled={!selectedSearchKbId || busy}><UploadSimple size={15} aria-hidden="true" />上传文档</button><input ref={uploadInputRef} className="v2-m3-hidden-input" type="file" accept=".txt,.md,.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void handleUpload(file) }} /></div>
       </section>
       {notice ? <div className="v2-m3-notice v2-m3-notice--success" role="status">{notice}</div> : null}
       {noticeError ? <div className="v2-m3-notice v2-m3-notice--error" role="alert"><span>{noticeError.message}<small>{formatErrorMeta(noticeError)}</small></span></div> : null}
@@ -325,7 +399,7 @@ export function DocumentsPage({ services }: V2PageProps) {
         {searchState !== 'empty' ? <SearchResults state={searchState} query={semanticQuery} hits={searchHits} /> : null}
         {documentsState === 'error' || documentsState === 'permission-denied' ? <StatePanel state={documentsState} message="文档中心未能加载真实授权结果，未用本地样本替代。" /> : null}
         {documentsState === 'empty' && knowledgeState === 'empty' ? <StatePanel state="empty" message="当前主体没有可显示的知识库和文档。" /> : null}
-        <DocumentTable documents={visibleDocuments} loading={documentsState === 'loading'} onDetail={(document) => void handleDetail(document)} onDelete={(document) => void handleDelete(document)} onRetry={(document) => void handleRetry(document)} onVersions={(document) => void handleVersions(document)} />
+        <DocumentTable documents={visibleDocuments} loading={documentsState === 'loading'} busy={busy} selectedKeys={selectedDocumentKeys} onToggle={toggleDocumentSelection} onToggleAll={toggleAllVisibleDocuments} onDetail={(document) => void handleDetail(document)} onDelete={(document) => void handleDelete(document)} onRetry={(document) => void handleRetry(document)} onVersions={(document) => void handleVersions(document)} />
         <nav className="v2-m3-pagination" aria-label="文档分页"><span>共 {filteredDocuments.length} 条真实结果</span><div>{Array.from({ length: totalPages }, (_, index) => index + 1).slice(0, 7).map((page) => <button type="button" key={page} className={page === currentPage ? 'v2-m3-page-button v2-m3-page-button--active' : 'v2-m3-page-button'} onClick={() => setCurrentPage(page)} aria-current={page === currentPage ? 'page' : undefined}>{page}</button>)}</div></nav>
       </section>
       {detailDocument ? <Modal title="文档详情" onClose={() => setDetailDocument(null)}><DocumentDetail state={detailState} document={detailDocument} /></Modal> : detailState === 'loading' ? <Modal title="文档详情" onClose={() => setDetailState('empty')}><StatePanel state="loading" message="正在获取文档详情。" /></Modal> : null}
@@ -333,6 +407,10 @@ export function DocumentsPage({ services }: V2PageProps) {
       <BatchUploadModal open={batchUploadOpen} kbId={selectedSearchKbId || null} services={services} onClose={() => setBatchUploadOpen(false)} onSuccess={() => { void loadDocuments(); void loadUploadCenter() }} />
     </div>
   )
+}
+
+function documentSelectionKey(document: DocumentTableRow): string {
+  return `${document.kbId}:${document.id}`
 }
 
 function UploadCenter({
