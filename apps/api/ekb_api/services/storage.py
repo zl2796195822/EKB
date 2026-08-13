@@ -15,10 +15,15 @@ identity.
 
 from __future__ import annotations
 
+import hashlib
+import hmac
+import os
 import unicodedata
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Optional, Protocol, runtime_checkable
+from urllib.parse import quote, urlencode, urlsplit, urlunsplit
 
 from sqlalchemy import Engine, text
 
@@ -69,6 +74,306 @@ class ObjectHead:
     sha256: Optional[str]
 
 
+class LocalFilesystemStorageClient:
+    """Durable local object store for development only.
+
+    This is a real filesystem-backed adapter, not an in-memory test fake. It is
+    enabled only when ``EKB_ENV=development`` and
+    ``EKB_OBJECT_STORAGE_LOCAL_ROOT`` is explicitly set. The upload URL is a
+    protected API route, so the browser never receives a filesystem path.
+    """
+
+    def __init__(self, root: str | Path) -> None:
+        self.root = Path(root).expanduser().resolve()
+        self.root.mkdir(parents=True, exist_ok=True)
+
+    def _path(self, tenant_id: str, object_key: str) -> Path:
+        if not tenant_id or not object_key or ".." in Path(object_key).parts:
+            raise ObjectStorageUnavailable("invalid local object key")
+        candidate = (self.root / tenant_id / object_key).resolve()
+        if self.root not in candidate.parents:
+            raise ObjectStorageUnavailable("local object key escapes storage root")
+        return candidate
+
+    def put_presigned(
+        self,
+        *,
+        tenant_id: str,
+        object_key: str,
+        byte_size: int,
+        method: str,
+        part_size: Optional[int],
+        expires_in_seconds: int,
+    ) -> PresignedUpload:
+        if method != "SINGLE":
+            raise ObjectStorageUnavailable("local development storage supports SINGLE uploads only")
+        self._path(tenant_id, object_key)
+        from urllib.parse import quote
+
+        return PresignedUpload(
+            provider_upload_id=None,
+            upload_urls=[f"/api/v1/kb/uploads/objects?object_key={quote(object_key, safe='')}"],
+            part_size=None,
+        )
+
+    def complete_multipart(
+        self, *, tenant_id: str, object_key: str, provider_upload_id: str, parts: list[dict]
+    ) -> None:
+        raise ObjectStorageUnavailable(
+            "local development storage does not support multipart uploads"
+        )
+
+    def abort(self, *, tenant_id: str, object_key: str, provider_upload_id: str) -> None:
+        path = self._path(tenant_id, object_key)
+        if path.exists():
+            path.unlink()
+
+    def get_object_url(self, *, tenant_id: str, object_key: str) -> str:
+        from urllib.parse import quote
+
+        return f"/api/v1/kb/uploads/objects?object_key={quote(object_key, safe='')}"
+
+    def get_object_bytes(self, *, tenant_id: str, object_key: str) -> bytes:
+        return self._path(tenant_id, object_key).read_bytes()
+
+    def head_object(self, *, tenant_id: str, object_key: str) -> ObjectHead:
+        data = self.get_object_bytes(tenant_id=tenant_id, object_key=object_key)
+        return ObjectHead(byte_size=len(data), sha256=hashlib.sha256(data).hexdigest())
+
+    def write_object(self, *, tenant_id: str, object_key: str, data: bytes) -> ObjectHead:
+        path = self._path(tenant_id, object_key)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_name(f".{path.name}.uploading")
+        temporary.write_bytes(data)
+        os.replace(temporary, path)
+        return ObjectHead(byte_size=len(data), sha256=hashlib.sha256(data).hexdigest())
+
+
+class S3CompatibleStorageClient:
+    """S3-compatible object storage client using AWS Signature Version 4.
+
+    The client intentionally has no SDK dependency. Presigned PUT URLs keep
+    file bytes out of the API process; worker reads use signed GET requests.
+    The endpoint, bucket and credentials are supplied by the runtime only and
+    are never serialized into an API response or persisted in the database.
+    """
+
+    def __init__(
+        self,
+        *,
+        endpoint: str,
+        bucket: str,
+        region: str,
+        access_key: str,
+        secret_key: str,
+        path_style: bool = True,
+    ) -> None:
+        from ekb_api.core.config import _is_remote_provider_url
+
+        if not _is_remote_provider_url(endpoint):
+            raise ObjectStorageUnavailable("object storage endpoint must be a remote HTTP URL")
+        if not bucket or not access_key or not secret_key:
+            raise ObjectStorageUnavailable("object storage bucket and credentials are required")
+        self.endpoint = endpoint.rstrip("/")
+        self.bucket = bucket
+        self.region = region or "us-east-1"
+        self.access_key = access_key
+        self.secret_key = secret_key
+        self.path_style = bool(path_style)
+
+    def _url(self, object_key: str) -> str:
+        if not object_key or ".." in Path(object_key).parts:
+            raise ObjectStorageUnavailable("invalid object key")
+        parts = urlsplit(self.endpoint)
+        encoded_key = quote(object_key, safe="/-_.~")
+        if self.path_style:
+            path = f"{parts.path.rstrip('/')}/{quote(self.bucket, safe='/-_.~')}/{encoded_key}"
+            return urlunsplit((parts.scheme, parts.netloc, path, "", ""))
+        host = f"{self.bucket}.{parts.netloc}"
+        path = f"{parts.path.rstrip('/')}/{encoded_key}"
+        return urlunsplit((parts.scheme, host, path, "", ""))
+
+    @staticmethod
+    def _payload_hash(data: bytes | None) -> str:
+        return hashlib.sha256(data or b"").hexdigest()
+
+    def _signature(
+        self,
+        *,
+        method: str,
+        url: str,
+        headers: dict[str, str],
+        payload_hash: str,
+        query: list[tuple[str, str]] | None = None,
+        presign_expires: int | None = None,
+    ) -> tuple[str, dict[str, str]]:
+        from datetime import datetime, timezone
+
+        now = datetime.now(timezone.utc)
+        amz_date = now.strftime("%Y%m%dT%H%M%SZ")
+        short_date = now.strftime("%Y%m%d")
+        parsed = urlsplit(url)
+        query_items = list(query or [])
+        host = parsed.netloc
+        signed_headers = {
+            key.lower(): " ".join(value.strip().split()) for key, value in headers.items()
+        }
+        signed_headers.setdefault("host", host)
+        signed_names = ";".join(sorted(signed_headers))
+        canonical_headers = "".join(
+            f"{key}:{signed_headers[key]}\n" for key in sorted(signed_headers)
+        )
+        canonical_uri = quote(parsed.path or "/", safe="/-_.~")
+        canonical_query = "&".join(
+            f"{quote(str(key), safe='-_.~')}={quote(str(value), safe='-_.~')}"
+            for key, value in sorted(query_items)
+        )
+        scope = f"{short_date}/{self.region}/s3/aws4_request"
+        if presign_expires is not None:
+            query_items.extend(
+                [
+                    ("X-Amz-Algorithm", "AWS4-HMAC-SHA256"),
+                    ("X-Amz-Credential", f"{self.access_key}/{scope}"),
+                    ("X-Amz-Date", amz_date),
+                    ("X-Amz-Expires", str(presign_expires)),
+                    ("X-Amz-SignedHeaders", signed_names),
+                ]
+            )
+            canonical_query = "&".join(
+                f"{quote(str(key), safe='-_.~')}={quote(str(value), safe='-_.~')}"
+                for key, value in sorted(query_items)
+            )
+            canonical_request = "\n".join(
+                [
+                    method,
+                    canonical_uri,
+                    canonical_query,
+                    canonical_headers,
+                    signed_names,
+                    "UNSIGNED-PAYLOAD",
+                ]
+            )
+        else:
+            headers = {**headers, "x-amz-date": amz_date, "x-amz-content-sha256": payload_hash}
+            signed_headers = {
+                key.lower(): " ".join(value.strip().split()) for key, value in headers.items()
+            }
+            signed_headers.setdefault("host", host)
+            signed_names = ";".join(sorted(signed_headers))
+            canonical_headers = "".join(
+                f"{key}:{signed_headers[key]}\n" for key in sorted(signed_headers)
+            )
+            canonical_request = "\n".join(
+                [
+                    method,
+                    canonical_uri,
+                    canonical_query,
+                    canonical_headers,
+                    signed_names,
+                    payload_hash,
+                ]
+            )
+        hashed_request = hashlib.sha256(canonical_request.encode()).hexdigest()
+        string_to_sign = "\n".join(["AWS4-HMAC-SHA256", amz_date, scope, hashed_request])
+
+        def signing_key() -> bytes:
+            date_key = hmac.new(
+                f"AWS4{self.secret_key}".encode(), short_date.encode(), hashlib.sha256
+            ).digest()
+            region_key = hmac.new(date_key, self.region.encode(), hashlib.sha256).digest()
+            service_key = hmac.new(region_key, b"s3", hashlib.sha256).digest()
+            return hmac.new(service_key, b"aws4_request", hashlib.sha256).digest()
+
+        signature = hmac.new(signing_key(), string_to_sign.encode(), hashlib.sha256).hexdigest()
+        if presign_expires is not None:
+            query_items.append(("X-Amz-Signature", signature))
+            return urlunsplit(
+                (parsed.scheme, parsed.netloc, parsed.path, urlencode(query_items), parsed.fragment)
+            ), {}
+        signed = dict(headers)
+        signed["Host"] = host
+        signed["x-amz-date"] = amz_date
+        signed["x-amz-content-sha256"] = payload_hash
+        signed["Authorization"] = (
+            f"AWS4-HMAC-SHA256 Credential={self.access_key}/{scope}, "
+            f"SignedHeaders={signed_names}, Signature={signature}"
+        )
+        return url, signed
+
+    def _request(
+        self,
+        method: str,
+        *,
+        object_key: str,
+        data: bytes | None = None,
+    ) -> bytes:
+        import urllib.error
+        import urllib.request
+
+        url = self._url(object_key)
+        payload = data or b""
+        url, headers = self._signature(
+            method=method,
+            url=url,
+            headers={"host": urlsplit(url).netloc},
+            payload_hash=self._payload_hash(payload),
+        )
+        request = urllib.request.Request(url, data=data, method=method, headers=headers)
+        try:
+            with urllib.request.urlopen(request, timeout=60) as response:
+                return response.read()
+        except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError) as exc:
+            raise ObjectStorageUnavailable("object storage request failed") from exc
+
+    def put_presigned(
+        self,
+        *,
+        tenant_id: str,
+        object_key: str,
+        byte_size: int,
+        method: str,
+        part_size: Optional[int],
+        expires_in_seconds: int,
+    ) -> PresignedUpload:
+        if method != "SINGLE":
+            raise ObjectStorageUnavailable("multipart upload is not enabled for this endpoint")
+        url = self._url(object_key)
+        presigned, _ = self._signature(
+            method="PUT",
+            url=url,
+            headers={"host": urlsplit(url).netloc},
+            payload_hash="UNSIGNED-PAYLOAD",
+            presign_expires=max(1, min(int(expires_in_seconds), 604800)),
+        )
+        return PresignedUpload(None, [presigned], None)
+
+    def complete_multipart(
+        self, *, tenant_id: str, object_key: str, provider_upload_id: str, parts: list[dict]
+    ) -> None:
+        raise ObjectStorageUnavailable("multipart upload is not enabled for this endpoint")
+
+    def abort(self, *, tenant_id: str, object_key: str, provider_upload_id: str) -> None:
+        self._request("DELETE", object_key=object_key)
+
+    def get_object_url(self, *, tenant_id: str, object_key: str) -> str:
+        return self.put_presigned(
+            tenant_id=tenant_id,
+            object_key=object_key,
+            byte_size=0,
+            method="SINGLE",
+            part_size=None,
+            expires_in_seconds=DEFAULT_SESSION_TTL_SECONDS,
+        ).upload_urls[0]
+
+    def get_object_bytes(self, *, tenant_id: str, object_key: str) -> bytes:
+        return self._request("GET", object_key=object_key)
+
+    def head_object(self, *, tenant_id: str, object_key: str) -> ObjectHead:
+        # S3 ETags are not a portable SHA-256 (multipart ETags are not even a
+        # content hash), so read and hash the bytes for an authoritative check.
+        data = self.get_object_bytes(tenant_id=tenant_id, object_key=object_key)
+        return ObjectHead(len(data), hashlib.sha256(data).hexdigest())
+
 @runtime_checkable
 class StorageClient(Protocol):
     def put_presigned(
@@ -104,14 +409,27 @@ def build_storage_client() -> StorageClient:
     from ekb_api.core.config import get_settings
 
     settings = get_settings()
+    local_root = os.getenv("EKB_OBJECT_STORAGE_LOCAL_ROOT", "").strip()
+    if settings.environment == "development" and local_root:
+        return LocalFilesystemStorageClient(local_root)
     endpoint = getattr(settings, "object_storage_endpoint", None) or ""
     if not endpoint:
         raise ObjectStorageUnavailable(
             "object storage is not configured; uploads cannot be accepted"
         )
-    # A real S3-compatible client would be constructed here.  Its absence is a
-    # fail-closed condition, not a degraded one.
-    raise ObjectStorageUnavailable("object storage client construction is unavailable")
+    try:
+        return S3CompatibleStorageClient(
+            endpoint=endpoint,
+            bucket=str(getattr(settings, "object_storage_bucket", "") or ""),
+            region=str(getattr(settings, "object_storage_region", "us-east-1") or "us-east-1"),
+            access_key=str(getattr(settings, "object_storage_access_key", "") or ""),
+            secret_key=str(getattr(settings, "object_storage_secret_key", "") or ""),
+            path_style=bool(getattr(settings, "object_storage_path_style", True)),
+        )
+    except ObjectStorageUnavailable:
+        raise
+    except Exception as exc:  # noqa: BLE001 - boundary must fail closed
+        raise ObjectStorageUnavailable("object storage client construction failed") from exc
 
 
 # ---- Path normalization ----------------------------------------------------
@@ -149,9 +467,7 @@ def normalize_relative_path(relative_path: str) -> str:
     if not normalized:
         raise PathValidationError("PATH_INVALID", "路径不能为空")
     if len(normalized) > MAX_PATH_DEPTH:
-        raise PathValidationError(
-            "PATH_TOO_DEEP", f"路径深度超过上限 {MAX_PATH_DEPTH}"
-        )
+        raise PathValidationError("PATH_TOO_DEEP", f"路径深度超过上限 {MAX_PATH_DEPTH}")
     return "/".join(normalized)
 
 
@@ -169,9 +485,7 @@ def _source_object_insert(dialect: str) -> str:
     )
     if dialect == "postgresql":
         return statement + " ON CONFLICT (tenant_id, object_key) DO NOTHING"
-    return statement.replace(
-        "INSERT INTO source_objects", "INSERT OR IGNORE INTO source_objects"
-    )
+    return statement.replace("INSERT INTO source_objects", "INSERT OR IGNORE INTO source_objects")
 
 
 # ---- Result dataclasses ---------------------------------------------------
@@ -185,6 +499,7 @@ class PreflightResult:
     display_path: Optional[str]
     byte_size: int
     detected_mime: Optional[str]
+    upload_item_id: Optional[str] = None
     error_code: Optional[str] = None
     error_detail: Optional[dict] = None
     upload_session: Optional[dict] = None
@@ -196,6 +511,15 @@ class BatchResult:
     status: str
     created: bool
     items: list[PreflightResult] = field(default_factory=list)
+
+    def as_dict(self) -> dict:
+        return {
+            "id": self.batch_id,
+            "batch_id": self.batch_id,
+            "status": self.status,
+            "created": self.created,
+            "items": [vars(item) for item in self.items],
+        }
 
 
 @dataclass
@@ -266,7 +590,8 @@ class UploadService:
     def _require_item(self, connection, tenant_id: str, item_id: str) -> dict:
         row = connection.execute(
             text(
-                "SELECT ui.*, ub.tenant_id AS batch_tenant, ub.knowledge_base_id "
+                "SELECT ui.*, ub.tenant_id AS batch_tenant, ub.knowledge_base_id, "
+                "ub.created_by AS created_by "
                 "FROM upload_items AS ui "
                 "JOIN upload_batches AS ub ON ub.id = ui.batch_id "
                 "WHERE ui.id=:item AND ub.tenant_id=:tenant"
@@ -431,6 +756,7 @@ class UploadService:
             result_items: list[PreflightResult] = []
             for preflight, original in zip(preflights, items):
                 item_id = str(uuid4())
+                preflight.upload_item_id = item_id
                 sha256 = original.get("sha256")
                 connection.execute(
                     text(
@@ -462,9 +788,7 @@ class UploadService:
                     ).__dict__
                 result_items.append(preflight)
 
-        return BatchResult(
-            batch_id=batch_id, status="ACCEPTED", created=True, items=result_items
-        )
+        return BatchResult(batch_id=batch_id, status="ACCEPTED", created=True, items=result_items)
 
     # -- upload session --
 
@@ -489,11 +813,17 @@ class UploadService:
             {"item": item_id},
         ).first()
         if existing is not None:
+            object_key = _object_key(tenant_id, kb_id, item_id)
             return _SessionRecord(
                 session_id=str(existing.id),
                 method=str(existing.method),
                 provider_upload_id=existing.provider_upload_id,
-                upload_urls=[],
+                upload_urls=[
+                    self.storage.get_object_url(
+                        tenant_id=tenant_id,
+                        object_key=object_key,
+                    )
+                ],
                 part_size=existing.part_size,
                 expires_at=str(existing.expires_at),
             )
@@ -508,8 +838,11 @@ class UploadService:
         )
         now = utc_now()
         expires_at = (
-            datetime.now(timezone.utc) + timedelta(seconds=DEFAULT_SESSION_TTL_SECONDS)
-        ).astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+            (datetime.now(timezone.utc) + timedelta(seconds=DEFAULT_SESSION_TTL_SECONDS))
+            .astimezone(timezone.utc)
+            .isoformat()
+            .replace("+00:00", "Z")
+        )
         session_id = str(uuid4())
         connection.execute(
             text(
@@ -582,23 +915,38 @@ class UploadService:
             item = self._require_item(connection, tenant_id, item_id)
             kb_id = str(item.knowledge_base_id)
             object_key = _object_key(tenant_id, kb_id, item_id)
+            session = connection.execute(
+                text(
+                    "SELECT state, expires_at FROM upload_sessions "
+                    "WHERE upload_item_id=:item AND tenant_id=:tenant"
+                ),
+                {"item": item_id, "tenant": tenant_id},
+            ).first()
+            if session is None or (
+                str(session.state) not in ("ACTIVE", "COMPLETED")
+                and str(item.status) not in ("COMPLETING", "COMPLETED")
+            ):
+                raise ApiError(409, "UPLOAD_SESSION_INVALID", "上传会话无效，请重新上传")
+            if str(session.state) == "ACTIVE" and str(session.expires_at) <= utc_now():
+                raise ApiError(409, "UPLOAD_SESSION_EXPIRED", "上传会话已过期，请重新上传")
 
             # Idempotency: already completed -> re-establish (no-op) version.
             if str(item.status) in ("COMPLETED", "COMPLETING"):
                 version_row = connection.execute(
                     text(
-                        "SELECT id FROM document_versions WHERE source_object_id IS NOT NULL "
-                        "AND doc_id IN (SELECT id FROM documents WHERE kb_id=:kb) "
+                        "SELECT id, doc_id FROM document_versions "
+                        "WHERE source_object_id=:source AND tenant_id=:tenant "
                         "ORDER BY created_at DESC LIMIT 1"
                     ),
-                    {"kb": kb_id},
+                    {"source": item.source_object_id, "tenant": tenant_id},
                 ).first()
                 if version_row is not None:
                     job_row = connection.execute(
                         text(
-                            "SELECT id FROM ingest_jobs WHERE document_version_id=:dv LIMIT 1"
+                            "SELECT id FROM ingest_jobs WHERE document_version_id=:dv "
+                            "AND tenant_id=:tenant LIMIT 1"
                         ),
-                        {"dv": str(version_row.id)},
+                        {"dv": str(version_row.id), "tenant": tenant_id},
                     ).first()
                     return CompleteResult(
                         version_id=str(version_row.id),
@@ -621,8 +969,7 @@ class UploadService:
             if sha256 and head.sha256 is not None and head.sha256 != sha256:
                 connection.execute(
                     text(
-                        "UPDATE upload_items SET status='FAILED', error_code=:code "
-                        "WHERE id=:item"
+                        "UPDATE upload_items SET status='FAILED', error_code=:code WHERE id=:item"
                     ),
                     {"code": OBJECT_CHECKSUM_MISMATCH, "item": item_id},
                 )
@@ -661,10 +1008,7 @@ class UploadService:
                 },
             )
             source_row = connection.execute(
-                text(
-                    "SELECT id FROM source_objects WHERE tenant_id=:tenant "
-                    "AND object_key=:key"
-                ),
+                text("SELECT id FROM source_objects WHERE tenant_id=:tenant AND object_key=:key"),
                 {"tenant": tenant_id, "key": object_key},
             ).first()
             source_id = str(source_row.id)
@@ -692,11 +1036,10 @@ class UploadService:
                 detected_mime=mime,
                 source_object_id=source_id,
                 job_service=self.jobs,
+                owner_user_id=str(item.created_by) if getattr(item, "created_by", None) else None,
             )
             connection.execute(
-                text(
-                    "UPDATE upload_items SET status='COMPLETING' WHERE id=:item"
-                ),
+                text("UPDATE upload_items SET status='COMPLETING' WHERE id=:item"),
                 {"item": item_id},
             )
             return CompleteResult(
@@ -730,9 +1073,7 @@ class UploadService:
                     except Exception:  # noqa: BLE001 - abort best-effort
                         pass
                 connection.execute(
-                    text(
-                        "UPDATE upload_sessions SET state='ABORTED' WHERE id=:sid"
-                    ),
+                    text("UPDATE upload_sessions SET state='ABORTED' WHERE id=:sid"),
                     {"sid": str(session.id)},
                 )
             connection.execute(
@@ -745,9 +1086,7 @@ class UploadService:
     def get_batch(self, *, tenant_id: str, batch_id: str) -> BatchProjection:
         with self.engine.connect() as connection:
             batch = connection.execute(
-                text(
-                    "SELECT * FROM upload_batches WHERE id=:id AND tenant_id=:tenant"
-                ),
+                text("SELECT * FROM upload_batches WHERE id=:id AND tenant_id=:tenant"),
                 {"id": batch_id, "tenant": tenant_id},
             ).first()
             if batch is None:
@@ -756,12 +1095,25 @@ class UploadService:
                 text("SELECT * FROM upload_items WHERE batch_id=:batch ORDER BY client_item_id"),
                 {"batch": batch_id},
             ).all()
-            items = [self._item_projection(connection, row) for row in item_rows]
+            items = [
+                self._item_projection(connection, row, tenant_id=tenant_id) for row in item_rows
+            ]
+            item_statuses = {str(row.status) for row in item_rows}
+            if "FAILED" in item_statuses:
+                batch_status = "FAILED"
+            elif item_statuses and item_statuses == {"COMPLETED"}:
+                batch_status = "COMPLETED"
+            elif item_statuses.intersection({"COMPLETING", "UPLOADED"}):
+                batch_status = "COMPLETING"
+            elif item_statuses.intersection({"UPLOADING", "WAITING"}):
+                batch_status = "UPLOADING"
+            else:
+                batch_status = str(batch.status)
         return BatchProjection(
             id=str(batch.id),
             kb_id=str(batch.knowledge_base_id),
             mode=str(batch.mode),
-            status=str(batch.status),
+            status=batch_status,
             item_count=int(batch.item_count),
             total_bytes=int(batch.total_bytes),
             created_at=str(batch.created_at),
@@ -769,7 +1121,7 @@ class UploadService:
             items=items,
         )
 
-    def _item_projection(self, connection, item_row) -> ItemProjection:
+    def _item_projection(self, connection, item_row, *, tenant_id: str) -> ItemProjection:
         version_id = None
         job_id = None
         progress = None
@@ -778,17 +1130,18 @@ class UploadService:
             dv = connection.execute(
                 text(
                     "SELECT id FROM document_versions WHERE source_object_id=:src "
-                    "ORDER BY created_at DESC LIMIT 1"
+                    "AND tenant_id=:tenant ORDER BY created_at DESC LIMIT 1"
                 ),
-                {"src": str(item_row.source_object_id)},
+                {"src": str(item_row.source_object_id), "tenant": tenant_id},
             ).first()
             if dv is not None:
                 version_id = str(dv.id)
                 job = connection.execute(
                     text(
-                        "SELECT id, status FROM ingest_jobs WHERE document_version_id=:dv LIMIT 1"
+                        "SELECT id, status FROM ingest_jobs "
+                        "WHERE document_version_id=:dv AND tenant_id=:tenant LIMIT 1"
                     ),
-                    {"dv": str(dv.id)},
+                    {"dv": str(dv.id), "tenant": tenant_id},
                 ).first()
                 if job is not None:
                     job_id = str(job.id)
@@ -803,10 +1156,10 @@ class UploadService:
             attempt = connection.execute(
                 text(
                     "SELECT state, current_stage, progress_current, progress_total "
-                    "FROM ingest_job_attempts WHERE ingest_job_id=:job "
+                    "FROM ingest_job_attempts WHERE ingest_job_id=:job AND tenant_id=:tenant "
                     "ORDER BY attempt_no DESC LIMIT 1"
                 ),
-                {"job": job_id},
+                {"job": job_id, "tenant": tenant_id},
             ).first()
             if attempt is not None:
                 unit = _progress_unit(str(attempt.current_stage))

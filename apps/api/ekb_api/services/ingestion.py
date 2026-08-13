@@ -167,6 +167,7 @@ def create_version_for_item(
     detected_mime: str,
     source_object_id: str,
     job_service,
+    owner_user_id: Optional[str] = None,
 ) -> dict[str, Any]:
     """Promote an uploaded object into a document version + queued ingest job.
 
@@ -322,6 +323,8 @@ def create_version_for_item(
             "document_version_id": version_id,
             "document_id": document_id,
             "kb_id": kb_id,
+            "mime": detected_mime,
+            "owner_user_id": owner_user_id,
         },
         max_attempts=DEFAULT_MAX_ATTEMPTS,
         now=now,
@@ -447,9 +450,7 @@ class IngestService:
                     "now": current,
                 },
             )
-            self._bump(
-                connection, tenant_id=tenant_id, job_row=job, status="RUNNING", now=current
-            )
+            self._bump(connection, tenant_id=tenant_id, job_row=job, status="RUNNING", now=current)
             connection.execute(
                 text(
                     "UPDATE ingest_jobs SET attempts=:attempts, active_attempt_id=:attempt "
@@ -654,9 +655,7 @@ class IngestService:
                 connection, tenant_id=tenant_id, job_row=job, status="CANCELLED", now=current
             )
             connection.execute(
-                text(
-                    "UPDATE ingest_jobs SET active_attempt_id=NULL WHERE id=:id AND tenant_id=:t"
-                ),
+                text("UPDATE ingest_jobs SET active_attempt_id=NULL WHERE id=:id AND tenant_id=:t"),
                 {"id": ingest_job_id, "t": tenant_id},
             )
             connection.execute(
@@ -761,15 +760,27 @@ class IngestService:
 
     def _projection(self, connection, tenant_id: str, ingest_job_id: str) -> IngestProjection:
         job = self._require_job(connection, tenant_id, ingest_job_id)
-        attempt_row = connection.execute(
-            text(
-                "SELECT * FROM ingest_job_attempts WHERE ingest_job_id=:job AND tenant_id=:tenant "
-                "ORDER BY attempt_no DESC LIMIT 1"
-            ),
-            {"job": ingest_job_id, "tenant": tenant_id},
-        ).first()
+        # Legacy upload path (the compatibility `/kb/{id}/docs` endpoint) can
+        # finish before the PH3 attempt worker creates an attempt.  Projection
+        # must remain readable against that schema and return a valid empty
+        # attempt, rather than turning a completed upload into a 500.
+        attempt_table = "ingest_job_attempts"
+        try:
+            attempt_row = connection.execute(
+                text(
+                    "SELECT * FROM ingest_job_attempts WHERE ingest_job_id=:job "
+                    "AND tenant_id=:tenant "
+                    "ORDER BY attempt_no DESC LIMIT 1"
+                ),
+                {"job": ingest_job_id, "tenant": tenant_id},
+            ).first()
+        except Exception as exc:  # noqa: BLE001 - compatibility schema probe
+            if "no such table" not in str(exc).lower():
+                raise
+            attempt_table = ""
+            attempt_row = None
         stages: list[dict[str, Any]] = []
-        if attempt_row is not None:
+        if attempt_row is not None and attempt_table:
             stage_rows = connection.execute(
                 text(
                     "SELECT stage, status, metrics, started_at, ended_at FROM ingest_stages "
@@ -794,11 +805,13 @@ class IngestService:
         return IngestProjection(
             ingest_job_id=str(job.id),
             document_id=str(job.doc_id),
-            document_version_id=str(job.document_version_id or ""),
+            document_version_id=str(getattr(job, "document_version_id", None) or ""),
             status=str(job.status),
-            attempts=int(job.attempts or 0),
-            max_attempts=int(job.max_attempts or DEFAULT_MAX_ATTEMPTS),
-            state_version=int(job.state_version or 0),
+            attempts=int(getattr(job, "attempts", 0) or 0),
+            max_attempts=int(
+                getattr(job, "max_attempts", DEFAULT_MAX_ATTEMPTS) or DEFAULT_MAX_ATTEMPTS
+            ),
+            state_version=int(getattr(job, "state_version", 0) or 0),
             active_attempt=_row_to_attempt(attempt_row) if attempt_row is not None else None,
             stages=stages,
         )

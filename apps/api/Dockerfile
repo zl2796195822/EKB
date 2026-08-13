@@ -1,29 +1,60 @@
-# EKB API · 生产镜像
-FROM python:3.11-slim
+# EKB API · 生产镜像（Python 3.11 + 离线依赖 + SQLite/PostgreSQL 双兼容）
+# 构建注意：
+#  docker build --platform linux/amd64 -t ekb/ekb-api:latest .
+#  docker save ekb/ekb-api:latest | gzip > ekb-api-amd64.tar.gz
+#  远程：
+#  docker load < ekb-api-amd64.tar.gz
+#  docker run -d --name ekb-api --restart unless-stopped \
+#    -p 127.0.0.1:8000:8000 \
+#    -v /opt/ekb/data:/data \
+#    --env-file /opt/ekb/api/.env \
+#    ekb/ekb-api:latest
+
+FROM python:3.11-slim-bookworm AS runtime
 
 WORKDIR /app
 
-# 安装系统依赖（tiktoken 需要 gcc）
+# 系统依赖（tiktoken 需要 gcc / libffi / libssl）
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc \
-    libpq-dev \
-    curl \
+    curl ca-certificates gcc libffi-dev libssl-dev pkg-config make \
     && rm -rf /var/lib/apt/lists/*
 
-# 先复制 pyproject.toml 利用 Docker 层缓存
+# Python 层缓存：先放 pyproject 安装依赖
+# 注意：不要在 buildx 构建阶段强依赖国内 PyPI 镜像——跨境构建时 TLS 握手常抛 SSLEOFError，
+# 导致 pip install build-deps 失败。生产镜像内安装默认用官方 PyPI；
+# 若服务器侧需要国内源，由 entrypoint / runtime 通过 PIP_INDEX_URL 环境变量覆盖。
 COPY pyproject.toml ./
-RUN pip install --no-cache-dir -e ".[prod]" 2>/dev/null || pip install --no-cache-dir -e .
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel \
+ && pip install --no-cache-dir --retries 3 --timeout 60 -e ".[prod]" \
+ || pip install --no-cache-dir --retries 3 --timeout 60 -e .
 
-# 复制应用代码
+# 应用代码 + 迁移 + entrypoint + admin 脚本
 COPY ekb_api/ ./ekb_api/
+COPY entrypoint.sh ./entrypoint.sh
+COPY ensure_admin.py ./ensure_admin.py
+RUN chmod +x /app/entrypoint.sh /app/ensure_admin.py 2>/dev/null || true
 
-# 非 root 用户运行
-RUN useradd -m -u 1000 ekb && chown -R ekb:ekb /app
-USER ekb
+# 生产默认 env（启动时用 --env-file 覆盖，见上方示例）
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    EKB_ENV=production \
+    EKB_API_HOST=127.0.0.1 \
+    EKB_API_PORT=8000 \
+    EKB_DATABASE_URL=sqlite:////data/ekb.sqlite3 \
+    EKB_ALLOWED_ORIGINS=http://127.0.0.1:5173,http://localhost:5173
+
+# 数据目录（挂载点）
+RUN mkdir -p /data && chmod 700 /data 2>/dev/null || true
+VOLUME ["/data"]
 
 EXPOSE 8000
 
-HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=3 \
-  CMD curl -f http://localhost:8000/healthz || exit 1
+HEALTHCHECK --interval=15s --timeout=5s --start-period=25s --retries=4 \
+  CMD curl -fsS http://localhost:8000/healthz || exit 1
 
-CMD ["uvicorn", "ekb_api.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+# 非 root 用户
+RUN useradd -m -u 1000 ekb && chown -R ekb:ekb /app /data 2>/dev/null || true
+USER ekb
+
+ENTRYPOINT ["/app/entrypoint.sh"]
+CMD ["sh", "-c", "exec uvicorn ekb_api.main:app --host \"${EKB_API_HOST:-127.0.0.1}\" --port \"${EKB_API_PORT:-8000}\" --workers 2"]

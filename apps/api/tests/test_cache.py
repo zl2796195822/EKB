@@ -103,6 +103,7 @@ def test_embed_one_cache_hit(monkeypatch) -> None:
     import ekb_api.embedding as emb_mod
 
     monkeypatch.setattr(emb_mod, "query_embedding_cache", test_cache)
+    monkeypatch.setattr(emb_mod, "embed_batch", lambda texts: [[1.0, 0.0] for _ in texts])
 
     call_count = 0
     original_embed_batch = emb_mod.embed_batch
@@ -129,6 +130,7 @@ def test_embed_one_cache_different_text_miss(monkeypatch) -> None:
 
     test_cache = LruTtlCache(maxsize=10, ttl_seconds=60.0)
     monkeypatch.setattr(emb_mod, "query_embedding_cache", test_cache)
+    monkeypatch.setattr(emb_mod, "embed_batch", lambda texts: [[1.0, 0.0] for _ in texts])
 
     embed_one("文本甲")
     embed_one("文本乙")

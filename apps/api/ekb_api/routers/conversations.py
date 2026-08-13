@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Annotated, Optional
+from typing_extensions import Annotated
+from typing import Optional
 
 from fastapi import APIRouter, Depends
 from starlette import status
@@ -36,7 +37,7 @@ def list_messages(
     conversation_id: str,
     auth: Annotated[AuthContext, Depends(get_auth_context)],
     store: Annotated[SqlStore, Depends(get_store)],
-) -> list[dict[str, str]]:
+) -> list[dict[str, object]]:
     conversation = store.get_conversation(auth, conversation_id)
     if not conversation:
         raise ApiError(404, "NOT_FOUND", "当前授权范围内不存在")
@@ -46,6 +47,15 @@ def list_messages(
             "role": message.role,
             "content": message.content,
             "created_at": message.created_at,
+            # Keep the existing response fields and expose the PH6 citation
+            # metadata under the redacted metadata envelope expected by the
+            # conversation client. No provider secret or raw object key is
+            # included in this projection.
+            "metadata_redacted": (
+                {"citations": message.citations}
+                if message.citations
+                else {}
+            ),
         }
         for message in store.list_messages(auth, conversation_id)
     ]

@@ -67,6 +67,9 @@ export type {
 } from './feedback'
 export type {
   KbMemberView,
+  FolderView,
+  FolderListResult,
+  FolderWriteResult,
   KnowledgeBaseView,
   KnowledgeItemResult,
   KnowledgeListResult,
@@ -76,6 +79,11 @@ export type {
 } from './knowledge'
 export type {
   CitationView,
+  ComposerAskOptions,
+  ComposerCapabilitiesInfo,
+  ComposerCapabilitiesResult,
+  ComposerCapabilitiesView,
+  ComposerModelInfo,
   QaCancelResult,
   QaCancelView,
   QaContentDeltaEvent,
@@ -93,6 +101,7 @@ export type {
   QaStreamInput,
   QaStreamServices,
   QaStreamStartResult,
+  ThinkingLevel,
 } from './qa'
 export type { SearchHitView, SearchResultView, SearchServices } from './search'
 export type {
@@ -229,3 +238,19 @@ export type {
   V3IdentityListUsersResponse,
   V3IdentityUserRecord,
 } from './v3Identity'
+export type {
+  CreateLLMModelInput,
+  CreateLLMProviderInput,
+  LLMModelListResult,
+  LLMModelResult,
+  LLMModelView,
+  LLMProfileServices,
+  LLMProviderListResult,
+  LLMProviderResult,
+  LLMProviderView,
+  LLMSyncResult,
+  PresetProviderListResult,
+  PresetProviderView,
+  UpdateLLMModelInput,
+  UpdateLLMProviderInput,
+} from './llm'

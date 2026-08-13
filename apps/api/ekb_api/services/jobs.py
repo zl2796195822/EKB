@@ -436,6 +436,8 @@ class JobService:
         self,
         *,
         worker_id: str,
+        tenant_id: Optional[str] = None,
+        job_type: Optional[str] = None,
         now: Optional[str] = None,
         lease_seconds: int = 60,
     ) -> Optional[ClaimedJob]:
@@ -447,14 +449,22 @@ class JobService:
         expiry = _after(current, lease_seconds)
         with self.engine.begin() as connection:
             self._recover_expired(connection, now=current)
+            clauses = ["state IN ('QUEUED','RETRY_WAIT')", "available_at <= :now"]
+            query_params: dict[str, Any] = {"now": current}
+            if tenant_id is not None:
+                clauses.append("tenant_id=:tenant")
+                query_params["tenant"] = tenant_id
+            if job_type is not None:
+                clauses.append("job_type=:job_type")
+                query_params["job_type"] = job_type
             query = (
-                "SELECT * FROM background_jobs WHERE state IN ('QUEUED','RETRY_WAIT') "
-                "AND available_at <= :now ORDER BY priority DESC, available_at ASC, created_at ASC "
-                "LIMIT 1"
+                "SELECT * FROM background_jobs WHERE "
+                + " AND ".join(clauses)
+                + " ORDER BY priority DESC, available_at ASC, created_at ASC LIMIT 1"
             )
             if self.engine.dialect.name == "postgresql":
                 query += " FOR UPDATE SKIP LOCKED"
-            candidate = connection.execute(text(query), {"now": current}).first()
+            candidate = connection.execute(text(query), query_params).first()
             if candidate is None:
                 return None
             updated = connection.execute(

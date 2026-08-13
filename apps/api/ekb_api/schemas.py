@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any, Dict, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -109,6 +109,8 @@ class TenantCreate(BaseModel):
     quota_daily_qa: int = 0
     # M3-5 文档数存储配额（0 = 不限）。
     quota_storage_docs: int = 0
+    # 单文件上传大小上限（字节，0 = 使用全局默认）。
+    quota_storage_bytes_per_file: int = 0
 
 
 class TenantResponse(BaseModel):
@@ -121,6 +123,8 @@ class TenantResponse(BaseModel):
     quota_daily_qa: int = 0
     # M3-5 文档数存储配额（0 = 不限）。
     quota_storage_docs: int = 0
+    # 单文件上传大小上限（字节，0 = 使用全局默认）。
+    quota_storage_bytes_per_file: int = 0
 
 
 class UserInvite(BaseModel):
@@ -193,6 +197,27 @@ class AskOptions(BaseModel):
     max_citations: int = Field(default=5, ge=1, le=10)
     # SSE v2: 1=legacy SSE, 2=Conversation Stream v2（envelope+seq+turn_id）
     stream_version: int = Field(default=2, ge=1, le=2)
+    # Phase 2: Composer 功能按钮参数
+    web_search: bool = False       # 联网搜索：v1 透传占位；后续接入 Tavily/SerpAPI 时生效
+    # 深度思考：默认开启（medium 档）。关闭则走 thinking_level=light。
+    # thinking_level 五档（与前端 UI 「轻度/中度/中/高/极高」一一对应），真实控制：
+    #   - 传给 DeepSeek V4 原生 reasoning_effort（low/medium/high/max）
+    #   - 控制 EKB 侧 prompt 推理提示强度与 temperature 采样
+    deep_thinking: bool = True
+    thinking_level: str = Field(
+        default="medium",
+        description="思考程度五档：light=轻度（快速回答） / mild=中度 / medium=中（默认，推荐） / high=高 / extreme=极高（更慢、更严谨、消耗更多额度）",
+        pattern=r"^(light|mild|medium|high|extreme)$",
+    )
+    model: Optional[str] = None    # 用户选择的模型覆盖（None 则使用 settings.llm_model + route 默认）
+    attachment_doc_ids: list[str] = Field(
+        default_factory=list,
+        max_length=50,
+    )  # 「添加文件」：附件 doc_id，合并到检索范围
+    # PH6 FR-051：答题模式。
+    #   STRICT  —— 选中知识库但检索不到任何证据时直接拒答（默认，避免编造）。
+    #   ENHANCED —— 允许结合常识作答，但仍以知识库证据为主、明确分隔。
+    answer_mode: Literal["STRICT", "ENHANCED"] = "STRICT"
 
 
 class AskRequest(BaseModel):
@@ -201,6 +226,34 @@ class AskRequest(BaseModel):
     kb_ids: list[str] = Field(default_factory=list, max_length=20)
     filters: SearchFilters = Field(default_factory=SearchFilters)
     options: AskOptions = Field(default_factory=AskOptions)
+
+
+# ---- Phase2：Composer 功能按钮 辅助 schemas ----
+
+class ModelInfo(BaseModel):
+    id: str
+    name: str
+    provider: str
+    description: Optional[str] = None
+    supports_deep_thinking: bool = False
+
+
+class ComposerCapabilities(BaseModel):
+    """Composer 功能按钮是否可用。"""
+    attachments_enabled: bool = True       # 添加文件（上传后为 doc_id，走 attachment_doc_ids）
+    web_search_enabled: bool = False       # 联网搜索：当前版本透传占位（未接 SERP 引擎时为 False）
+    deep_thinking_enabled: bool = True     # 深度思考：通过 prompt + 温度 模拟，LLM 支持即启用
+    model_choice_enabled: bool = True      # 模型选择：通过覆盖 route.model_name 生效
+
+
+class ComposerCapabilitiesResponse(BaseModel):
+    capabilities: ComposerCapabilities
+    models: list[ModelInfo]
+    # 同步返回 AskOptions 默认值，便于前端初始化
+    defaults: AskOptions
+    # M4-6 多轮对话新增：上下文窗口大小 + 压缩功能开关
+    context_window_tokens: int = 16384
+    compaction_enabled: bool = True
 
 
 class FeedbackRequest(BaseModel):
@@ -344,6 +397,7 @@ class SyncRunResponse(BaseModel):
 class TenantQuotaUpdate(BaseModel):
     quota_daily_qa: Optional[int] = None
     quota_storage_docs: Optional[int] = None
+    quota_storage_bytes_per_file: Optional[int] = None
 
 
 # ---- SSE v2 Turn 显式取消 ----
@@ -353,7 +407,7 @@ class TurnCancelResponse(BaseModel):
     turn_id: str
     status: str               # cancelled / already_completed / not_found
     accepted: bool
-    message: str | None = None
+    message: Optional[str] = None
 
 
-JsonDict = dict[str, Any]
+JsonDict = Dict[str, Any]

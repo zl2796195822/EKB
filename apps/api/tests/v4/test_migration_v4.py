@@ -32,6 +32,7 @@ def test_canonical_v3_ledger_order_is_shared_by_runners() -> None:
         "v3_006_apps_compat",
         "v3_007_content_governance_compat",
         "v3_005_llm",
+        "v3_008_content_hierarchy",
     )
     assert KNOWN_V3_VERSIONS == expected
     assert tuple(KNOWN_VERSIONS[: len(expected)]) == expected

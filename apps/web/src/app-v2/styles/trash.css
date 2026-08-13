@@ -1,0 +1,166 @@
+/* Phase 2 回收站：只放本页新增类，表格/按钮等基元继续复用 m5/m6。 */
+
+.v2-trash-search {
+  display: flex;
+  align-items: center;
+  gap: var(--v2-space-2);
+  padding: var(--v2-space-1) var(--v2-space-2) var(--v2-space-1) var(--v2-space-3);
+  border: 1px solid var(--v2-color-border);
+  border-radius: var(--v2-radius-pill);
+  background: var(--v2-color-surface);
+}
+
+.v2-trash-search > svg {
+  color: var(--v2-color-muted);
+  flex: none;
+}
+
+.v2-trash-search input {
+  width: 168px;
+  padding: 6px 0;
+  border: 0;
+  background: transparent;
+  color: var(--v2-color-ink);
+  font-size: var(--v2-font-size-md);
+  outline: none;
+}
+
+.v2-trash-search input::placeholder {
+  color: var(--v2-color-subtle);
+}
+
+.v2-trash-search input:focus-visible {
+  outline: none;
+}
+
+.v2-trash-search:focus-within {
+  border-color: var(--v2-color-focus);
+}
+
+.v2-trash-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--v2-space-2);
+  padding: 0 var(--v2-space-4) var(--v2-space-3);
+}
+
+.v2-trash-filters button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border: 1px solid var(--v2-color-border);
+  border-radius: var(--v2-radius-pill);
+  background: var(--v2-color-surface);
+  color: var(--v2-color-ink-soft);
+  font-size: var(--v2-font-size-md);
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+.v2-trash-filters button:hover {
+  border-color: var(--v2-color-focus);
+  color: var(--v2-color-primary);
+}
+
+.v2-trash-filters button.is-active {
+  border-color: var(--v2-color-primary);
+  background: var(--v2-color-primary-soft);
+  color: var(--v2-color-primary);
+  font-weight: 600;
+}
+
+.v2-trash-filter-count {
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: var(--v2-radius-pill);
+  background: var(--v2-color-border-soft);
+  color: var(--v2-color-muted);
+  font-size: var(--v2-font-size-sm);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.v2-trash-filters button.is-active .v2-trash-filter-count {
+  background: var(--v2-color-surface);
+  color: var(--v2-color-primary);
+}
+
+.v2-trash-title {
+  display: block;
+  color: var(--v2-color-ink);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.v2-trash-blocked {
+  display: block;
+  margin-top: 3px;
+  color: var(--v2-color-warning);
+  font-size: var(--v2-font-size-sm);
+  line-height: 1.5;
+}
+
+.v2-trash-type {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--v2-color-ink-soft);
+  white-space: nowrap;
+}
+
+.v2-trash-type > svg {
+  color: var(--v2-color-muted);
+  flex: none;
+}
+
+.v2-trash-retention {
+  display: inline-block;
+  padding: 2px 9px;
+  border-radius: var(--v2-radius-pill);
+  background: var(--v2-color-border-soft);
+  color: var(--v2-color-ink-soft);
+  font-size: var(--v2-font-size-sm);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.v2-trash-retention[data-tone='soon'] {
+  background: var(--v2-color-warning-soft);
+  color: var(--v2-color-warning);
+}
+
+.v2-trash-retention[data-tone='overdue'] {
+  background: var(--v2-color-danger-soft);
+  color: var(--v2-color-danger);
+  font-weight: 600;
+}
+
+.v2-trash-danger-button {
+  color: var(--v2-color-danger);
+}
+
+.v2-trash-danger-button:hover:not([aria-disabled='true']) {
+  border-color: var(--v2-color-danger);
+  background: var(--v2-color-danger-soft);
+  color: var(--v2-color-danger);
+}
+
+/* aria-disabled 而非 disabled：按钮仍可聚焦，点击时给出可解释的原因提示。 */
+.v2-m6-recycle-page [aria-disabled='true'] {
+  opacity: 0.5;
+}
+
+.v2-m6-recycle-page [aria-busy='true'] {
+  opacity: 0.65;
+  pointer-events: none;
+}
+
+@media (max-width: 860px) {
+  .v2-trash-search {
+    width: 100%;
+  }
+
+  .v2-trash-search input {
+    width: 100%;
+  }
+}

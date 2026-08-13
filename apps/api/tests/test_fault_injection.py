@@ -1,11 +1,11 @@
 """M4-7 故障注入测试：验证降级、熔断和超时保护在真实故障场景下的端到端行为。
 
 覆盖架构设计第 7 章失败模式：
-  - LLM 超时/失败 → 熔断器开闸 → 短路 → 降级到 demo 拼接
+  - LLM 超时/失败 → 熔断器开闸 → 短路 → 明确返回 Provider 错误
   - 熔断器半开探测 → 成功恢复
   - search 端点超时 → 504 SEARCH_TIMEOUT
   - QA 全流程超时 → finish_reason=timeout
-  - embedding 全部 provider 失败 → 降级到本地 n-gram 向量
+  - embedding 全部远程 provider 失败 → fail-closed，不生成本地向量
 
 故障注入方式：monkeypatch LLM/embedding 客户端内部函数模拟超时和失败，
 不依赖真实外部服务，确保测试可重复且快速。
@@ -259,13 +259,13 @@ def test_circuit_breaker_half_open_failure_returns_to_open():
         breaker.reset()
 
 
-# ---- 2. QA 降级：LLM 失败时降级到 demo 拼接，不中断问答 ----
+# ---- 2. QA：远程 LLM 失败时返回明确 Provider 错误 ----
 
 
 def test_qa_degrades_to_demo_when_llm_fails(client, dev_token):
-    """LLM 调用失败时 QA 降级到 demo 拼接，返回 200 且无 error 事件。
+    """LLM 调用失败时 QA 返回明确 Provider 错误，不拼接证据冒充回答。
 
-    M4-3：patch generate_answer_stream 抛 LlmError，模拟流式生成失败 → 降级到 demo 拼接。
+    M4-3：patch generate_answer_stream 抛 LlmError，模拟远程服务失败。
     """
     kb_id = _get_kb_id(client, dev_token)
 
@@ -273,7 +273,10 @@ def test_qa_degrades_to_demo_when_llm_fails(client, dev_token):
         raise LlmError("simulated failure")
         yield  # 使其成为生成器（永远不会执行）
 
-    with patch("ekb_api.routers.qa.generate_answer_stream", side_effect=_fail_stream):
+    with (
+        patch("ekb_api.routers.qa.get_runtime_chat_providers", return_value=[_fake_chat_provider()]),
+        patch("ekb_api.routers.qa.generate_answer_stream", side_effect=_fail_stream),
+    ):
         resp = client.post(
             f"{API}/qa/ask",
             headers=_headers(dev_token),
@@ -281,9 +284,7 @@ def test_qa_degrades_to_demo_when_llm_fails(client, dev_token):
         )
 
     assert resp.status_code == 200, resp.text
-    # 降级后不应出现 error 事件
-    assert "event: error" not in resp.text
-    # 应有 done 事件（降级成功完成）
+    assert "LLM_PROVIDER_ERROR" in resp.text
     assert "event: done" in resp.text
     get_circuit_breaker().reset()
 
@@ -304,6 +305,8 @@ def test_qa_streaming_completes_normally(client, dev_token):
     # 跳过 LLM 改写（避免真实外部调用），聚焦流式正常完成路径。
     with patch(
         "ekb_api.retrieval._safe_rewrite", side_effect=lambda q, route=None: [q]
+    ), patch(
+        "ekb_api.routers.qa.get_runtime_chat_providers", return_value=[_fake_chat_provider()]
     ), patch(
         "ekb_api.routers.qa.generate_answer_stream", side_effect=_ok_stream
     ):
@@ -352,6 +355,8 @@ def test_qa_stream_refusal_fallback_with_chunks(client, dev_token):
 
     with patch(
         "ekb_api.retrieval._safe_rewrite", side_effect=lambda q, route=None: [q]
+    ), patch(
+        "ekb_api.routers.qa.get_runtime_chat_providers", return_value=[_fake_chat_provider()]
     ), patch(
         "ekb_api.routers.qa.get_settings", return_value=fake_settings
     ), patch(
@@ -403,6 +408,8 @@ def test_qa_stream_refusal_still_refuses_when_no_chunks(client, dev_token):
     ), patch(
         "ekb_api.retrieval._safe_rewrite", side_effect=lambda q, route=None: [q]
     ), patch("ekb_api.routers.qa.get_settings", return_value=fake_settings), patch(
+        "ekb_api.routers.qa.get_runtime_chat_providers", return_value=[_fake_chat_provider()]
+    ), patch(
         "ekb_api.llm.get_settings", return_value=fake_settings
     ), patch(
         "ekb_api.routers.qa.generate_answer_stream", side_effect=_refusal_stream
@@ -484,11 +491,11 @@ def test_qa_timeout_emits_timeout_event(client, dev_token):
     assert "timeout" in resp.text.lower() or "UPSTREAM_TIMEOUT" in resp.text
 
 
-# ---- 5. embedding 全部 provider 失败降级到本地向量 ----
+# ---- 5. embedding 全部远程 provider 失败时 fail-closed ----
 
 
-def test_embedding_degrades_to_local_vectors_on_all_providers_fail():
-    """所有 embedding provider 失败时降级到本地 n-gram TF 向量。"""
+def test_embedding_fails_closed_when_all_remote_providers_fail():
+    """所有远程 embedding provider 失败时不得使用本地向量。"""
     fake_settings = _FakeSettings(embedding=[_fake_embedding_provider()])
     # monkeypatch _embed_with_provider 模拟全部失败 + 注入假 provider
     with (
@@ -498,13 +505,8 @@ def test_embedding_degrades_to_local_vectors_on_all_providers_fail():
         ),
         patch("ekb_api.embedding.get_settings", return_value=fake_settings),
     ):
-        vectors = embed_batch(["测试文本一", "测试文本二"])
-
-    # 降级后仍返回向量（本地 n-gram），维度与配置一致
-    assert len(vectors) == 2
-    for v in vectors:
-        assert len(v) > 0, "降级向量不应为空"
-        assert all(isinstance(x, float) for x in v)
+        with pytest.raises(EmbeddingError, match="所有远程 embedding provider 均失败"):
+            embed_batch(["测试文本一", "测试文本二"])
 
 
 # ---- 6. 权限变更后缓存失效（架构第 7 章：permission.changed） ----
@@ -524,4 +526,3 @@ def test_permission_change_does_not_leak_stale_data(client, dev_token):
     # 清除缓存模拟权限变更后的失效
     query_rewrite_cache.clear()
     assert query_rewrite_cache.get(("test-model", "hash123")) is None
-

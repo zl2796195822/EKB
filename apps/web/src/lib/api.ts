@@ -16,6 +16,8 @@ import type {
   AuditLogQuery,
   BackupResponse,
   KbMemberRecord,
+  FolderListResponse,
+  FolderRecord,
   OpsDashboardResponse,
   ReviewItemListResponse,
   ReviewItemQuery,
@@ -37,6 +39,8 @@ import type {
   TurnCancelResponse,
   TurnPhase,
   UploadAcceptedResponse,
+  UploadBatchProjection,
+  UploadBatchResponse,
   TenantCreate,
   TenantResponse,
   UserInvite,
@@ -77,6 +81,16 @@ import type {
   FavoritesListResponse,
   FavoriteCheckResponse,
   FavoriteToggleResponse,
+  CreateLLMModelPayload,
+  CreateLLMProviderPayload,
+  LLMModelItem,
+  LLMModelsResponse,
+  LLMProviderItem,
+  LLMProvidersResponse,
+  LLMSyncResponse,
+  PresetProvidersResponse,
+  UpdateLLMModelPayload,
+  UpdateLLMProviderPayload,
 } from '../types/api'
 import type {
   V3IdentityListUsersQuery,
@@ -140,7 +154,7 @@ function createIdempotencyKey(): string {
 function buildQuery<T extends object>(params: T): string {
   const search = new URLSearchParams()
   for (const [key, value] of Object.entries(params)) {
-    if (value === undefined || value === '') continue
+    if (value === undefined || value === null || value === '') continue
     search.set(key, String(value))
   }
   const serialized = search.toString()
@@ -176,6 +190,54 @@ function normalizeDiffChunk(chunk: NonNullable<DocumentDiff['added']>[number]) {
 }
 
 // ---- SSE v2 结构化事件 ----
+
+/** Phase 2：Composer 功能按钮对应的 ask options（前端内部类型，会在 askStream 中映射成后端 snake_case 字段） */
+export interface AskStreamComposerOptions {
+  webSearch?: boolean
+  /** 老布尔字段，保留兼容；实际由 thinkingLevel 主导 */
+  deepThinking?: boolean
+  /** 思考程度：off/standard/intensive；不传默认 standard */
+  thinkingLevel?: 'off' | 'standard' | 'intensive'
+  /** 模型 ID；格式建议如 provider/model，与后端 /qa/capabilities 返回的 models[].id 一致 */
+  model?: string
+  /** 添加文件（附件 doc_ids，合并到检索范围） */
+  attachmentDocIds?: string[]
+  /** 最大引用数；默认 5 */
+  maxCitations?: number
+  /** SSE 流版本，默认 2 */
+  streamVersion?: 1 | 2
+}
+
+/** 后端 GET /qa/capabilities 响应（snake_case，和 schemas.py 对齐） */
+export interface QaModelInfo {
+  id: string
+  name: string
+  provider: string
+  description?: string | null
+  supports_deep_thinking: boolean
+}
+export interface QaCapabilitiesInfo {
+  attachments_enabled: boolean
+  web_search_enabled: boolean
+  deep_thinking_enabled: boolean
+  model_choice_enabled: boolean
+}
+export interface QaCapabilitiesDefaults {
+  stream: boolean
+  max_citations: number
+  stream_version: number
+  web_search: boolean
+  deep_thinking: boolean
+  thinking_level: string
+  model: string | null
+  attachment_doc_ids: string[]
+}
+export interface QaCapabilitiesResponse {
+  capabilities: QaCapabilitiesInfo
+  models: QaModelInfo[]
+  defaults: QaCapabilitiesDefaults
+}
+
 export interface AskStreamHandlers {
   onRequest?: (payload: RequestPayload, raw: SseV2Envelope<RequestPayload>) => void
   onPhase?: (event: 'retrieval_started' | 'retrieval_completed' | 'generation_started', payload: PhasePayload) => void
@@ -451,6 +513,58 @@ export class ApiClient {
     })
   }
 
+  async createUploadBatch(
+    kbId: string,
+    payload: {
+      mode: 'FILE' | 'MULTI_FILE' | 'DIRECTORY'
+      client_request_id: string
+      items: Array<{
+        client_item_id: string
+        relative_path: string
+        byte_size: number
+        browser_mime?: string
+        sha256?: string
+      }>
+    },
+  ): Promise<UploadBatchResponse> {
+    return this.request<UploadBatchResponse>(`/kb/${encodeURIComponent(kbId)}/uploads/batches`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    })
+  }
+
+  async putUploadObject(uploadUrl: string, file: File): Promise<{ object_key: string; sha256: string; byte_size: number }> {
+    const target = uploadUrl.startsWith('http')
+      ? uploadUrl
+      : `${window.location.origin}${uploadUrl}`
+    // Local development URLs are protected API routes. Remote S3 URLs are
+    // already authenticated by their SigV4 query and must not receive the
+    // EKB Bearer header, which would invalidate some S3 CORS/signature setups.
+    const headers = uploadUrl.startsWith('/api/') && this.token
+      ? { Authorization: `Bearer ${this.token}` }
+      : undefined
+    const response = await fetch(target, {
+      method: 'PUT',
+      body: file,
+      ...(headers ? { headers } : {}),
+    })
+    return this.parseResponse(response)
+  }
+
+  async completeUploadItem(
+    itemId: string,
+    payload: { sha256: string; detected_mime?: string },
+  ): Promise<{ version_id: string; document_id: string; ingest_job_id: string; status: string }> {
+    return this.request(`/kb/uploads/items/${encodeURIComponent(itemId)}/complete`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    })
+  }
+
+  async getUploadBatch(batchId: string): Promise<UploadBatchProjection> {
+    return this.request<UploadBatchProjection>(`/kb/uploads/batches/${encodeURIComponent(batchId)}`)
+  }
+
   async createKnowledgeBase(
     name: string,
     description = '',
@@ -464,6 +578,37 @@ export class ApiClient {
 
   async deleteKnowledgeBase(kbId: string): Promise<void> {
     await this.request(`/kb/${encodeURIComponent(kbId)}`, { method: 'DELETE' })
+  }
+
+  async listFolders(kbId: string, parentId?: string | null): Promise<FolderListResponse> {
+    return this.request<FolderListResponse>(
+      `/knowledge-bases/${encodeURIComponent(kbId)}/folders${buildQuery({ parent_id: parentId })}`,
+    )
+  }
+
+  async createFolder(
+    kbId: string,
+    name: string,
+    parentId?: string | null,
+  ): Promise<FolderRecord> {
+    return this.request<FolderRecord>(`/knowledge-bases/${encodeURIComponent(kbId)}/folders`, {
+      method: 'POST',
+      body: JSON.stringify({ name, ...(parentId ? { parent_id: parentId } : {}) }),
+    })
+  }
+
+  async updateFolder(
+    folderId: string,
+    payload: { name?: string; parent_id?: string | null },
+  ): Promise<FolderRecord> {
+    return this.request<FolderRecord>(`/folders/${encodeURIComponent(folderId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    })
+  }
+
+  async deleteFolder(folderId: string): Promise<void> {
+    await this.request(`/folders/${encodeURIComponent(folderId)}`, { method: 'DELETE' })
   }
 
   async deleteDocument(kbId: string, docId: string): Promise<void> {
@@ -602,15 +747,35 @@ export class ApiClient {
     handlers: AskStreamHandlers,
     signal?: AbortSignal,
     conversationId?: string,
+    composerOptions?: AskStreamComposerOptions,
   ): Promise<AskStreamHandle> {
     const controller = signal ? undefined : new AbortController()
     const actualSignal = signal ?? controller!.signal
 
+    // 把前端 camelCase options 映射成后端 snake_case AskOptions
+    const mergedKbIds = new Set<string>([kbId])
+    for (const d of composerOptions?.attachmentDocIds ?? []) mergedKbIds.add(d)
+    const thinkingLevelRaw = (composerOptions?.thinkingLevel ?? 'standard').toLowerCase()
+    const thinkingLevel =
+      thinkingLevelRaw === 'off' || thinkingLevelRaw === 'standard' || thinkingLevelRaw === 'intensive'
+        ? thinkingLevelRaw
+        : 'standard'
+    const deepThinking =
+      thinkingLevel !== 'off' || Boolean(composerOptions?.deepThinking)
+    const options: Record<string, unknown> = {
+      stream: true,
+      max_citations: composerOptions?.maxCitations ?? 5,
+      stream_version: composerOptions?.streamVersion ?? 2,
+      web_search: Boolean(composerOptions?.webSearch),
+      deep_thinking: deepThinking,
+      thinking_level: thinkingLevel,
+      model: composerOptions?.model && composerOptions.model.trim() ? composerOptions.model.trim() : null,
+      attachment_doc_ids: Array.from(composerOptions?.attachmentDocIds ?? []),
+    }
     const body: Record<string, unknown> = {
       question,
-      kb_ids: [kbId],
-      // stream_version=2 启用 v2 Conversation Stream；服务端 feature flag 关闭时会自动回退 v1
-      options: { stream: true, max_citations: 5, stream_version: 2 },
+      kb_ids: Array.from(mergedKbIds),
+      options,
     }
     if (conversationId) body.conversation_id = conversationId
 
@@ -668,6 +833,11 @@ export class ApiClient {
       `/qa/turns/${encodeURIComponent(turnId)}/cancel`,
       { method: 'POST' },
     )
+  }
+
+  /** Phase 2：Composer 功能按钮能力 + 可选模型列表。 */
+  async fetchQaCapabilities(): Promise<QaCapabilitiesResponse> {
+    return this.request<QaCapabilitiesResponse>('/qa/capabilities', { method: 'GET' })
   }
 
   async sendFeedback(messageId: string, payload: FeedbackPayload): Promise<void> {
@@ -964,6 +1134,91 @@ export class ApiClient {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ resource_type: resourceType, resource_id: resourceId }),
+    })
+  }
+
+  // ============ LLM Providers / Models ============
+
+  async getLLMProviders(): Promise<LLMProvidersResponse> {
+    return this.request<LLMProvidersResponse>('/llm/providers')
+  }
+
+  async getLLMProviderCatalog(): Promise<PresetProvidersResponse> {
+    return this.request<PresetProvidersResponse>('/llm/providers/catalog')
+  }
+
+  async getLLMProvider(id: string): Promise<LLMProviderItem> {
+    return this.request<LLMProviderItem>(`/llm/providers/${encodeURIComponent(id)}`)
+  }
+
+  async createLLMProvider(payload: CreateLLMProviderPayload): Promise<LLMProviderItem> {
+    return this.request<LLMProviderItem>('/llm/providers', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+  }
+
+  async patchLLMProvider(
+    id: string,
+    payload: UpdateLLMProviderPayload,
+  ): Promise<LLMProviderItem> {
+    return this.request<LLMProviderItem>(`/llm/providers/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+  }
+
+  async deleteLLMProvider(id: string): Promise<{ status: string }> {
+    return this.request<{ status: string }>(`/llm/providers/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    })
+  }
+
+  async enableLLMProvider(id: string, enabled: boolean): Promise<LLMProviderItem> {
+    return this.request<LLMProviderItem>(`/llm/providers/${encodeURIComponent(id)}/enable`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ is_enabled: enabled }),
+    })
+  }
+
+  async getLLMModels(providerId: string): Promise<LLMModelsResponse> {
+    return this.request<LLMModelsResponse>(`/llm/providers/${encodeURIComponent(providerId)}/models`)
+  }
+
+  async createLLMModel(
+    providerId: string,
+    payload: CreateLLMModelPayload,
+  ): Promise<LLMModelItem> {
+    return this.request<LLMModelItem>(`/llm/providers/${encodeURIComponent(providerId)}/models`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+  }
+
+  async patchLLMModel(
+    id: string,
+    payload: UpdateLLMModelPayload,
+  ): Promise<LLMModelItem> {
+    return this.request<LLMModelItem>(`/llm/models/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+  }
+
+  async deleteLLMModel(id: string): Promise<{ status: string }> {
+    return this.request<{ status: string }>(`/llm/models/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    })
+  }
+
+  async syncLLMModels(providerId: string): Promise<LLMSyncResponse> {
+    return this.request<LLMSyncResponse>(`/llm/providers/${encodeURIComponent(providerId)}/models/sync`, {
+      method: 'POST',
     })
   }
 

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Annotated
+from typing_extensions import Annotated
 
 from fastapi import APIRouter, Depends
 

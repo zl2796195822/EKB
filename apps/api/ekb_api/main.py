@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import re
 import time
 import uuid
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -30,6 +32,7 @@ from ekb_api.routers import (
     jobs,
     kb,
     kb_upload,
+    knowledge_v3,
     llm,
     me,
     qa,
@@ -38,6 +41,40 @@ from ekb_api.routers import (
 )
 
 settings = get_settings()
+
+
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    scheduler_task: asyncio.Task | None = None
+    if settings.environment == "development" and os.getenv(
+        "EKB_LOCAL_SCHEDULER", "true"
+    ).lower() in {"1", "true", "yes", "on"}:
+
+        async def _run_local_scheduler() -> None:
+            from ekb_api.core.db import get_engine
+            from ekb_api.services.ingest_worker import run_ingest_tick
+            from ekb_api.services.scheduler import run_retention_tick
+
+            while True:
+                try:
+                    await asyncio.to_thread(run_retention_tick)
+                    await asyncio.to_thread(run_ingest_tick, get_engine())
+                except Exception as exc:  # noqa: BLE001 - keep API alive; next tick retries
+                    _log.warning("local.scheduler.tick_failed", error_type=type(exc).__name__)
+                await asyncio.sleep(60)
+
+        scheduler_task = asyncio.create_task(_run_local_scheduler())
+    try:
+        yield
+    finally:
+        if scheduler_task is not None:
+            scheduler_task.cancel()
+            try:
+                await scheduler_task
+            except asyncio.CancelledError:
+                pass
+
+
 configure_logging(settings.environment)
 _log = get_logger("ekb.main")
 init_db()
@@ -62,6 +99,7 @@ if settings.environment == "test":
 app = FastAPI(
     title="EKB API",
     version="0.1.0",
+    lifespan=_lifespan,
     docs_url=None if settings.is_production else "/docs",
     redoc_url=None if settings.is_production else "/redoc",
 )
@@ -74,7 +112,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.allowed_origins,
     allow_credentials=False,
-    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "Idempotency-Key", "X-Request-Id"],
     expose_headers=[
         "X-Request-Id",
@@ -145,6 +183,7 @@ app.include_router(apps.router, prefix="/api/v1")
 app.include_router(jobs.router, prefix="/api/v1")
 app.include_router(kb_upload.router, prefix="/api/v1")
 app.include_router(content_governance.router, prefix="/api/v1")
+app.include_router(knowledge_v3.router, prefix="/api/v1")
 app.include_router(llm.router, prefix="/api/v1")
 app.include_router(chat_graph.router, prefix="/api/v1")
 app.include_router(attachments.router, prefix="/api/v1")

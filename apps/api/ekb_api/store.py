@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 from dataclasses import dataclass
 from typing import Optional
 
@@ -19,11 +20,14 @@ from ekb_api.domain import (
     KbVisibility,
     KnowledgeBase,
     Message,
+    MessageVisibility,
+    QaTurn,
     ReviewItem,
     SourceType,
     SyncSource,
     Tenant,
     TenantRole,
+    TurnStatus,
     User,
     new_id,
     utc_now,
@@ -33,6 +37,32 @@ from ekb_api.domain import (
 # 但缺乏领域区分度（如 “问题”“配置”“策略”），计入会造成无依据问题误命中走拒答失败。
 # M1-04 接入向量检索后将由语义相似度门禁替代，停用表可下线。
 _STOPWORD_BIGRAMS = frozenset({"问题", "配置", "策略"})
+
+
+def _record_trash(
+    tenant_id: str,
+    resource_type: str,
+    resource_id: str,
+    **kwargs,
+) -> None:
+    """把软删除同步进回收站投影（v3_002_content）。
+
+    投影失败不回滚业务删除——源表才是真值——但必须留下结构化日志，
+    否则会重演 auth.py 那种“静默 pass 导致坏了半天没人发现”的问题。
+    """
+    from ekb_api.core.logging import get_logger  # noqa: PLC0415 - 避免顶层循环依赖
+    from ekb_api.services.v3_trash import record_deletion  # noqa: PLC0415
+
+    try:
+        record_deletion(tenant_id, resource_type, resource_id, **kwargs)
+    except Exception as exc:  # noqa: BLE001 - 投影失败不应阻断删除
+        get_logger("ekb.store").warning(
+            "trash.projection_failed",
+            tenant_id=tenant_id,
+            resource_type=resource_type,
+            resource_id=resource_id,
+            error=repr(exc),
+        )
 
 
 def _is_cjk(char: str) -> bool:
@@ -173,6 +203,9 @@ class SqlStore:
                 egress_policy=row.egress_policy,
                 quota_daily_qa=_as_int(row.quota_daily_qa, 0),
                 quota_storage_docs=_as_int(row.quota_storage_docs, 0),
+                quota_storage_bytes_per_file=_as_int(
+                    getattr(row, "quota_storage_bytes_per_file", 0), 0
+                ),
             )
 
     def create_user(self, tenant_id: str, email: str, name: str, password: str, role: str) -> User:
@@ -218,6 +251,9 @@ class SqlStore:
                     egress_policy=r.egress_policy,
                     quota_daily_qa=_as_int(r.quota_daily_qa, 0),
                     quota_storage_docs=_as_int(r.quota_storage_docs, 0),
+                    quota_storage_bytes_per_file=_as_int(
+                        getattr(r, "quota_storage_bytes_per_file", 0), 0
+                    ),
                 )
                 for r in session.query(models.Tenant).all()
             ]
@@ -336,6 +372,7 @@ class SqlStore:
             )
             if row is None:
                 return False
+            kb_name = row.name
             row.deleted_at = now
             row.updated_at = now
             session.query(models.Document).filter_by(kb_id=kb_id).update(
@@ -343,7 +380,18 @@ class SqlStore:
                 synchronize_session=False,
             )
             session.commit()
-            return True
+        # 回收站投影：知识库本身入站；级联删除的文档不单独入站，
+        # 恢复知识库时一并恢复，避免回收站被子文档刷屏。
+        _record_trash(
+            auth.tenant_id,
+            "KB",
+            kb_id,
+            title=kb_name,
+            deleted_by=auth.actor_id,
+            deleted_at=now,
+            metadata={"cascade": "documents"},
+        )
+        return True
 
     def get_knowledge_base(self, auth: AuthContext, kb_id: str) -> Optional[KnowledgeBase]:
         SessionLocal = get_session_local()
@@ -464,6 +512,7 @@ class SqlStore:
         egress_policy: str = "allow",
         quota_daily_qa: int = 0,
         quota_storage_docs: int = 0,
+        quota_storage_bytes_per_file: int = 0,
     ) -> tuple[Tenant, User]:
         """开通新租户并创建初始 OWNER 用户（口令 PBKDF2 哈希，明文不落库）。"""
         from ekb_api.core.security import hash_password
@@ -480,6 +529,7 @@ class SqlStore:
             egress_policy=egress_policy,
             quota_daily_qa=quota_daily_qa,
             quota_storage_docs=quota_storage_docs,
+            quota_storage_bytes_per_file=quota_storage_bytes_per_file,
             created_at=now,
             updated_at=now,
         )
@@ -507,6 +557,9 @@ class SqlStore:
                     egress_policy=tenant.egress_policy,
                     quota_daily_qa=_as_int(tenant.quota_daily_qa, 0),
                     quota_storage_docs=_as_int(tenant.quota_storage_docs, 0),
+                    quota_storage_bytes_per_file=_as_int(
+                        tenant.quota_storage_bytes_per_file, 0
+                    ),
                 ),
                 User(
                     id=user.id,
@@ -584,14 +637,26 @@ class SqlStore:
             )
             if row is None or row.status == DocumentStatus.DELETED.value:
                 return False
+            doc_title = row.title
             row.status = DocumentStatus.DELETED.value
             row.updated_at = now
             kb = session.query(models.KnowledgeBase).filter_by(id=kb_id).with_for_update().first()
+            kb_name = None if kb is None else kb.name
             if kb is not None and kb.document_count > 0:
                 kb.document_count -= 1
                 kb.updated_at = now
             session.commit()
-            return True
+        _record_trash(
+            auth.tenant_id,
+            "DOCUMENT",
+            doc_id,
+            title=doc_title,
+            deleted_by=auth.actor_id,
+            deleted_at=now,
+            parent_id=kb_id,
+            parent_title=kb_name,
+        )
+        return True
 
     def mark_document_failed(self, auth: AuthContext, kb_id: str, doc_id: str, reason: str) -> bool:
         """标记文档解析失败。供未来真实解析器在异常时调用，测试中也用于构造 FAILED 状态。"""
@@ -819,11 +884,22 @@ class SqlStore:
                     doc_row.chunk_count = len(chunks)
                     doc_row.updated_at = now
 
+                # The job object loaded before parsing belongs to the first
+                # session and is detached by the time this commit session is
+                # opened.  Updating that detached instance silently leaves the
+                # durable job in RUNNING, even though the document is READY.
+                # Re-read it in the write session so document/chunks/job reach
+                # one consistent terminal state.
+                current_job = None
                 if job is not None:
-                    job.status = "SUCCEEDED"
-                    job.error_code = None
-                    job.error_message = None
-                    job.updated_at = now
+                    current_job = session.query(models.IngestJob).filter_by(
+                        id=job.id, tenant_id=auth.tenant_id
+                    ).first()
+                if current_job is not None:
+                    current_job.status = "SUCCEEDED"
+                    current_job.error_code = None
+                    current_job.error_message = None
+                    current_job.updated_at = now
 
                 # M3-6 创建文档版本快照（chunk 摘要列表），供版本对比与差异 diff。
                 if doc_row is not None:
@@ -1181,10 +1257,19 @@ class SqlStore:
             )
             if not row or row.tenant_id != auth.tenant_id or row.user_id != auth.actor_id:
                 return False
+            conversation_title = row.title
             row.deleted_at = now
             row.updated_at = now
             session.commit()
-            return True
+        _record_trash(
+            auth.tenant_id,
+            "CONVERSATION",
+            conversation_id,
+            title=conversation_title,
+            deleted_by=auth.actor_id,
+            deleted_at=now,
+        )
+        return True
 
     def list_messages(self, auth: AuthContext, conversation_id: str) -> list[Message]:
         SessionLocal = get_session_local()
@@ -1199,18 +1284,33 @@ class SqlStore:
             rows = (
                 session.query(models.Message)
                 .filter_by(tenant_id=auth.tenant_id, conversation_id=conversation_id)
+                # SSE v2: 只渲染 visible 消息，被取消/超时替代的占位消息不出现在历史里
+                .filter(
+                    models.Message.visibility_state.is_(None)
+                    | (models.Message.visibility_state == MessageVisibility.VISIBLE.value)
+                )
                 .order_by(models.Message.created_at)
                 .all()
             )
             return [_to_message(r) for r in rows]
 
     def get_message(self, auth: AuthContext, message_id: str) -> Optional[Message]:
-        SessionLocal = get_session_local()
-        with SessionLocal() as session:
-            row = session.query(models.Message).filter_by(id=message_id).first()
-            if not row or row.tenant_id != auth.tenant_id:
-                return None
-            return _to_message(row)
+        from ekb_api.core.logging import get_logger  # noqa: PLC0415
+
+        try:
+            SessionLocal = get_session_local()
+            with SessionLocal() as session:
+                row = session.query(models.Message).filter_by(id=message_id).first()
+                if not row or row.tenant_id != auth.tenant_id:
+                    return None
+                return _to_message(row)
+        except Exception as exc:  # noqa: BLE001
+            get_logger("ekb.store").warning(
+                "store.get_message failed",
+                message_id=message_id,
+                error=repr(exc),
+            )
+            return None
 
     def save_message(
         self,
@@ -1218,6 +1318,9 @@ class SqlStore:
         conversation_id: str,
         role: str,
         content: str,
+        *,
+        turn_id: Optional[str] = None,
+        visibility_state: str = MessageVisibility.VISIBLE.value,
     ) -> Message:
         SessionLocal = get_session_local()
         with SessionLocal() as session:
@@ -1227,6 +1330,8 @@ class SqlStore:
                 conversation_id=conversation_id,
                 role=role,
                 content=content,
+                turn_id=turn_id,
+                visibility_state=visibility_state,
                 created_at=utc_now(),
             )
             session.add(message)
@@ -1234,25 +1339,276 @@ class SqlStore:
             session.refresh(message)
             return _to_message(message)
 
+    def update_message_visibility(
+        self,
+        auth: AuthContext,
+        message_id: str,
+        visibility_state: str,
+    ) -> bool:
+        """SSE v2：切换消息可见性（如把取消前的占位消息标记 hidden）。"""
+        from ekb_api.core.logging import get_logger  # noqa: PLC0415
+
+        try:
+            SessionLocal = get_session_local()
+            with SessionLocal() as session:
+                row = (
+                    session.query(models.Message)
+                    .filter_by(id=message_id, tenant_id=auth.tenant_id)
+                    .first()
+                )
+                if row is None:
+                    return False
+                row.visibility_state = visibility_state
+                session.commit()
+                return True
+        except Exception as exc:  # noqa: BLE001
+            get_logger("ekb.store").warning(
+                "store.update_message_visibility failed",
+                message_id=message_id,
+                error=repr(exc),
+            )
+            return False
+
+    # ---- SSE v2 Turn Registry ----
+
+    def create_turn(
+        self,
+        auth: AuthContext,
+        *,
+        turn_id: str,
+        request_id: str,
+        conversation_id: Optional[str],
+        assistant_message_id: Optional[str],
+        stream_version: int = 2,
+    ) -> Optional[QaTurn]:
+        """创建一个 QA Turn（流式回合），返回领域对象。失败返回 None，不阻断主流程。"""
+        from ekb_api.core.logging import get_logger  # noqa: PLC0415
+
+        try:
+            now = utc_now()
+            SessionLocal = get_session_local()
+            with SessionLocal() as session:
+                row = models.QaTurn(
+                    turn_id=turn_id,
+                    request_id=request_id,
+                    tenant_id=auth.tenant_id,
+                    actor_id=auth.actor_id,
+                    conversation_id=conversation_id,
+                    assistant_message_id=assistant_message_id,
+                    stream_version=stream_version,
+                    status=TurnStatus.RUNNING.value,
+                    last_seq=0,
+                    first_visible_at=None,
+                    cancel_requested_at=None,
+                    finish_reason=None,
+                    created_at=now,
+                    completed_at=None,
+                )
+                session.add(row)
+                session.commit()
+                session.refresh(row)
+                return _to_qa_turn(row)
+        except Exception as exc:  # noqa: BLE001
+            get_logger("ekb.store").warning(
+                "store.create_turn failed",
+                turn_id=turn_id,
+                request_id=request_id,
+                error=repr(exc),
+            )
+            return None
+
+    def get_turn(self, auth: AuthContext, turn_id: str) -> Optional[QaTurn]:
+        """按 turn_id 查询 Turn；跨租户不可见。"""
+        SessionLocal = get_session_local()
+        with SessionLocal() as session:
+            row = (
+                session.query(models.QaTurn)
+                .filter_by(turn_id=turn_id, tenant_id=auth.tenant_id)
+                .first()
+            )
+            return _to_qa_turn(row) if row else None
+
+    def request_cancel_turn(self, auth: AuthContext, turn_id: str) -> tuple[bool, str]:
+        """显式取消 Turn。
+
+        返回 (accepted: bool, status: str)：
+          - accepted=True, status="cancelled"：running 状态，标记取消
+          - accepted=False, status="already_completed"：已结束，取消不生效
+          - accepted=False, status="not_found"：不存在或无权限
+        """
+        now = utc_now()
+        SessionLocal = get_session_local()
+        with SessionLocal() as session:
+            row = (
+                session.query(models.QaTurn)
+                .filter_by(turn_id=turn_id, tenant_id=auth.tenant_id)
+                .first()
+            )
+            if row is None:
+                return False, "not_found"
+            if row.status != TurnStatus.RUNNING.value:
+                return False, "already_completed"
+            row.cancel_requested_at = now
+            # status 仍保持 running；流式循环检查 cancel_requested_at 后真正流转到 cancelled
+            session.commit()
+            return True, "cancelled"
+
+    def is_turn_cancelled(self, turn_id: str) -> bool:
+        """流式循环内轻量检查：某 turn 是否被请求取消（无 auth，因为流式上下文已持有权限）。
+
+        注意：这是流式进程的协作取消检查点，不做权限判定；权限在 request_cancel_turn 处已校验。
+        """
+        from ekb_api.core.logging import get_logger  # noqa: PLC0415
+
+        try:
+            SessionLocal = get_session_local()
+            with SessionLocal() as session:
+                row = session.query(models.QaTurn).filter_by(turn_id=turn_id).first()
+                if row is None:
+                    return True  # Turn 不存在视为被取消，避免无限写流
+                return row.cancel_requested_at is not None
+        except Exception as exc:  # noqa: BLE001
+            get_logger("ekb.store").warning(
+                "store.is_turn_cancelled failed",
+                turn_id=turn_id,
+                error=repr(exc),
+            )
+            return False  # 异常时默认不取消，避免误杀流式响应
+
+    def complete_turn(
+        self,
+        turn_id: str,
+        *,
+        status: str,
+        finish_reason: str,
+        last_seq: int,
+    ) -> None:
+        """回合结束：更新 status / finish_reason / last_seq / completed_at。"""
+        from ekb_api.core.logging import get_logger  # noqa: PLC0415
+
+        try:
+            now = utc_now()
+            SessionLocal = get_session_local()
+            with SessionLocal() as session:
+                row = session.query(models.QaTurn).filter_by(turn_id=turn_id).first()
+                if row is None:
+                    return
+                row.status = status
+                row.finish_reason = finish_reason
+                row.last_seq = last_seq
+                row.completed_at = now
+                session.commit()
+        except Exception as exc:  # noqa: BLE001
+            get_logger("ekb.store").warning(
+                "store.complete_turn failed",
+                turn_id=turn_id,
+                error=repr(exc),
+            )
+
+    def increment_turn_seq(self, turn_id: str, *, to_seq: int) -> None:
+        """流式发送时更新 last_seq（非严格加一，以调用方传入的 seq 为准）。"""
+        from ekb_api.core.logging import get_logger  # noqa: PLC0415
+
+        try:
+            SessionLocal = get_session_local()
+            with SessionLocal() as session:
+                row = session.query(models.QaTurn).filter_by(turn_id=turn_id).first()
+                if row is None:
+                    return
+                if to_seq > row.last_seq:
+                    row.last_seq = to_seq
+                session.commit()
+        except Exception as exc:  # noqa: BLE001
+            get_logger("ekb.store").warning(
+                "store.increment_turn_seq failed",
+                turn_id=turn_id,
+                error=repr(exc),
+            )
+
+    def mark_turn_first_visible(self, turn_id: str) -> None:
+        """首次可见 token 发出时落库，用于 TTFB 可观测性。"""
+        from ekb_api.core.logging import get_logger  # noqa: PLC0415
+
+        try:
+            now = utc_now()
+            SessionLocal = get_session_local()
+            with SessionLocal() as session:
+                row = session.query(models.QaTurn).filter_by(turn_id=turn_id).first()
+                if row is None:
+                    return
+                if row.first_visible_at is None:
+                    row.first_visible_at = now
+                session.commit()
+        except Exception as exc:  # noqa: BLE001
+            get_logger("ekb.store").warning(
+                "store.mark_turn_first_visible failed",
+                turn_id=turn_id,
+                error=repr(exc),
+            )
+
     def update_message_content(
         self,
         auth: AuthContext,
         message_id: str,
         content: str,
     ) -> Optional[Message]:
-        SessionLocal = get_session_local()
-        with SessionLocal() as session:
-            row = (
-                session.query(models.Message)
-                .filter_by(id=message_id, tenant_id=auth.tenant_id)
-                .first()
+        from ekb_api.core.logging import get_logger  # noqa: PLC0415
+
+        try:
+            SessionLocal = get_session_local()
+            with SessionLocal() as session:
+                row = (
+                    session.query(models.Message)
+                    .filter_by(id=message_id, tenant_id=auth.tenant_id)
+                    .first()
+                )
+                if row is None:
+                    return None
+                row.content = content
+                session.commit()
+                session.refresh(row)
+                return _to_message(row)
+        except Exception as exc:  # noqa: BLE001
+            get_logger("ekb.store").warning(
+                "store.update_message_content failed",
+                message_id=message_id,
+                error=repr(exc),
             )
-            if row is None:
-                return None
-            row.content = content
-            session.commit()
-            session.refresh(row)
-            return _to_message(row)
+            return None
+
+    def save_message_citations(
+        self,
+        auth: AuthContext,
+        message_id: str,
+        citations: list[dict],
+    ) -> Optional["Message"]:
+        """PH6 FR-053：把本次回答的引用（含生成时文档版本/时间戳）持久化到消息元数据。
+
+        写入消息的 ``citations`` 列，便于刷新/分支/版本回溯时复核引用指向的版本。
+        失败仅告警不抛，引用持久化不是问答主链路的关键路径。
+        """
+        from ekb_api.core.logging import get_logger  # noqa: PLC0415
+        try:
+            SessionLocal = get_session_local()
+            with SessionLocal() as session:
+                row = (
+                    session.query(models.Message)
+                    .filter_by(id=message_id, tenant_id=auth.tenant_id)
+                    .first()
+                )
+                if row is None:
+                    return None
+                row.citations = citations
+                session.commit()
+                session.refresh(row)
+                return _to_message(row)
+        except Exception as exc:  # noqa: BLE001
+            get_logger("ekb.store").warning(
+                "store.save_message_citations failed",
+                message_id=message_id,
+                error=repr(exc),
+            )
+            return None
 
     # ---- 反馈 ----
 
@@ -1316,7 +1672,29 @@ class SqlStore:
             session.add(row)
             session.commit()
             session.refresh(row)
-            return _to_audit_log(row)
+            written = _to_audit_log(row)
+
+        # The analytics projection is defined as a projection of audit_logs, so
+        # it is fed from the same call site the backfill read from — that keeps
+        # historical and live rows classified by identical rules.  Best effort:
+        # analytics must never be able to fail an audited write.
+        if result == "SUCCESS" and tenant_id and target_id:
+            try:
+                from ekb_api.services.v3_analytics import record_access
+
+                record_access(
+                    tenant_id,
+                    target_type,
+                    target_id,
+                    action=action,
+                    actor_id=actor_id,
+                    trace_id=trace_id,
+                    occurred_at=written.created_at,
+                    source_ref=written.id,
+                )
+            except Exception:  # pragma: no cover - projection is non-critical
+                pass
+        return written
 
     def list_audit_logs(
         self,
@@ -1393,7 +1771,16 @@ class SqlStore:
         仅统计当前租户数据。
         """
         SessionLocal = get_session_local()
-        utc_now()[:10]
+        # 时间窗口下界：created_at 存为 ISO-8601 Z 字符串，字典序与时间序一致，
+        # 因此可以直接用字符串比较而不必解析每一行。
+        from datetime import datetime as _datetime, timedelta as _timedelta, timezone as _timezone
+
+        since = (
+            (_datetime.now(_timezone.utc) - _timedelta(days=days))
+            .replace(microsecond=0)
+            .isoformat()
+            .replace("+00:00", "Z")
+        )
         with SessionLocal() as session:
             # 问答量按 finish_reason 分组
             qa_logs = (
@@ -1401,6 +1788,7 @@ class SqlStore:
                 .filter(
                     models.AuditLog.tenant_id == auth.tenant_id,
                     models.AuditLog.action == "qa.ask",
+                    models.AuditLog.created_at >= since,
                 )
                 .all()
             )
@@ -1418,10 +1806,13 @@ class SqlStore:
                 1 for log in qa_logs if log.metadata_redacted.get("finish_reason") == "error"
             )
 
-            # 满意度：UP vs DOWN
+            # 满意度：UP vs DOWN — 按 since 时间窗口过滤
             feedbacks = (
                 session.query(models.Feedback)
-                .filter(models.Feedback.tenant_id == auth.tenant_id)
+                .filter(
+                    models.Feedback.tenant_id == auth.tenant_id,
+                    models.Feedback.created_at >= since,
+                )
                 .all()
             )
             up_count = sum(1 for f in feedbacks if f.rating == "UP")
@@ -1430,12 +1821,13 @@ class SqlStore:
                 up_count / (up_count + down_count) if (up_count + down_count) > 0 else None
             )
 
-            # 覆盖盲区：PENDING 审核项数
+            # 覆盖盲区：PENDING 审核项数（since 内新建的待审项）
             pending_reviews = (
                 session.query(models.ReviewItem)
                 .filter(
                     models.ReviewItem.tenant_id == auth.tenant_id,
                     models.ReviewItem.status == "PENDING",
+                    models.ReviewItem.created_at >= since,
                 )
                 .count()
             )
@@ -1678,6 +2070,26 @@ class SqlStore:
 
     # ---- M3-5 存储配额 ----
 
+    def get_effective_max_upload_bytes(self, tenant_id: str) -> int:
+        """获取租户生效的单文件上传大小上限（字节）。
+
+        优先级：租户级 quota_storage_bytes_per_file > 全局 settings.max_upload_bytes
+        全局 0 表示不限制（返回 0）。
+        """
+        from ekb_api.core.config import get_settings
+
+        SessionLocal = get_session_local()
+        with SessionLocal() as session:
+            tenant = session.query(models.Tenant).filter_by(id=tenant_id).first()
+            if tenant is not None:
+                per_file = _as_int(
+                    getattr(tenant, "quota_storage_bytes_per_file", 0), 0
+                )
+                if per_file > 0:
+                    return per_file
+        settings = get_settings()
+        return settings.max_upload_bytes
+
     def check_storage_quota(self, tenant_id: str) -> bool:
         """M3-5 检查租户文档数是否在配额内。返回 True 表示可以新增文档。"""
         SessionLocal = get_session_local()
@@ -1906,6 +2318,12 @@ def _to_conversation(row: models.Conversation) -> Conversation:
 
 
 def _to_message(row: models.Message) -> Message:
+    raw_citations = getattr(row, "citations", None)
+    if isinstance(raw_citations, str):
+        try:
+            raw_citations = json.loads(raw_citations)
+        except Exception:  # noqa: BLE001
+            raw_citations = None
     return Message(
         id=row.id,
         tenant_id=row.tenant_id,
@@ -1913,6 +2331,28 @@ def _to_message(row: models.Message) -> Message:
         role=row.role,
         content=row.content,
         created_at=row.created_at,
+        turn_id=getattr(row, "turn_id", None),
+        visibility_state=getattr(row, "visibility_state", "visible"),
+        citations=raw_citations,
+    )
+
+
+def _to_qa_turn(row: models.QaTurn) -> QaTurn:
+    return QaTurn(
+        turn_id=row.turn_id,
+        request_id=row.request_id,
+        tenant_id=row.tenant_id,
+        actor_id=row.actor_id,
+        conversation_id=row.conversation_id,
+        assistant_message_id=row.assistant_message_id,
+        status=row.status,
+        stream_version=row.stream_version,
+        last_seq=row.last_seq,
+        first_visible_at=row.first_visible_at,
+        cancel_requested_at=row.cancel_requested_at,
+        finish_reason=row.finish_reason,
+        created_at=row.created_at,
+        completed_at=row.completed_at,
     )
 
 

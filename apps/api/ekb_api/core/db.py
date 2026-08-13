@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import logging
 import os
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 # 默认使用本地 SQLite 文件，零外部依赖即可跑通 M1 tracer；
@@ -13,18 +14,87 @@ DATABASE_URL = os.getenv("EKB_DATABASE_URL", DEFAULT_DATABASE_URL)
 _engine = None
 _SessionLocal = None
 Base = declarative_base()
+_log = logging.getLogger(__name__)
+_PGVECTOR_STATE: dict[str, object] = {
+    "required": False,
+    "available": None,
+    "status": "not_checked",
+}
+_LEGACY_METADATA_ALLOWLIST = frozenset(
+    {
+        "audit_logs",
+        "chunks",
+        "conversations",
+        "document_versions",
+        "documents",
+        "feedback",
+        "ingest_jobs",
+        "kb_memberships",
+        "knowledge_bases",
+        "llm_models",
+        "llm_providers",
+        "messages",
+        "qa_turns",
+        "review_items",
+        "sync_sources",
+        "tenant_daily_usage",
+        "tenants",
+        "users",
+    }
+)
 
 
-def _build_engine():
+def _v3_owned_tables() -> tuple[str, ...]:
+    """Union of tables owned by the v3 migration chain (never ORM-managed)."""
+    from ekb_api.migrations.v3_001_identity import V3_001_OWNED_TABLES
+    from ekb_api.migrations.v3_002_content import V3_002_OWNED_TABLES
+
+    return tuple(V3_001_OWNED_TABLES) + tuple(V3_002_OWNED_TABLES)
+
+
+def _assert_legacy_metadata_boundary() -> None:
+    """Fail closed on any table outside the explicit legacy ORM allowlist."""
+    registered = set(Base.metadata.tables)
+    unknown = registered - _LEGACY_METADATA_ALLOWLIST
+    if unknown:
+        raise RuntimeError(
+            "Base.metadata contains tables outside the legacy allowlist: "
+            + ",".join(sorted(unknown))
+        )
+    owned = registered.intersection(_v3_owned_tables())
+    if owned:
+        raise RuntimeError(
+            "v3-owned tables must not be registered in Base.metadata: "
+            + ",".join(sorted(owned))
+        )
+
+
+def _create_legacy_tables_only(engine) -> None:
+    """Create ORM-owned legacy tables and assert no v3 table was created by it."""
+    from sqlalchemy import inspect
+
+    _assert_legacy_metadata_boundary()
+    before = set(inspect(engine).get_table_names())
+    Base.metadata.create_all(engine)
+    created = set(inspect(engine).get_table_names()) - before
+    overlap = created.intersection(_v3_owned_tables())
+    if overlap:
+        raise RuntimeError(
+            "legacy Base.metadata.create_all created v3-owned tables: " + ",".join(sorted(overlap))
+        )
+
+
+def build_engine(database_url: str | None = None):
     """构建数据库引擎。
 
     SQLite：单文件模式，check_same_thread=False 允许跨线程复用连接。
     PostgreSQL：连接池配置（pool_size=10, max_overflow=20），启用 pool_pre_ping 保活。
     """
+    database_url = database_url or DATABASE_URL
     connect_args: dict = {}
     kwargs: dict = {"future": True, "pool_pre_ping": True}
 
-    if DATABASE_URL.startswith("sqlite"):
+    if database_url.startswith("sqlite"):
         connect_args = {"check_same_thread": False}
     else:
         # PostgreSQL 连接池：10 个常驻连接 + 20 个溢出，适合单副本中等负载。
@@ -34,7 +104,22 @@ def _build_engine():
         kwargs["pool_timeout"] = int(os.getenv("EKB_DB_POOL_TIMEOUT", "30"))
         kwargs["pool_recycle"] = int(os.getenv("EKB_DB_POOL_RECYCLE", "1800"))
 
-    return create_engine(DATABASE_URL, connect_args=connect_args, **kwargs)
+    engine = create_engine(database_url, connect_args=connect_args, **kwargs)
+    if database_url.startswith("sqlite"):
+
+        @event.listens_for(engine, "connect")
+        def _enable_sqlite_foreign_keys(dbapi_connection, _connection_record) -> None:
+            cursor = dbapi_connection.cursor()
+            try:
+                cursor.execute("PRAGMA foreign_keys=ON")
+            finally:
+                cursor.close()
+
+    return engine
+
+
+def _build_engine():
+    return build_engine(DATABASE_URL)
 
 
 def get_engine():
@@ -51,6 +136,32 @@ def get_session_local() -> sessionmaker:
     return _SessionLocal
 
 
+def get_pgvector_health() -> dict[str, object]:
+    """Return a safe, process-local pgvector initialization status."""
+    return dict(_PGVECTOR_STATE)
+
+
+def _set_pgvector_health(*, required: bool, available: bool | None, status: str) -> None:
+    _PGVECTOR_STATE.update(
+        {"required": required, "available": available, "status": status}
+    )
+
+
+def prepare_legacy_schema(engine, *, seed: bool) -> None:
+    """Create legacy tables and additive columns, optionally seed application data."""
+    from ekb_api import models  # noqa: F401
+
+    _create_legacy_tables_only(engine)
+    _migrate_user_columns(engine)
+    _migrate_tenant_columns(engine)
+    _migrate_feedback_columns(engine)
+    _migrate_message_turn_columns(engine)
+    _migrate_message_citations_columns(engine)
+    _migrate_qa_turns_columns(engine)
+    if seed:
+        _seed_if_empty(engine)
+
+
 def init_db() -> None:
     """创建表结构（幂等）并在空库时种子化 dev 租户/用户/示例知识库。"""
     # 延迟导入，避免 models -> db 的顶层循环依赖。
@@ -63,29 +174,118 @@ def init_db() -> None:
     # 当前实现仍在 Python 层做余弦相似度，pgvector 为后续优化预留。
     if not DATABASE_URL.startswith("sqlite"):
         _init_pgvector(engine)
+    else:
+        _set_pgvector_health(required=False, available=None, status="not_applicable")
 
-    Base.metadata.create_all(engine)
-    _migrate_user_columns(engine)
-    _migrate_tenant_columns(engine)
-    _migrate_feedback_columns(engine)
-    _seed_if_empty()
+    prepare_legacy_schema(engine, seed=True)
+
+    # Seeded fresh rows must exist before deterministic v3 membership/profile backfill.
+    # Ordered, checksum-locked chain — keep in sync with migrations/v3_fullstack.CHAIN.
+    from ekb_api.migrations.v3_001_identity import apply_v3_001
+    from ekb_api.migrations.v3_002_content import apply_v3_002
+    from ekb_api.migrations.v3_003_analytics import apply_v3_003
+    from ekb_api.migrations.v3_004_apps import apply_v3_004
+    from ekb_api.migrations.v3_005_analytics_compat import apply_v3_005
+    from ekb_api.migrations.v3_005_llm import apply_v3_005 as apply_v3_005_llm
+    from ekb_api.migrations.v3_006_apps_compat import apply_v3_006
+    from ekb_api.migrations.v3_007_content_governance_compat import apply_v3_007
+    from ekb_api.migrations.v3_008_content_hierarchy import apply_v3_008
+
+    apply_v3_001(engine)
+    apply_v3_002(engine)
+    apply_v3_003(engine)
+    apply_v3_004(engine)
+    apply_v3_005(engine)
+    apply_v3_006(engine)
+    apply_v3_007(engine)
+    apply_v3_005_llm(engine)
+    apply_v3_008(engine)
+
+    # Local/test startup owns only the additive provider-security boundary.
+    # The production entrypoint runs the complete v4 chain explicitly; it must
+    # not silently perform a PostgreSQL cutover or storage migration here.
+    from ekb_api.core.config import get_settings
+
+    if not get_settings().is_production:
+        from ekb_api.migrations.v4_001_migration_provenance import apply_v4_001
+        from ekb_api.migrations.v4_002_runtime_jobs import apply_v4_002
+        from ekb_api.migrations.v4_003_provider_security import apply_v4_003
+        from ekb_api.migrations.v4_004_postgres_cutover import apply_v4_004
+        from ekb_api.migrations.v4_005_retention_governance import apply_v4_005
+        from ekb_api.migrations.v4_006_storage_ingestion import apply_v4_006
+        from ekb_api.migrations.v4_007_chat_graph import apply_v4_007
+        from ekb_api.migrations.v4_008_attachments import apply_v4_008
+
+        apply_v4_001(engine)
+        apply_v4_002(engine)
+        apply_v4_003(engine)
+        # v4_004 is a local cutover ledger only; no DSN switch or data move.
+        apply_v4_004(engine)
+        apply_v4_005(engine)
+        # Local development owns the complete additive business chain so the
+        # browser can exercise real upload, ingestion, chat and attachment
+        # tables. Production still uses the explicit migration runner.
+        apply_v4_006(engine)
+        apply_v4_007(engine)
+        apply_v4_008(engine)
 
 
-def _init_pgvector(engine) -> None:
-    """在 PostgreSQL 中创建 pgvector 扩展（幂等，需要 superuser 或 rds_superuser）。
+def _init_pgvector(engine, *, settings=None) -> None:
+    """在 PostgreSQL 中创建并验证 pgvector 扩展。
 
     pgvector 扩展允许使用 VECTOR 类型和 ivfflat/hnsw 索引。
     当前 Chunk.embedding 使用 JSON/JSONB 列，pgvector 为将来切换原生向量列预留。
-    若数据库账号无权限创建扩展，此步骤会静默跳过（不阻断启动）。
+    生产环境或显式 required 配置下失败必须阻断启动；开发/测试环境仅在
+    非 required 时允许降级，但必须留下可观测状态。
     """
     from sqlalchemy import text  # noqa: PLC0415
+
+    if settings is None:
+        from ekb_api.core.config import get_settings
+
+        settings = get_settings()
+    environment = str(getattr(settings, "environment", os.getenv("EKB_ENV", "development")))
+    is_production = bool(getattr(settings, "is_production", environment.lower() == "production"))
+    required = is_production or os.getenv("EKB_PGVECTOR_REQUIRED", "false").lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    _set_pgvector_health(required=required, available=None, status="checking")
 
     try:
         with engine.begin() as conn:
             conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-    except Exception:  # noqa: BLE001
-        # 无权限或扩展未安装时静默跳过；不影响当前 JSON 向量实现。
-        pass
+            installed = conn.execute(
+                text(
+                    "SELECT EXISTS ("
+                    "SELECT 1 FROM pg_extension WHERE extname = 'vector'"
+                    ")"
+                )
+            ).scalar_one()
+            if not installed:
+                raise RuntimeError("pgvector extension is not installed")
+    except Exception as exc:  # noqa: BLE001
+        if required:
+            _set_pgvector_health(required=True, available=False, status="required_failure")
+            _log.error(
+                "db.pgvector.required_initialization_failed",
+                extra={"environment": environment, "required": True},
+            )
+            raise RuntimeError("required pgvector initialization failed") from exc
+        _set_pgvector_health(required=False, available=False, status="optional_unavailable")
+        _log.warning(
+            "db.pgvector.optional_initialization_skipped",
+            extra={"environment": environment, "required": False},
+        )
+        return
+
+    _set_pgvector_health(required=required, available=True, status="available")
+    _log.info(
+        "db.pgvector.initialized",
+        extra={"environment": environment, "required": required},
+    )
 
 
 def _migrate_user_columns(engine) -> None:
@@ -121,6 +321,7 @@ def _migrate_tenant_columns(engine) -> None:
         "egress_policy": "VARCHAR(32) DEFAULT 'allow'",
         "quota_daily_qa": "INTEGER DEFAULT 0",
         "quota_storage_docs": "INTEGER DEFAULT 0",
+        "quota_storage_bytes_per_file": "INTEGER DEFAULT 0",
     }
     with engine.begin() as conn:
         for name, ddl in needed.items():
@@ -146,7 +347,80 @@ def _migrate_feedback_columns(engine) -> None:
                 conn.execute(text(f"ALTER TABLE feedback ADD COLUMN {name} {ddl}"))
 
 
-def _seed_if_empty() -> None:
+def _migrate_message_turn_columns(engine) -> None:
+    """SSE v2 向后兼容：为已存在的 messages 表补加 turn_id / visibility_state 列。"""
+    from sqlalchemy import inspect, text
+
+    insp = inspect(engine)
+    if "messages" not in insp.get_table_names():
+        return
+    existing = {c["name"] for c in insp.get_columns("messages")}
+    needed = {
+        "turn_id": "VARCHAR(64)",
+        "visibility_state": "VARCHAR(32) DEFAULT 'visible'",
+    }
+    with engine.begin() as conn:
+        for name, ddl in needed.items():
+            if name not in existing:
+                conn.execute(text(f"ALTER TABLE messages ADD COLUMN {name} {ddl}"))
+        # 为旧库补索引
+        if "turn_id" not in existing:
+            try:
+                conn.execute(
+                    text("CREATE INDEX IF NOT EXISTS ix_messages_turn_id ON messages(turn_id)")
+                )
+            except Exception:  # noqa: BLE001
+                pass  # SQLite 旧版本不支持 IF NOT EXISTS，忽略即可
+        if "visibility_state" not in existing:
+            try:
+                conn.execute(
+                    text(
+                        "CREATE INDEX IF NOT EXISTS ix_messages_visibility_state "
+                        "ON messages(visibility_state)"
+                    )
+                )
+            except Exception:  # noqa: BLE001
+                pass
+
+
+def _migrate_message_citations_columns(engine) -> None:
+    """PH6 compatibility: add persisted citation payloads to existing messages."""
+    from sqlalchemy import inspect, text
+
+    insp = inspect(engine)
+    if "messages" not in insp.get_table_names():
+        return
+    existing = {column["name"] for column in insp.get_columns("messages")}
+    if "citations" not in existing:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE messages ADD COLUMN citations JSON"))
+
+
+def _migrate_qa_turns_columns(engine) -> None:
+    """SSE v2 兼容：qa_turns 表未来扩展时的列补齐钩子；当前为空安全实现。
+
+    新部署由 Base.metadata.create_all 直接建表，无需迁移；此函数为后续字段增量提供入口。
+    """
+    from sqlalchemy import inspect, text
+
+    insp = inspect(engine)
+    if "qa_turns" not in insp.get_table_names():
+        return
+    existing = {c["name"] for c in insp.get_columns("qa_turns")}
+    # 预留：未来字段可按如下模式补加：
+    # needed = {
+    #     "new_column": "VARCHAR(64) DEFAULT ''",
+    # }
+    needed: dict[str, str] = {}
+    if not needed:
+        return
+    with engine.begin() as conn:
+        for name, ddl in needed.items():
+            if name not in existing:
+                conn.execute(text(f"ALTER TABLE qa_turns ADD COLUMN {name} {ddl}"))
+
+
+def _seed_if_empty(engine=None) -> None:
     from ekb_api import models
     from ekb_api.core.config import get_settings
     from ekb_api.core.security import hash_password
@@ -160,7 +434,10 @@ def _seed_if_empty() -> None:
         utc_now,
     )
 
-    SessionLocal = get_session_local()
+    if engine is None:
+        SessionLocal = get_session_local()
+    else:
+        SessionLocal = sessionmaker(bind=engine, expire_on_commit=False, autoflush=False)
     settings = get_settings()
     with SessionLocal() as session:
         if session.query(models.Tenant).first():

@@ -379,3 +379,11 @@ Headers: `Authorization: Bearer <access_token>`
 ---
 
 _本契约在 M1 开发中作为后端、前端、测试和审计的共同边界。若实现需要变更路径或字段，先更新本文和追踪矩阵，再开发。_
+
+## V3 companion authority（追加，2026-08-09）
+
+v3 companion status: `已批准`; Sol final gate passed on 2026-08-10. Implementation, browser and migration evidence remain pending; user review of the final wording is not claimed.
+
+十页真实前后端闭环 v3 的完整 API authority 为 [`v3 02_spec.md`](./pmos/features/2026-08-09_ekb-fullstack-v3/02_spec.md)，根索引为 [`docs/README.md`](./README.md)，需求/计划/验证入口见 [`v3 README`](./pmos/features/2026-08-09_ekb-fullstack-v3/README.md)。本文历史契约保持不变，只在本节声明兼容范围：v3 新增 `/api/v1` tenant-scoped identity/content/assistant/analytics/apps paths 和 additive optional fields；现有 `/me`、JSON body `/auth/refresh`、`PATCH /conversations/{id}`、KB/document/upload、`POST /admin/users`、ops dashboard 和 sync paths 不被随意破坏。
+
+新 list API 使用 `{items,next_cursor,page_size}` 并继承 `Content-Type: application/json` 与 `X-Request-Id`；旧 list response 保持原 required shape。v3 保留现有 FastAPI + AuthContext/audit/SSE v2/app-v2 adapter 边界，SSE wire contract、actor+tenant scope、API key prefix uniqueness、auth sessions、web-search/app credential redaction 以及 compatibility tests 以 v3 spec 为准。与 v2 frontend-only/禁止后端修改冲突的历史边界由 v3 successor 替代；其余历史内容和执行记录不在本文重写。

@@ -20,6 +20,7 @@ from ekb_api.migrations import (
     v3_005_llm,
     v3_006_apps_compat,
     v3_007_content_governance_compat,
+    v3_008_content_hierarchy,
     v4_001_migration_provenance,
     v4_002_runtime_jobs,
     v4_003_provider_security,
@@ -212,6 +213,13 @@ CHAIN = (
         apply_name="apply_v3_005",
         verify_name="verify_v3_005",
         rollback_name="rollback_v3_005_dry_run",
+    ),
+    _step(
+        v3_008_content_hierarchy.VERSION,
+        v3_008_content_hierarchy,
+        apply_name="apply_v3_008",
+        verify_name="verify_v3_008",
+        rollback_name="rollback_v3_008_dry_run",
     ),
     _step(
         v4_001_migration_provenance.VERSION,

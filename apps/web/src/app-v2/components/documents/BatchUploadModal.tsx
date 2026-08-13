@@ -17,8 +17,11 @@ import type {
   BulkFileItem,
   BulkFileProgress,
   BulkUploadProgress,
+  BulkUploadResult,
   V2Services,
+  KnowledgeBaseView,
 } from '../../types'
+import { toAdapterError } from '../../adapters'
 
 /** 文件格式白名单（与后端 ALLOWED_EXTENSIONS 完全一致） */
 const ALLOWED_EXTENSIONS = new Set([
@@ -202,13 +205,50 @@ export function BatchUploadModal({ open, kbId, services, onClose, onSuccess }: B
   const [skippedCount, setSkippedCount] = useState(0)
   const [showSkipped, setShowSkipped] = useState(true)
   const [summaryMsg, setSummaryMsg] = useState<string | null>(null)
+  // 覆盖式的 KB 选择：弹窗内可选；kbId 作为默认值和兜底
+  const [selectedKbId, setSelectedKbId] = useState<string | null>(kbId)
+  const [kbListState, setKbListState] = useState<'loading' | 'ready' | 'error'>('loading')
+  const [kbList, setKbList] = useState<readonly KnowledgeBaseView[]>([])
+  const [kbError, setKbError] = useState<string | null>(null)
 
   const directoryInputRef = useRef<HTMLInputElement | null>(null)
   const filesInputRef = useRef<HTMLInputElement | null>(null)
   const abortRef = useRef<AbortController | null>(null)
+  // 用于 startUpload 的 fatal 分支在 setSummaryMsg 回调里读到最新计数（避免闭包陈旧值）
+  const progressRef = useRef<BulkUploadProgress | null>(null)
+  const successCountRef = useRef(0)
+  const failedCountRef = useRef(0)
+  const skippedCountRef = useRef(0)
+  useEffect(() => { progressRef.current = progress }, [progress])
+  useEffect(() => { successCountRef.current = successCount }, [successCount])
+  useEffect(() => { failedCountRef.current = failedCount }, [failedCount])
+  useEffect(() => { skippedCountRef.current = skippedCount }, [skippedCount])
+
+  // 有效 kbId：优先弹窗内选择，其次父组件传入
+  const effectiveKbId = selectedKbId ?? kbId
+
+  const loadKbList = useCallback(async () => {
+    setKbListState('loading')
+    setKbError(null)
+    try {
+      const res = await services.knowledge.list()
+      if (res.state === 'ready' && res.data) {
+        setKbList(res.data)
+        setKbListState('ready')
+        if (!selectedKbId && !kbId && res.data.length > 0) {
+          setSelectedKbId(res.data[0].id)
+        }
+      } else {
+        setKbListState('error')
+        setKbError(res.error?.message || '知识库列表加载失败')
+      }
+    } catch (err: unknown) {
+      setKbListState('error')
+      setKbError(err instanceof Error ? err.message : '知识库列表加载失败')
+    }
+  }, [services, kbId])
 
   useEffect(() => {
-    // 每次打开 Modal，重置状态
     if (open) {
       setStage('selecting')
       setEntries([])
@@ -218,10 +258,12 @@ export function BatchUploadModal({ open, kbId, services, onClose, onSuccess }: B
       setSkippedCount(0)
       setSummaryMsg(null)
       setShowSkipped(true)
+      setSelectedKbId(kbId) // 以父组件当前选中为默认
       if (directoryInputRef.current) directoryInputRef.current.value = ''
       if (filesInputRef.current) filesInputRef.current.value = ''
+      void loadKbList()
     }
-  }, [open])
+  }, [open, kbId, loadKbList])
 
   const stats = useMemo(() => computeStats(entries), [entries])
 
@@ -240,6 +282,18 @@ export function BatchUploadModal({ open, kbId, services, onClose, onSuccess }: B
     return sortedEntries.filter((e) => !e.skippedReason)
   }, [sortedEntries, showSkipped])
 
+  // 分页：每页 50 条（避免 500+ 条同时渲染）
+  const PAGE_SIZE = 50
+  const [page, setPage] = useState(1)
+  const totalDisplayEntries = displayEntries.length
+  const totalPages = Math.max(1, Math.ceil(totalDisplayEntries / PAGE_SIZE))
+  const currentPage = page > totalPages ? totalPages : page
+  const visibleEntries = useMemo(() => {
+    const start = (currentPage - 1) * PAGE_SIZE
+    return displayEntries.slice(start, start + PAGE_SIZE)
+  }, [displayEntries, currentPage])
+  useEffect(() => { setPage(1) }, [showSkipped, entries.length])
+
   const findProgress = useCallback(
     (id: string): BulkFileProgress | null => {
       if (!progress) return null
@@ -252,9 +306,12 @@ export function BatchUploadModal({ open, kbId, services, onClose, onSuccess }: B
   const handlePickFiles = () => filesInputRef.current?.click()
 
   const handleDirectoryChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const { files } = event.target
-    event.target.value = ''
+    // NOTE: 必须 **先读 FileList，再清 value**——Chromium/Blink 下 value='' 会立即把
+    // input.files 重置为空（FileList 与 value 镜像），若先清 value 会导致“选完目录后没反应/条目是 0”。
+    const input = event.currentTarget
+    const files = input.files
     const built = buildEntriesFromFiles(files)
+    input.value = ''
     setEntries(built.entries)
     setStage('selecting')
     setProgress(null)
@@ -264,9 +321,10 @@ export function BatchUploadModal({ open, kbId, services, onClose, onSuccess }: B
   }
 
   const handleFilesChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const { files } = event.target
-    event.target.value = ''
+    const input = event.currentTarget
+    const files = input.files
     const built = buildEntriesFromFiles(files)
+    input.value = ''
     setEntries(built.entries)
     setStage('selecting')
     setProgress(null)
@@ -282,7 +340,8 @@ export function BatchUploadModal({ open, kbId, services, onClose, onSuccess }: B
   }
 
   const startUpload = async () => {
-    if (!kbId) return
+    const targetKbId = effectiveKbId
+    if (!targetKbId) return
     const uploadable = entries.filter((e) => !e.skippedReason)
     if (uploadable.length === 0) return
     const ac = new AbortController()
@@ -290,27 +349,86 @@ export function BatchUploadModal({ open, kbId, services, onClose, onSuccess }: B
     setStage('uploading')
     setSuccessCount(0)
     setFailedCount(0)
+    setSummaryMsg(null)
     setSkippedCount(entries.filter((e) => !!e.skippedReason).length)
-    const result = await services.documents.uploadBulk(kbId, uploadable.map((u) => u.item), {
-      concurrency,
-      signal: ac.signal,
-      onProgress: (next) => {
-        setProgress(next)
-        setSuccessCount(next.completed)
-        setFailedCount(next.failed)
-        setSkippedCount(entries.filter((e) => !!e.skippedReason).length + next.skipped)
-      },
-    })
-    abortRef.current = null
-    setStage('finished')
-    const { summary } = result
-    setSummaryMsg(
-      `上传完成：共 ${summary.total} 条，成功 ${summary.successCount}，失败 ${summary.failedCount}，跳过 ${summary.skippedCount}。`,
-    )
-    if (summary.successCount > 0) {
-      // 让父页面刷新文档列表
-      onSuccess?.()
+    let result: BulkUploadResult | null = null
+    let fatal: unknown = null
+    try {
+      result = await services.documents.uploadBulk(targetKbId, uploadable.map((u) => u.item), {
+        concurrency,
+        signal: ac.signal,
+        onProgress: (next) => {
+          setProgress(next)
+          setSuccessCount(next.completed)
+          setFailedCount(next.failed)
+          setSkippedCount(entries.filter((e) => !!e.skippedReason).length + next.skipped)
+        },
+      })
+    } catch (err: unknown) {
+      // 并发调度/网络级异常也不能静默吞；把剩下还没完成的条目统一标成失败，用户能明确看到问题。
+      fatal = err
+      setProgress((prev) => {
+        const basePerFile = prev?.perFile ?? new Map<string, BulkFileProgress>()
+        const now = new Map(basePerFile)
+        const mappedErr = toAdapterError(err, '批量上传失败')
+        let extraFailed = 0
+        for (const u of uploadable) {
+          const v = now.get(u.item.id)
+          if (!v || v.status === 'queued' || v.status === 'uploading') {
+            if (v && v.status !== 'queued' && v.status !== 'uploading') continue
+            if (!v) {
+              now.set(u.item.id, {
+                id: u.item.id,
+                path: u.item.path,
+                size: u.item.size,
+                status: 'failed',
+                error: mappedErr,
+              })
+              extraFailed += 1
+              continue
+            }
+            now.set(u.item.id, { ...v, status: 'failed', error: mappedErr })
+            extraFailed += 1
+          }
+        }
+        const nextTotal = uploadable.length
+        let completed = 0
+        let failed = 0
+        let skipped = 0
+        for (const val of now.values()) {
+          if (val.status === 'success') completed += 1
+          else if (val.status === 'failed') failed += 1
+          else if (val.status === 'skipped') skipped += 1
+        }
+        return { total: nextTotal, completed, failed, skipped, perFile: now }
+      })
+    } finally {
+      abortRef.current = null
+      setStage('finished')
     }
+    if (result) {
+      const { summary } = result
+      setSuccessCount(summary.successCount)
+      setFailedCount(summary.failedCount)
+      setSkippedCount(entries.filter((e) => !!e.skippedReason).length + summary.skippedCount)
+      const extra = fatal ? `（执行异常：${fatal instanceof Error ? fatal.message : String(fatal)}）` : ''
+      setSummaryMsg(
+        `上传完成：共 ${summary.total} 条，成功 ${summary.successCount}，失败 ${summary.failedCount}，跳过 ${summary.skippedCount}。${extra}`,
+      )
+      if (summary.successCount > 0) onSuccess?.()
+      return
+    }
+    // 走了 fatal 分支，summary 基于当前 progress 拼一段，保证页面始终有可感知结果
+    setSummaryMsg((prev) => {
+      if (prev) return prev
+      const p = progressRef.current
+      const total = p?.total ?? uploadable.length
+      const ok = successCountRef.current
+      const bad = failedCountRef.current
+      const skip = skippedCountRef.current - entries.filter((e) => !!e.skippedReason).length
+      const msg = fatal instanceof Error ? fatal.message : String(fatal)
+      return `批量上传中断：共 ${total} 条，成功 ${ok}，失败 ${bad}，跳过 ${Math.max(0, skip)}。错误：${msg}`
+    })
   }
 
   const cancelUpload = () => {
@@ -318,7 +436,8 @@ export function BatchUploadModal({ open, kbId, services, onClose, onSuccess }: B
   }
 
   const retryFailed = async () => {
-    if (!kbId || stage !== 'finished') return
+    const targetKbId = effectiveKbId
+    if (!targetKbId || stage !== 'finished') return
     const failedIds = new Set<string>(
       (
         progress?.perFile?.values()
@@ -341,32 +460,90 @@ export function BatchUploadModal({ open, kbId, services, onClose, onSuccess }: B
     setStage('uploading')
     setFailedCount((n) => Math.max(0, n - uploadable.length))
     setSummaryMsg(null)
-    const result = await services.documents.uploadBulk(kbId, uploadable.map((u) => u.item), {
-      concurrency,
-      signal: ac.signal,
-      onProgress: (next) => {
-        setProgress((prev) => {
-          if (!prev) return next
-          // 合入 perFile（已存在的覆盖）
-          const merged = new Map(prev.perFile)
-          for (const [k, v] of next.perFile) merged.set(k, v)
-          return {
-            total: prev.total,
-            completed: (prev.completed - failedPreviouslyFailed(prev, failedIds)) + next.completed,
-            failed: prev.failed - countStillFailedButNowDone(prev, next, failedIds) + next.failed,
-            skipped: prev.skipped,
-            perFile: merged,
+    let result: BulkUploadResult | null = null
+    let fatal: unknown = null
+    try {
+      result = await services.documents.uploadBulk(targetKbId, uploadable.map((u) => u.item), {
+        concurrency,
+        signal: ac.signal,
+        onProgress: (next) => {
+          setProgress((prev) => {
+            if (!prev) {
+              setSuccessCount(next.completed)
+              setFailedCount(next.failed)
+              return next
+            }
+            // 合入 perFile（已存在的覆盖）
+            const merged = new Map(prev.perFile)
+            for (const [k, v] of next.perFile) merged.set(k, v)
+            const completed = (prev.completed - failedPreviouslyFailed(prev, failedIds)) + next.completed
+            const failed = prev.failed - countStillFailedButNowDone(prev, next, failedIds) + next.failed
+            const skipped = prev.skipped
+            setSuccessCount(completed)
+            setFailedCount(failed)
+            return {
+              total: prev.total,
+              completed,
+              failed,
+              skipped,
+              perFile: merged,
+            }
+          })
+        },
+      })
+    } catch (err: unknown) {
+      fatal = err
+      const mappedErr = toAdapterError(err, '重传失败')
+      setProgress((prev) => {
+        if (!prev) return prev
+        const merged = new Map(prev.perFile)
+        let failedNow = prev.failed
+        for (const u of uploadable) {
+          const v = merged.get(u.item.id)
+          if (!v || v.status === 'queued' || v.status === 'uploading') {
+            if (!v) {
+              merged.set(u.item.id, {
+                id: u.item.id,
+                path: u.item.path,
+                size: u.item.size,
+                status: 'failed',
+                error: mappedErr,
+              })
+              failedNow += 1
+              continue
+            }
+            if (v.status === 'failed') continue
+            merged.set(u.item.id, { ...v, status: 'failed', error: mappedErr })
+            failedNow += 1
           }
-        })
-      },
-    })
-    abortRef.current = null
-    setStage('finished')
-    const { summary } = result
-    setSummaryMsg(
-      `失败项重传完成：共 ${summary.total} 条，成功 ${summary.successCount}，失败 ${summary.failedCount}，跳过 ${summary.skippedCount}。`,
-    )
-    if (summary.successCount > 0) onSuccess?.()
+        }
+        let completed = 0
+        let failed = 0
+        let skipped = 0
+        for (const val of merged.values()) {
+          if (val.status === 'success') completed += 1
+          else if (val.status === 'failed') failed += 1
+          else if (val.status === 'skipped') skipped += 1
+        }
+        return { total: prev.total, completed, failed, skipped, perFile: merged }
+      })
+    } finally {
+      abortRef.current = null
+      setStage('finished')
+    }
+    if (result) {
+      const { summary } = result
+      setSuccessCount((prev) => prev + summary.successCount)
+      setFailedCount((prev) => Math.max(0, prev - uploadable.length + summary.failedCount))
+      setSkippedCount(entries.filter((e) => !!e.skippedReason).length + (progress?.skipped ?? 0) + summary.skippedCount)
+      setSummaryMsg(
+        `失败项重传完成：共 ${summary.total} 条，成功 ${summary.successCount}，失败 ${summary.failedCount}，跳过 ${summary.skippedCount}。`,
+      )
+      if (summary.successCount > 0) onSuccess?.()
+      return
+    }
+    const msg = fatal instanceof Error ? fatal.message : String(fatal)
+    setSummaryMsg(`失败项重传中断：${msg}`)
   }
 
   const isUploading = stage === 'uploading'
@@ -591,7 +768,7 @@ export function BatchUploadModal({ open, kbId, services, onClose, onSuccess }: B
                 {displayEntries.length === 0 ? (
                   <li className="v2-m3-file-list-empty">当前已隐藏跳过文件。</li>
                 ) : (
-                  displayEntries.map((entry) => {
+                  visibleEntries.map((entry) => {
                     const p = findProgress(entry.item.id)
                     const status = progressFor(entry)
                     const statusText: Record<BulkFileProgress['status'], string> = {
@@ -627,12 +804,90 @@ export function BatchUploadModal({ open, kbId, services, onClose, onSuccess }: B
                   })
                 )}
               </ul>
+              {/* 分页条（总数超一页才显示） */}
+              {totalPages > 1 ? (
+                <div className="v2-m3-file-list-pagination" role="navigation" aria-label="文件列表分页">
+                  <button
+                    type="button"
+                    className="v2-m3-secondary-button v2-m3-secondary-button--sm"
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    disabled={currentPage <= 1}
+                  >
+                    上一页
+                  </button>
+                  <span className="v2-m3-file-list-pagination__meta">
+                    第 <strong>{currentPage}</strong> / {totalPages} 页，共 {totalDisplayEntries} 条
+                  </span>
+                  <button
+                    type="button"
+                    className="v2-m3-secondary-button v2-m3-secondary-button--sm"
+                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                    disabled={currentPage >= totalPages}
+                  >
+                    下一页
+                  </button>
+                </div>
+              ) : null}
             </div>
           ) : stage === 'selecting' ? null : null}
 
           {/* 无 KB 提示 */}
-          {!kbId && hasEntries ? (
-            <p className="v2-m3-row-error">请先从左侧选择一个知识库空间，然后再开始上传。</p>
+          {!effectiveKbId && (
+            <div className="v2-m3-row-block" role="alert">
+              <div className="v2-m3-row-block__title">选择目标知识库</div>
+              {kbError ? (
+                <p className="v2-m3-row-error">{kbError}</p>
+              ) : (
+                <p className="v2-m3-muted">
+                  {kbListState === 'loading'
+                    ? '正在加载知识库列表…'
+                    : '未检测到可用的知识库。请先从文档中心左侧创建或选择一个知识库空间。'}
+                </p>
+              )}
+              {kbListState === 'ready' && kbList.length > 0 ? (
+                <label className="v2-m3-toolbar-field">
+                  目标知识库：
+                  <select
+                    className="v2-m3-select"
+                    value={effectiveKbId || ''}
+                    onChange={(e) => setSelectedKbId(e.target.value || null)}
+                    disabled={isUploading}
+                  >
+                    <option value="">（请选择）</option>
+                    {kbList.map((kb) => (
+                      <option key={kb.id} value={kb.id}>
+                        {kb.name}（{kb.documentCount} 篇）
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
+            </div>
+          )}
+
+          {effectiveKbId && hasEntries ? (
+            <div className="v2-m3-row-block">
+              <label className="v2-m3-toolbar-field">
+                目标知识库：
+                <select
+                  className="v2-m3-select"
+                  value={effectiveKbId || ''}
+                  onChange={(e) => setSelectedKbId(e.target.value || null)}
+                  disabled={isUploading}
+                >
+                  {kbListState === 'ready' && kbList.length === 0
+                    ? (
+                      <option value={effectiveKbId}>{effectiveKbId.slice(0, 8)}…</option>
+                    )
+                    : kbList.map((kb) => (
+                      <option key={kb.id} value={kb.id}>
+                        {kb.name}（{kb.documentCount} 篇）
+                      </option>
+                    ))}
+                </select>
+                {kbError ? <span className="v2-m3-text-failed">{kbError}</span> : null}
+              </label>
+            </div>
           ) : null}
         </div>
 
@@ -647,7 +902,7 @@ export function BatchUploadModal({ open, kbId, services, onClose, onSuccess }: B
                 type="button"
                 className="v2-m3-primary-button"
                 onClick={() => void startUpload()}
-                disabled={!hasEntries || uploadableCount === 0 || !kbId || isUploading}
+                disabled={!hasEntries || uploadableCount === 0 || !effectiveKbId || isUploading}
               >
                 <Play size={15} aria-hidden="true" />
                 开始上传（{uploadableCount}）

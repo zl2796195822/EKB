@@ -151,6 +151,7 @@ _REQUIRED_COLUMNS = {
 }
 
 _REQUIRED_INDEXES = {
+    "ux_trash_items_resource",
     "ux_trash_items_resource_generation",
     "ux_trash_claim_token",
     "ix_trash_expiry_claim",
@@ -327,7 +328,20 @@ def apply_v4_005(engine: Engine) -> MigrationResult:
             _ensure_column(connection, "document_versions", name, definition)
         for name, definition in _CONV_NEW_COLUMNS.items():
             _ensure_column(connection, "conversations", name, definition)
+        # ``ux_trash_items_resource`` is owned by the immutable v3_002 migration and
+        # its verify asserts the index still exists.  The v4 multi-generation model
+        # cannot keep the original *global* uniqueness (a resource may legitimately
+        # re-enter the trash after restore/purge), so the index is narrowed to the
+        # live set instead of being dropped: v3_002's contract keeps holding for
+        # live rows and the immutable v3 verify still passes after the full chain.
         _drop_index_if_exists(connection, "ux_trash_items_resource")
+        connection.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS ux_trash_items_resource "
+                "ON trash_items (resource_type, resource_id) "
+                "WHERE restored_at IS NULL AND purged_at IS NULL"
+            )
+        )
         connection.execute(
             text(
                 "CREATE UNIQUE INDEX IF NOT EXISTS ux_trash_items_resource_generation "

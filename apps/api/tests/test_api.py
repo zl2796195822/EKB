@@ -100,6 +100,15 @@ def test_upload_returns_accepted_and_document_is_visible() -> None:
     ).json()
     assert doc["status"] == "READY"
     assert doc["chunk_count"] >= 1
+    # The document and its durable ingest job must reach the same terminal
+    # state; a READY document with a RUNNING job would poison Jobs Center and
+    # make retries/reconciliation incorrect.
+    job = client.get(
+        f"/api/v1/kb/ingest-jobs/{body['job_id']}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert job.status_code == 200
+    assert job.json()["status"] == "SUCCEEDED"
 
     documents = client.get(
         f"/api/v1/kb/{kb_id}/docs",
@@ -354,7 +363,7 @@ def test_qa_ask_is_audited_with_finish_reason() -> None:
     client.post(
         "/api/v1/qa/ask",
         headers={**headers, "Accept": "text/event-stream"},
-        json={"question": "连接池耗尽审计测试", "kb_ids": [kb_id]},
+        json={"question": "连接池耗尽审计测试", "kb_ids": [kb_id], "options": {"answer_mode": "ENHANCED"}},
     )
 
     audit = client.get(
@@ -558,14 +567,6 @@ def _sse_citation_items(body: str) -> list[dict]:
     return items
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "EKB-CR-FR-051 / CR-PH6-T03：证据不足拒答属 strict_grounded 模式门禁，PH6 范围。"
-        "当前 qa.py 零证据降级为纯 LLM 直答（finish_reason=stop）。"
-        "PH6 落地 answer_mode 后本用例须自动转绿（strict=True 会以 XPASS 报错提醒摘除标记）。"
-    ),
-)
 def test_qa_returns_refusal_when_no_evidence() -> None:
     """无证据问题返回 finish_reason=refusal，不产出引用条目（AC-US01-03）。"""
     token = login()

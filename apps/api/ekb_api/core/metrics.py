@@ -126,11 +126,49 @@ class _Histogram:
         return lines
 
 
+class _Gauge:
+    """可增可减可设的仪表，按 label 组合分桶。"""
+
+    def __init__(self, name: str, help_text: str, label_names: Iterable[str] = ()):
+        self.name = name
+        self.help = help_text
+        self.label_names = tuple(label_names)
+        self._values: dict[tuple[str, ...], float] = {}
+        self._lock = threading.Lock()
+
+    def set(self, value: float, **labels: str) -> None:
+        key = self._key(labels)
+        with self._lock:
+            self._values[key] = float(value)
+
+    def inc(self, value: float = 1.0, **labels: str) -> None:
+        key = self._key(labels)
+        with self._lock:
+            self._values[key] = self._values.get(key, 0.0) + value
+
+    def dec(self, value: float = 1.0, **labels: str) -> None:
+        self.inc(-value, **labels)
+
+    def _key(self, labels: dict[str, str]) -> tuple[str, ...]:
+        return tuple(labels.get(name, "") for name in self.label_names)
+
+    def expose(self) -> list[str]:
+        lines = [f"# HELP {self.name} {self.help}", f"# TYPE {self.name} gauge"]
+        with self._lock:
+            items = list(self._values.items())
+        if not items:
+            return lines
+        for key, val in items:
+            labels = dict(zip(self.label_names, key))
+            lines.append(f"{self.name}{_format_labels(labels)} {val}")
+        return lines
+
+
 class _Registry:
     """全局指标注册表单例。"""
 
     def __init__(self) -> None:
-        self._metrics: list[_Counter | _Histogram] = []
+        self._metrics: list = []
         self._lock = threading.Lock()
 
     def counter(self, name: str, help_text: str, label_names: Iterable[str] = ()) -> _Counter:
@@ -156,6 +194,15 @@ class _Registry:
             h = _Histogram(name, help_text, label_names, buckets)
             self._metrics.append(h)
             return h
+
+    def gauge(self, name: str, help_text: str, label_names: Iterable[str] = ()) -> _Gauge:
+        with self._lock:
+            for m in self._metrics:
+                if m.name == name:
+                    return m  # type: ignore[return-value]
+            g = _Gauge(name, help_text, label_names)
+            self._metrics.append(g)
+            return g
 
     def collect(self) -> str:
         """输出 Prometheus exposition 格式文本。"""
@@ -203,7 +250,7 @@ QA_GENERATION_DURATION = registry.histogram(
 )
 QA_DEGRADATIONS = registry.counter(
     "qa_degradations_total",
-    "QA degradation events by reason (llm_unavailable, llm_failed, timeout)",
+    "QA degradation events by reason (llm_unavailable, llm_failed, timeout, no_evidence_fallback_to_llm_direct, stream_refusal_fallback_ok)",
     ("reason",),
 )
 # --- SSE v2 Conversation Stream 可观测性指标 ---
@@ -274,6 +321,36 @@ CACHE_MISSES = registry.counter(
     "Cache misses by type (embedding, rewrite)",
     ("type",),
 )
+# Tavily 联网搜索指标（Phase 4）
+WEB_SEARCH_CALLS = registry.counter(
+    "web_search_calls_total",
+    "Tavily web search attempts by status (success, auth_error, rate_limited, timeout, network_error, upstream_5xx)",
+    ("status",),
+)
+WEB_SEARCH_DURATION = registry.histogram(
+    "web_search_duration_seconds",
+    "Tavily web search total duration (HTTP + parse)",
+)
+WEB_SEARCH_RESULT_COUNT = registry.histogram(
+    "web_search_result_count",
+    "Tavily web search hit count (0..MAX_RESULTS_CAP) per successful attempt",
+)
+QA_COMPACTION_TRIGGERED = registry.counter(
+    "qa_compaction_triggered_total",
+    "Number of times conversation history compaction was attempted",
+    ("reason", "method"),
+)
+QA_COMPACTION_DURATION_SECONDS = registry.histogram(
+    "qa_compaction_duration_seconds",
+    "Duration of a single compaction attempt (LLM summary or truncate)",
+    buckets=(0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0),
+)
+QA_HISTORY_TOKENS = registry.gauge(
+    "qa_history_tokens",
+    "Estimated tokens in conversation history before generation (per turn)",
+    ("tenant_id", "conversation_id"),
+)
+
 
 
 class Timer:

@@ -12,6 +12,8 @@ tenant's prefix).
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from ekb_api.services.embedding import EmbeddingUnavailable, build_embedding_client
@@ -23,8 +25,10 @@ from ekb_api.services.parsers.registry import (
 )
 from ekb_api.services.storage import (
     MAX_PATH_DEPTH,
+    LocalFilesystemStorageClient,
     ObjectStorageUnavailable,
     PathValidationError,
+    S3CompatibleStorageClient,
     build_storage_client,
     normalize_relative_path,
 )
@@ -33,6 +37,41 @@ from ekb_api.services.storage import (
 def test_object_storage_fails_closed_when_unconfigured() -> None:
     with pytest.raises(ObjectStorageUnavailable):
         build_storage_client()
+
+
+def test_local_development_storage_is_durable_and_confined(tmp_path: Path) -> None:
+    client = LocalFilesystemStorageClient(tmp_path / "objects")
+    object_key = "uploads/tenant-1/kb-1/item-1"
+    body = b"real local object"
+
+    head = client.write_object(tenant_id="tenant-1", object_key=object_key, data=body)
+
+    assert client.get_object_bytes(tenant_id="tenant-1", object_key=object_key) == body
+    assert client.head_object(tenant_id="tenant-1", object_key=object_key) == head
+    assert (tmp_path / "objects" / "tenant-1" / object_key).read_bytes() == body
+    with pytest.raises(ObjectStorageUnavailable):
+        client.get_object_bytes(tenant_id="tenant-1", object_key="../tenant-2/secret")
+
+
+def test_s3_presign_is_remote_and_does_not_expose_secret() -> None:
+    client = S3CompatibleStorageClient(
+        endpoint="https://objects.example.invalid",
+        bucket="ekb-test",
+        region="us-east-1",
+        access_key="ACCESS_KEY",
+        secret_key="SECRET_VALUE",
+    )
+    presigned = client.put_presigned(
+        tenant_id="tenant-1",
+        object_key="uploads/tenant-1/kb-1/item-1",
+        byte_size=4,
+        method="SINGLE",
+        part_size=None,
+        expires_in_seconds=60,
+    )
+    assert presigned.upload_urls[0].startswith("https://objects.example.invalid/")
+    assert "SECRET_VALUE" not in presigned.upload_urls[0]
+    assert "X-Amz-Signature=" in presigned.upload_urls[0]
 
 
 def test_embedding_fails_closed_when_unconfigured() -> None:

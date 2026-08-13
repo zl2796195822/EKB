@@ -121,3 +121,86 @@
 ---
 
 _Backlog 的作用是让项目保持能交付的形状，而不是把问题藏在“以后再说”里。_
+
+## V3 companion authority（追加，2026-08-09）
+
+本节只追加 v3 索引，不改写上方历史条目。十页真实前后端闭环的 authoritative 文档链为 [`docs/README.md`](./README.md) 与 [`v3 README`](./pmos/features/2026-08-09_ekb-fullstack-v3/README.md)。v3 文档状态为 `已批准`，实现状态仍为 pending；Sol final gate 已于 2026-08-10 通过，M0–M5 前端/app-v2 及既有 Team/Profile 端点接入仍按历史记录保留，不声称用户审阅了最终文字。v3 采用唯一 canonical task namespace `V3-T01`–`V3-T38`，以及 `AC-V3-001`–`AC-V3-052`、`AC-V3-NFR-001`–`AC-V3-NFR-018`。
+
+V3 的需求、技术合同、竖切计划和验证矩阵分别见 [`01_requirements.md`](./pmos/features/2026-08-09_ekb-fullstack-v3/01_requirements.md)、[`02_spec.md`](./pmos/features/2026-08-09_ekb-fullstack-v3/02_spec.md)、[`03_plan.md`](./pmos/features/2026-08-09_ekb-fullstack-v3/03_plan.md) 和 [`04_verification-matrix.md`](./pmos/features/2026-08-09_ekb-fullstack-v3/04_verification-matrix.md)。根 API、数据模型、测试和架构基线仅作为兼容 companion，不复制 v3 全套合同；v3 只 additive/backward-compatible 扩展，且仅在 Sol final gate 后改变 v2 的 authority 状态。
+
+### FR/NFR canonical governance index
+
+| Requirement | Acceptance | Primary task |
+|---|---|---|
+| FR-001 | AC-V3-001 | V3-T01 |
+| FR-002 | AC-V3-002 | V3-T06 |
+| FR-003 | AC-V3-003 | V3-T06 |
+| FR-004 | AC-V3-004 | V3-T03 |
+| FR-005 | AC-V3-005 | V3-T02 |
+| FR-006 | AC-V3-006 | V3-T04 |
+| FR-007 | AC-V3-007 | V3-T05 |
+| FR-008 | AC-V3-008 | V3-T07 |
+| FR-009 | AC-V3-009 | V3-T08 |
+| FR-010 | AC-V3-010 | V3-T09 |
+| FR-011 | AC-V3-011 | V3-T09 |
+| FR-012 | AC-V3-012 | V3-T10 |
+| FR-013 | AC-V3-013 | V3-T10 |
+| FR-014 | AC-V3-014 | V3-T11 |
+| FR-015 | AC-V3-015 | V3-T13 |
+| FR-016 | AC-V3-016 | V3-T14 |
+| FR-017 | AC-V3-017 | V3-T15 |
+| FR-018 | AC-V3-018 | V3-T16 |
+| FR-019 | AC-V3-019 | V3-T17 |
+| FR-020 | AC-V3-020 | V3-T20 |
+| FR-021 | AC-V3-021 | V3-T21 |
+| FR-022 | AC-V3-022 | V3-T19 |
+| FR-023 | AC-V3-023 | V3-T23 |
+| FR-024 | AC-V3-024 | V3-T25 |
+| FR-025 | AC-V3-025 | V3-T25 |
+| FR-026 | AC-V3-026 | V3-T26 |
+| FR-027 | AC-V3-027 | V3-T27 |
+| FR-028 | AC-V3-028 | V3-T29 |
+| FR-029 | AC-V3-029 | V3-T32 |
+| FR-030 | AC-V3-030 | V3-T12 |
+| FR-031 | AC-V3-031 | V3-T18 |
+| FR-032 | AC-V3-032 | V3-T08 |
+| FR-033 | AC-V3-033 | V3-T35 |
+| FR-034 | AC-V3-034 | V3-T24 |
+| FR-035 | AC-V3-035 | V3-T30 |
+| FR-036 | AC-V3-036 | V3-T11 |
+| FR-037 | AC-V3-037 | V3-T31 |
+| FR-038 | AC-V3-038 | V3-T37 |
+| FR-039 | AC-V3-039 | V3-T38 |
+| FR-040 | AC-V3-040 | V3-T38 |
+| FR-041 | AC-V3-041 | V3-T08 |
+| FR-042 | AC-V3-042 | V3-T38 |
+| FR-043 | AC-V3-043 | V3-T38 |
+| FR-044 | AC-V3-044 | V3-T27 |
+| FR-045 | AC-V3-045 | V3-T16 |
+| FR-046 | AC-V3-046 | V3-T37 |
+| FR-047 | AC-V3-047 | V3-T32 |
+| FR-048 | AC-V3-048 | V3-T38 |
+| FR-049 | AC-V3-049 | V3-T31 |
+| FR-050 | AC-V3-050 | V3-T04 |
+| FR-051 | AC-V3-051 | V3-T31 |
+| FR-052 | AC-V3-052 | V3-T31 |
+| NFR-001 | AC-V3-NFR-001 | V3-T01 |
+| NFR-002 | AC-V3-NFR-002 | V3-T05 |
+| NFR-003 | AC-V3-NFR-003 | V3-T02 |
+| NFR-004 | AC-V3-NFR-004 | V3-T23 |
+| NFR-005 | AC-V3-NFR-005 | V3-T23 |
+| NFR-006 | AC-V3-NFR-006 | V3-T09 |
+| NFR-007 | AC-V3-NFR-007 | V3-T38 |
+| NFR-008 | AC-V3-NFR-008 | V3-T27 |
+| NFR-009 | AC-V3-NFR-009 | V3-T38 |
+| NFR-010 | AC-V3-NFR-010 | V3-T38 |
+| NFR-011 | AC-V3-NFR-011 | V3-T37 |
+| NFR-012 | AC-V3-NFR-012 | V3-T38 |
+| NFR-013 | AC-V3-NFR-013 | V3-T38 |
+| NFR-014 | AC-V3-NFR-014 | V3-T38 |
+| NFR-015 | AC-V3-NFR-015 | V3-T38 |
+| NFR-016 | AC-V3-NFR-016 | V3-T38 |
+| NFR-017 | AC-V3-NFR-017 | V3-T37 |
+| NFR-018 | AC-V3-NFR-018 | V3-T38 |
+
+每一行的 API/DB/UI/security/test/evidence 细节以 v3 matrix 对应 AC 行为准；Backlog 负责 canonical ownership，不复制实施合同。

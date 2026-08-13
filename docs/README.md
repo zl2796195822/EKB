@@ -33,3 +33,11 @@
 ## PH0 evidence status (2026-08-12)
 
 Core Rebuild PH0 的可审查写入证据位于 [`evidence/ekb-core-rebuild/ph0/2026-08-12-baseline/`](./evidence/ekb-core-rebuild/ph0/2026-08-12-baseline/)，入口为 [`manifest.md`](./evidence/ekb-core-rebuild/ph0/2026-08-12-baseline/manifest.md)，验证记录为 [`verification.md`](./evidence/ekb-core-rebuild/ph0/2026-08-12-baseline/verification.md)。该目录只记录路径、状态、摘要、命令/来源和限制；生产只读检查当前为 `BLOCKED/NOT RUN`。本阶段仅建立未提交、未推送的 baseline 分支、部署脚本 fail-closed 安全边界和静态文档证据，不代表 PH1–PH8、运行时代码、迁移、部署、备份恢复或生产验收完成。
+
+## PH1 foundation local evidence status (2026-08-12)
+
+CR-PH1-T01 + CR-PH1-T03 的第一真实业务切片已在本地工作树实现，证据位于 [`evidence/ekb-core-rebuild/ph1/2026-08-12-foundation/`](./evidence/ekb-core-rebuild/ph1/2026-08-12-foundation/)，入口为 [`manifest.md`](./evidence/ekb-core-rebuild/ph1/2026-08-12-foundation/manifest.md)，验证记录为 [`verification.md`](./evidence/ekb-core-rebuild/ph1/2026-08-12-foundation/verification.md)。本地切片覆盖 v4_001/v4_002 append-only provenance/runtime migration、checksum/历史事实 fail-closed、DB-backed jobs/outbox/lease/heartbeat/retry/DLQ，以及 entrypoint migration/verify/admin/runtime config fail-closed。SQLite 与一次 disposable 本地 PostgreSQL+pgvector 执行均已验证；生产切库、生产 migration/deploy/restart 或真实 uvicorn 启动未执行，不得据此标记 PH1 总体完成。v4 runner 禁止隐式 ORM `create_all`，无 imported legacy schema 时生产路径 fail closed，测试 fixture 显式完成 bootstrap。
+
+## Local business closure evidence (2026-08-13)
+
+本地真实上传/对象写入/checksum complete/后台解析失败闭环、LLM-only Provider/Embedding fail-closed、文档中心真实浏览器验收和回归结果记录于 [`evidence/ekb-core-rebuild/local/2026-08-13-local-business.md`](./evidence/ekb-core-rebuild/local/2026-08-13-local-business.md)。该证据明确区分本地 SQLite/开发对象存储与生产 PostgreSQL/pgvector、对象存储、队列、Worker、Scheduler、Provider 及部署前置；未满足生产前置时不得标记 PH1–PH8 完成。

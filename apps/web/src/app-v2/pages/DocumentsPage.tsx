@@ -92,6 +92,12 @@ export function DocumentsPage({ services }: V2PageProps) {
     void loadDocuments()
   }, [loadDocuments])
 
+  useEffect(() => {
+    if (!documents.some((document) => document.status === 'PROCESSING' || document.status === 'INDEXING')) return
+    const timer = window.setInterval(() => void loadDocuments(), 2000)
+    return () => window.clearInterval(timer)
+  }, [documents, loadDocuments])
+
   const filteredDocuments = useMemo(() => {
     const query = documentQuery.trim().toLowerCase()
     return documents.filter((document) => {
@@ -204,7 +210,7 @@ export function DocumentsPage({ services }: V2PageProps) {
           <h1 id="documents-page-title">文档中心</h1>
           <p>集中查看当前主体已授权知识库中的文档，并保留真实状态、版本和错误信息。</p>
         </div>
-        <div className="v2-m3-heading-actions"><button type="button" className="v2-m3-secondary-button" disabled title="当前 API 没有批量删除端点"><FunnelSimple size={15} aria-hidden="true" />批量删除（不可用）</button><button type="button" className="v2-m3-secondary-button" onClick={() => setBatchUploadOpen(true)} disabled={!selectedSearchKbId || busy}><FolderOpen size={15} aria-hidden="true" />批量/目录上传</button><button type="button" className="v2-m3-primary-button" onClick={() => uploadInputRef.current?.click()} disabled={!selectedSearchKbId || busy}><UploadSimple size={15} aria-hidden="true" />上传文档</button><input ref={uploadInputRef} className="v2-m3-hidden-input" type="file" accept=".txt,.md,.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void handleUpload(file) }} /></div>
+        <div className="v2-m3-heading-actions"><button type="button" className="v2-m3-secondary-button" disabled title="批量删除端点仍在后续治理阶段"><FunnelSimple size={15} aria-hidden="true" />批量删除（后续开放）</button><button type="button" className="v2-m3-secondary-button" onClick={() => setBatchUploadOpen(true)} disabled={busy} title={!selectedSearchKbId ? '打开弹窗后选择目标知识库' : '批量/目录上传到已选知识库'}><FolderOpen size={15} aria-hidden="true" />批量/目录上传</button><button type="button" className="v2-m3-primary-button" onClick={() => uploadInputRef.current?.click()} disabled={!selectedSearchKbId || busy}><UploadSimple size={15} aria-hidden="true" />上传文档</button><input ref={uploadInputRef} className="v2-m3-hidden-input" type="file" accept=".txt,.md,.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void handleUpload(file) }} /></div>
       </section>
       {notice ? <div className="v2-m3-notice v2-m3-notice--success" role="status">{notice}</div> : null}
       {noticeError ? <div className="v2-m3-notice v2-m3-notice--error" role="alert"><span>{noticeError.message}<small>{formatErrorMeta(noticeError)}</small></span></div> : null}

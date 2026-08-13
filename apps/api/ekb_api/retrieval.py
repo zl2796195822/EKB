@@ -57,7 +57,9 @@ def retrieve(
 
     # 投机并行：原始 query 检索 + LLM 改写同时进行。
     with ThreadPoolExecutor(max_workers=2) as pool:
-        rewrite_future = pool.submit(_safe_rewrite, query, route)
+        rewrite_future = pool.submit(
+            _safe_rewrite, query, route, tenant_id=auth.tenant_id, user_id=auth.actor_id
+        )
         original_future = pool.submit(
             store.search_with_context, ctx, query, _RECALL_TOP_K
         )
@@ -110,9 +112,9 @@ def retrieve(
     return reranked[:top_k]
 
 
-def _safe_rewrite(query: str, route=None) -> list[str]:
+def _safe_rewrite(query: str, route=None, *, tenant_id=None, user_id=None) -> list[str]:
     """包装 rewrite_query，异常时返回 [query]（不抛异常到 ThreadPoolExecutor）。"""
     try:
-        return rewrite_query(query, route=route)
+        return rewrite_query(query, route=route, tenant_id=tenant_id, user_id=user_id)
     except LlmError:
         return [query]

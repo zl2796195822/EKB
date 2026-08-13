@@ -25,9 +25,13 @@ from ekb_api.domain import utc_now
 # resource_type -> (table, primary_key_column)
 _RESOURCE_TABLES = {
     "knowledge_base": ("knowledge_bases", "id"),
+    "KB": ("knowledge_bases", "id"),
     "document": ("documents", "id"),
+    "DOCUMENT": ("documents", "id"),
     "document_version": ("document_versions", "id"),
+    "DOCUMENT_VERSION": ("document_versions", "id"),
     "conversation": ("conversations", "id"),
+    "CONVERSATION": ("conversations", "id"),
 }
 
 _TERMINAL_PURGED = "SUCCEEDED"
@@ -52,13 +56,14 @@ def _resource_delete_sql(resource_type: str) -> Optional[str]:
     table, pk = mapping
     return (
         f"DELETE FROM {table} WHERE tenant_id=:tenant AND {pk}=:resource_id "
-        f"AND deletion_generation=:generation"
+        f"AND (deletion_generation=:generation OR deletion_generation=0)"
     )
 
 
 def purge_expired_trash(
     engine: Optional[Engine] = None,
     *,
+    tenant_id: Optional[str] = None,
     now: Optional[str] = None,
     batch_size: int = 200,
     dry_run: bool = False,
@@ -74,6 +79,10 @@ def purge_expired_trash(
     report = PurgeReport()
 
     with engine.begin() as connection:
+        tenant_clause = "" if tenant_id is None else " AND t.tenant_id=:tenant"
+        candidate_params = {"eligible": _ELIGIBLE, "limit": max(1, min(batch_size, 2000))}
+        if tenant_id is not None:
+            candidate_params["tenant"] = tenant_id
         candidates = connection.execute(
             text(
                 "SELECT t.id, t.tenant_id, t.resource_type, t.resource_id, "
@@ -81,9 +90,10 @@ def purge_expired_trash(
                 "FROM trash_items AS t "
                 "WHERE t.purge_state=:eligible AND t.restored_at IS NULL "
                 "AND t.purged_at IS NULL AND t.expires_at IS NOT NULL "
-                "ORDER BY t.expires_at ASC LIMIT :limit"
+                + tenant_clause
+                + " ORDER BY t.expires_at ASC LIMIT :limit"
             ),
-            {"eligible": _ELIGIBLE, "limit": max(1, min(batch_size, 2000))},
+            candidate_params,
         ).all()
 
         for row in candidates:
@@ -164,6 +174,7 @@ def purge_expired_trash(
 
 def schedule_purge_job(
     *,
+    engine: Optional[Engine] = None,
     tenant_id: str,
     batch_size: int = 200,
     now: Optional[str] = None,
@@ -176,12 +187,17 @@ def schedule_purge_job(
     """
     from ekb_api.services.jobs import get_job_service
 
-    service = get_job_service()
+    service = get_job_service(engine)
+    schedule_time = now or utc_now()
+    # A scheduler tick may run more than once per hour; idempotency keeps one
+    # durable cleanup job per tenant/hour while still allowing the next window.
+    bucket = schedule_time[:13]
     result = service.enqueue(
         tenant_id=tenant_id,
         job_type="retention_purge",
-        idempotency_key=f"retention_purge:{tenant_id}:{now or utc_now()}",
+        idempotency_key=f"retention_purge:{tenant_id}:{bucket}",
         payload={"batch_size": batch_size},
+        now=schedule_time,
     )
     return result.job.id
 

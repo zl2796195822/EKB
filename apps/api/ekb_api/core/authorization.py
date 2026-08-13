@@ -9,6 +9,8 @@ CAP_KB_WRITE = "kb:write"
 CAP_QA_ASK = "qa:ask"
 CAP_AUDIT_READ = "audit:read"
 CAP_TENANT_PROVISION = "tenant:provision"
+CAP_TEAM_USER_READ = "team:user:read"
+CAP_TEAM_USER_MANAGE = "team:user:manage"
 
 # 平台管理员的额外能力（仅 dev_is_platform_admin 或真实平台角色时注入）。
 PLATFORM_CAPABILITIES = [CAP_TENANT_PROVISION]
@@ -20,6 +22,39 @@ ROLE_CAPABILITIES: dict[str, list[str]] = {
     "MEMBER": [CAP_KB_READ, CAP_QA_ASK, CAP_AUDIT_READ],
     "CUSTOMER": [CAP_KB_READ, CAP_QA_ASK],
 }
+
+# v3 tenant roles are lower-case slugs and are stored in role_permissions by
+# v3_001_identity.  The legacy CUSTOMER mapping is intentionally exact.
+V3_ROLE_CAPABILITIES: dict[str, list[str]] = {
+    "owner": [
+        CAP_KB_READ,
+        CAP_KB_WRITE,
+        CAP_QA_ASK,
+        CAP_AUDIT_READ,
+        CAP_TEAM_USER_READ,
+        CAP_TEAM_USER_MANAGE,
+    ],
+    "admin": [
+        CAP_KB_READ,
+        CAP_KB_WRITE,
+        CAP_QA_ASK,
+        CAP_AUDIT_READ,
+        CAP_TEAM_USER_READ,
+        CAP_TEAM_USER_MANAGE,
+    ],
+    "member": [CAP_KB_READ, CAP_QA_ASK, CAP_AUDIT_READ],
+    "auditor": [CAP_KB_READ, CAP_QA_ASK, CAP_AUDIT_READ],
+    "legacy_customer": [CAP_KB_READ, CAP_QA_ASK],
+}
+
+
+def v3_capabilities_for_role(role: str) -> list[str]:
+    """Return the current v3 capability registry entries for a role slug."""
+    try:
+        return list(V3_ROLE_CAPABILITIES[role])
+    except KeyError:
+        raise ValueError(f"unknown v3 role: {role}") from None
+
 
 # KB 内可管理成员/可见性的角色。
 KB_MANAGER_ROLES = {KbRole.OWNER.value, KbRole.ADMIN.value}

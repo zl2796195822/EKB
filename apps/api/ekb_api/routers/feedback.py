@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Annotated, Optional
+from typing_extensions import Annotated
+from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
 

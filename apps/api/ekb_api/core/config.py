@@ -6,10 +6,23 @@ import secrets
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
+from urllib.parse import urlparse
 
 
 def _split_csv(value: str) -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def _is_remote_provider_url(value: str) -> bool:
+    """只允许远程 LLM endpoint，拒绝本机回环地址和未解析地址。"""
+    parsed = urlparse((value or "").strip())
+    host = (parsed.hostname or "").lower().rstrip(".")
+    return bool(parsed.scheme in {"http", "https"} and host not in {
+        "localhost",
+        "127.0.0.1",
+        "::1",
+        "0.0.0.0",
+    })
 
 
 def _load_dotenv() -> None:
@@ -17,11 +30,23 @@ def _load_dotenv() -> None:
 
     不依赖 python-dotenv；仅在项目根目录存在 .env 且非测试环境时生效。
     测试环境（EKB_ENV=test）跳过加载，避免 .env 中的外部 API 配置污染测试。
+    部署场景（Docker）通常通过 docker --env-file 注入，这里允许文件不存在。
     """
     if os.getenv("EKB_ENV") == "test":
         return
-    env_path = Path(__file__).resolve().parents[4] / ".env"
-    if not env_path.exists():
+    env_path: Path | None = None
+    here = Path(__file__).resolve()
+    # 向上最多找 8 层（仓库结构 / Docker / 单目录结构都能覆盖）
+    # 注意：这里用列表拼接 + itertools.islice 兼容 Python 3.9（Path.parents 切片是 3.10+ 特性）
+    import itertools
+    candidate_dirs = [here]
+    candidate_dirs.extend(list(itertools.islice(here.parents, 8)))
+    for parent in candidate_dirs:
+        candidate = parent / ".env"
+        if candidate.exists():
+            env_path = candidate
+            break
+    if env_path is None:
         return
     for line in env_path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
@@ -77,7 +102,13 @@ class Settings:
     # 生成参数（全局，不随 provider 变动）。
     llm_temperature: float
     llm_max_tokens: int
-    # 本地降级向量维度 / 批大小（仅 embed 失败降级时使用）。
+    # M4-6 Multi-Turn Chat：总开关/上下文窗口/压缩参数。
+    multi_turn_enabled: bool
+    llm_context_window: int
+    llm_compaction_ratio: float
+    compaction_recent_rounds_keep: int
+    compaction_summary_ratio_target: float
+    # 远程 Embedding 批处理参数；无 Provider 时 fail-closed。
     embedding_dim: int
     embedding_batch_size: int
     # M4-7 容量压测/故障演练：超时与熔断参数可配置（原为硬编码常量）。
@@ -105,6 +136,19 @@ class Settings:
     sse_v2_delta_max_bytes: int
     # Delta 合并：时间窗口阈值（毫秒），保证延迟不膨胀
     sse_v2_delta_flush_ms: int
+    # 单文件上传大小上限（字节），0 表示不限制；租户可单独覆盖
+    max_upload_bytes: int
+    # v4 provider credential encryption key.  This is intentionally separate
+    # from the legacy Apps master key and has no development default.
+    provider_master_key: str
+    # S3-compatible object storage.  An empty endpoint means the feature is
+    # unavailable; callers must fail closed rather than use local disk/mocks.
+    object_storage_endpoint: str
+    object_storage_bucket: str
+    object_storage_region: str
+    object_storage_access_key: str
+    object_storage_secret_key: str
+    object_storage_path_style: bool
 
     @property
     def is_production(self) -> bool:
@@ -114,13 +158,23 @@ class Settings:
     @property
     def chat_providers(self) -> list[ModelProvider]:
         """已启用的 chat 提供商（需同时具备 base_url 与 api_key）。"""
-        return [p for p in self.model_providers if p.kind == "chat" and p.api_key and p.base_url]
+        return [
+            p
+            for p in self.model_providers
+            if p.kind == "chat"
+            and p.api_key
+            and _is_remote_provider_url(p.base_url)
+        ]
 
     @property
     def embedding_providers(self) -> list[ModelProvider]:
         """已启用的 embedding 提供商。"""
         return [
-            p for p in self.model_providers if p.kind == "embedding" and p.api_key and p.base_url
+            p
+            for p in self.model_providers
+            if p.kind == "embedding"
+            and p.api_key
+            and _is_remote_provider_url(p.base_url)
         ]
 
     @property
@@ -158,9 +212,7 @@ class Settings:
 
     @property
     def embedding_model(self) -> str:
-        if self.embedding_providers:
-            return self.embedding_providers[0].model
-        return "bge-large-zh-v1.5"
+        return self.embedding_providers[0].model if self.embedding_providers else ""
 
     @property
     def embedding_timeout_seconds(self) -> float:
@@ -255,6 +307,14 @@ def get_settings() -> Settings:
         retrieval_bm25_enabled=os.getenv("EKB_RETRIEVAL_BM25", "true").lower() == "true",
         llm_temperature=float(os.getenv("EKB_LLM_TEMPERATURE", "0.1")),
         llm_max_tokens=int(os.getenv("EKB_LLM_MAX_TOKENS", "1024")),
+        # M4-6 Multi-Turn Chat 配置
+        multi_turn_enabled=os.getenv("EKB_MULTI_TURN_ENABLED", "true").lower() == "true",
+        llm_context_window=int(os.getenv("EKB_LLM_CONTEXT_WINDOW", "16384")),
+        llm_compaction_ratio=float(os.getenv("EKB_LLM_COMPACTION_RATIO", "0.75")),
+        compaction_recent_rounds_keep=int(os.getenv("EKB_COMPACTION_RECENT_ROUNDS_KEEP", "6")),
+        compaction_summary_ratio_target=float(
+            os.getenv("EKB_COMPACTION_SUMMARY_RATIO_TARGET", "0.6")
+        ),
         embedding_dim=int(os.getenv("EKB_EMBEDDING_DIM", "256")),
         embedding_batch_size=int(os.getenv("EKB_EMBEDDING_BATCH_SIZE", "32")),
         qa_timeout_seconds=float(os.getenv("EKB_QA_TIMEOUT_SECONDS", "60")),
@@ -274,7 +334,259 @@ def get_settings() -> Settings:
         ),
         sse_v2_heartbeat_interval=float(os.getenv("EKB_SSE_V2_HEARTBEAT", "15")),
         sse_v2_enabled=os.getenv("EKB_SSE_V2_ENABLED", "true").lower() == "true",
-        sse_v2_delta_max_tokens=int(os.getenv("EKB_SSE_V2_DELTA_TOKENS", "4")),
-        sse_v2_delta_max_bytes=int(os.getenv("EKB_SSE_V2_DELTA_BYTES", "256")),
-        sse_v2_delta_flush_ms=int(os.getenv("EKB_SSE_V2_DELTA_FLUSH_MS", "80")),
+        sse_v2_delta_max_tokens=int(os.getenv("EKB_SSE_V2_DELTA_TOKENS", "2")),
+        sse_v2_delta_max_bytes=int(os.getenv("EKB_SSE_V2_DELTA_BYTES", "128")),
+        sse_v2_delta_flush_ms=int(os.getenv("EKB_SSE_V2_DELTA_FLUSH_MS", "10")),
+        max_upload_bytes=int(
+            os.getenv("EKB_MAX_UPLOAD_BYTES", str(50 * 1024 * 1024))
+        ),  # 默认 50MB
+        provider_master_key=os.getenv("EKB_PROVIDER_MASTER_KEY", ""),
+        object_storage_endpoint=os.getenv("EKB_OBJECT_STORAGE_ENDPOINT", ""),
+        object_storage_bucket=os.getenv("EKB_OBJECT_STORAGE_BUCKET", ""),
+        object_storage_region=os.getenv("EKB_OBJECT_STORAGE_REGION", "us-east-1"),
+        object_storage_access_key=os.getenv("EKB_OBJECT_STORAGE_ACCESS_KEY", ""),
+        object_storage_secret_key=os.getenv("EKB_OBJECT_STORAGE_SECRET_KEY", ""),
+        object_storage_path_style=os.getenv("EKB_OBJECT_STORAGE_PATH_STYLE", "true").lower()
+        in {"1", "true", "yes", "on"},
     )
+
+
+# ============================================================
+#  配置中心 → 运行时 ModelProvider 适配
+#  从 llm_providers / llm_models 表读取用户已启用且绑定了活动凭据
+#  的配置，转为 ModelProvider，供 llm.py / QA 能力中心使用。
+#  优先级：数据库用户配置 > env 静态配置（EKB_MODEL_PROVIDERS）
+# ============================================================
+
+
+class _LLMConfigUnavailable(Exception):
+    """数据库/迁移未就绪时的软失败标记，不影响启动。"""
+
+
+def _load_runtime_model_providers_from_db(
+    *,
+    tenant_id: str,
+    user_id: str,
+    kind: str = "chat",
+) -> list[ModelProvider]:
+    """从配置中心数据库表读取 provider（仅启用 + 有 API Key 的记录）。
+
+    kind: "chat" | "embedding"
+    返回的 ModelProvider.name 形如 "<provider_key>/<model_id>"，与
+    _qa_capabilities() 生成的模型下拉 id 对齐（route.provider_name/model）。
+
+    若 llm_providers 表尚未创建、数据库连接失败等，返回空列表。
+    """
+    if kind not in ("chat", "embedding"):
+        return []
+    try:
+        # 延迟导入，避免模块加载期循环依赖（config → db → models → ... → config）。
+        from sqlalchemy import text
+
+        from ekb_api.core.db import get_session_local
+
+        SessionLocal = get_session_local()
+    except Exception:
+        return []
+
+    timeout_seconds = 30.0
+    out: list[ModelProvider] = []
+
+    try:
+        with SessionLocal() as session:
+            # 1) 读取当前用户的 provider：仅启用且绑定活动凭据。
+            # 旧的 llm_providers.api_key 永不进入运行时查询；这保证了
+            # v4 凭据边界生效后，明文/旧格式字段不会成为旁路。
+            rows = session.execute(
+                text(
+                    """
+                    SELECT p.id, p.provider_key, p.name, p.default_chat_endpoint,
+                           p.endpoint_configs, c.ciphertext
+                    FROM llm_providers AS p
+                    JOIN provider_credentials AS c
+                      ON c.id = p.credential_id
+                     AND c.tenant_id = p.tenant_id
+                     AND c.status = 'ACTIVE'
+                     AND (
+                       (c.ownership_scope = 'PERSONAL'
+                        AND c.owner_user_id = p.user_id
+                        AND c.ownership_key = 'USER:' || p.user_id)
+                       OR
+                       (c.ownership_scope = 'TEAM'
+                        AND c.owner_user_id IS NULL
+                        AND c.ownership_key = 'TEAM')
+                     )
+                    WHERE p.tenant_id = :t AND p.user_id = :u
+                      AND p.is_enabled = 1
+                    """
+                ),
+                {"t": tenant_id, "u": user_id},
+            ).fetchall()
+
+            for row in rows:
+                provider_id = str(row[0])
+                provider_key = str(row[1])
+                default_endpoint = row[3]
+                endpoint_configs_raw = row[4] or "{}"
+                ciphertext = row[5] or ""
+
+                # 解密失败或没有 provider master key 时，该配置不可用；
+                # 不回退到旧 api_key，也不把异常细节暴露给调用方。
+                try:
+                    from ekb_api.services import secrets as provider_secrets
+
+                    api_key = provider_secrets.decrypt(str(ciphertext))
+                except Exception:
+                    continue
+
+                # 解析 endpoint_configs JSON
+                try:
+                    endpoint_configs = (
+                        json.loads(endpoint_configs_raw)
+                        if isinstance(endpoint_configs_raw, str)
+                        else (endpoint_configs_raw or {})
+                    )
+                except (TypeError, ValueError):
+                    endpoint_configs = {}
+
+                endpoint_name = default_endpoint or "openai-chat-completions"
+                endpoint_cfg = endpoint_configs.get(endpoint_name, {}) if endpoint_configs else {}
+                base_url_raw = (
+                    endpoint_cfg.get("baseUrl")
+                    if isinstance(endpoint_cfg, dict)
+                    else None
+                )
+
+                if not base_url_raw:
+                    continue
+                if not _is_remote_provider_url(str(base_url_raw)):
+                    continue
+
+                # 规范化 base_url：保证末尾是 /chat/completions 或 /embeddings
+                # 若用户已经带上具体 path 就保留；否则补 OpenAI 兼容的默认 path
+                model_type_filter = "chat" if kind == "chat" else "embedding"
+                base_url = _normalize_model_endpoint(
+                    base_url_raw, endpoint_name, kind=model_type_filter
+                )
+
+                # 2) 读取该 provider 下已启用的 models
+                model_rows = session.execute(
+                    text(
+                        """
+                        SELECT model_id, display_name, model_type
+                        FROM llm_models
+                        WHERE provider_id = :pid AND is_enabled = 1
+                        ORDER BY created_at ASC
+                        """
+                    ),
+                    {"pid": provider_id},
+                ).fetchall()
+
+                models_to_use: list[tuple[str, str]] = []  # [(model_id, display_name)]
+                for m in model_rows:
+                    mid, mname, mtype = str(m[0]), str(m[1] or m[0]), (m[2] or "chat")
+                    if kind == "chat" and not (mtype and "embedding" in mtype.lower()):
+                        models_to_use.append((mid, mname))
+                    elif kind == "embedding" and mtype and "embedding" in mtype.lower():
+                        models_to_use.append((mid, mname))
+
+                for mid, _mname in models_to_use:
+                    runtime_name = f"{provider_key}/{mid}"
+                    out.append(
+                        ModelProvider(
+                            name=runtime_name,
+                            kind=kind,
+                            base_url=base_url,
+                            api_key=api_key,
+                            model=mid,
+                            timeout_seconds=timeout_seconds,
+                        )
+                    )
+    except _LLMConfigUnavailable:
+        return []
+    except Exception:
+        # 配置中心 DB 未就绪 / 表不存在 / 迁移未跑 → 空列表；env 配置兜底。
+        return []
+
+    return out
+
+
+def _normalize_model_endpoint(base_url_raw: str, endpoint_name: str, *, kind: str) -> str:
+    """把 catalog 里的 baseUrl 统一成 llm.py _call_provider 需要的完整端点 URL。
+
+    约定：
+      - endpoint_name = "openai-chat-completions" → /chat/completions
+      - 若 base_url_raw 已经以 /chat/completions 或 /embeddings 结尾则原样返回
+      - 其它情况补全 path，保证 llm.py 里 POST 到的 URL 是正确的。
+    """
+    url = (base_url_raw or "").rstrip("/")
+    if not url:
+        return ""
+
+    suffix = "/chat/completions" if kind == "chat" else "/embeddings"
+    if url.endswith(suffix):
+        return url
+    # 如果结尾已经是具体的 /v1 之类，就拼 suffix
+    if "chat/completions" in url.lower() and kind == "chat":
+        return url
+    if "embeddings" in url.lower() and kind == "embedding":
+        return url
+    return url + suffix
+
+
+def get_runtime_chat_providers(
+    *,
+    tenant_id: str | None = None,
+    user_id: str | None = None,
+) -> list[ModelProvider]:
+    """运行时可用的 chat provider：配置中心（优先）+ env 静态配置（兜底）。
+
+    不传 tenant_id/user_id 时只返回 env 静态配置（兼容测试 / 启动期调用）。
+    """
+    settings = get_settings()
+    static: list[ModelProvider] = list(settings.chat_providers)
+    if tenant_id is None or user_id is None:
+        return static
+
+    dynamic = _load_runtime_model_providers_from_db(
+        tenant_id=tenant_id, user_id=user_id, kind="chat"
+    )
+
+    # 合并：动态在前（配置中心优先），静态在后（兜底），按 name 去重
+    merged: list[ModelProvider] = []
+    seen: set[str] = set()
+    for p in [*dynamic, *static]:
+        if p.name in seen:
+            continue
+        seen.add(p.name)
+        merged.append(p)
+    return merged
+
+
+def get_runtime_embedding_providers(
+    *,
+    tenant_id: str | None = None,
+    user_id: str | None = None,
+) -> list[ModelProvider]:
+    """对应 embedding 版本。"""
+    settings = get_settings()
+    static: list[ModelProvider] = list(settings.embedding_providers)
+    if tenant_id is None or user_id is None:
+        return static
+
+    dynamic = _load_runtime_model_providers_from_db(
+        tenant_id=tenant_id, user_id=user_id, kind="embedding"
+    )
+    merged: list[ModelProvider] = []
+    seen: set[str] = set()
+    for p in [*dynamic, *static]:
+        if p.name in seen:
+            continue
+        seen.add(p.name)
+        merged.append(p)
+    return merged
+
+
+def runtime_llm_enabled(*, tenant_id: str | None = None, user_id: str | None = None) -> bool:
+    """兼容 settings.llm_enabled：任一来源有至少一个 chat provider 即 True。"""
+    return bool(get_runtime_chat_providers(tenant_id=tenant_id, user_id=user_id))

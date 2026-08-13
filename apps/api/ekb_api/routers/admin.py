@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Annotated, Optional
+from typing_extensions import Annotated
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, Query, Request
 from starlette import status
@@ -139,6 +140,7 @@ def create_tenant(
         egress_policy=payload.egress_policy,
         quota_daily_qa=payload.quota_daily_qa,
         quota_storage_docs=payload.quota_storage_docs,
+        quota_storage_bytes_per_file=getattr(payload, "quota_storage_bytes_per_file", 0),
     )
     ip_hash, ua_hash = extract_fingerprints(request)
     store.write_audit_log(
@@ -163,10 +165,11 @@ def create_tenant(
         egress_policy=tenant.egress_policy,
         quota_daily_qa=tenant.quota_daily_qa,
         quota_storage_docs=tenant.quota_storage_docs,
+        quota_storage_bytes_per_file=tenant.quota_storage_bytes_per_file,
     )
 
 
-@router.get("/tenants", response_model=list[TenantResponse])
+@router.get("/tenants", response_model=List[TenantResponse])
 def list_tenants(
     auth: Annotated[AuthContext, Depends(get_auth_context)],
     store: Annotated[SqlStore, Depends(get_store)],
@@ -181,6 +184,7 @@ def list_tenants(
             egress_policy=t.egress_policy,
             quota_daily_qa=t.quota_daily_qa,
             quota_storage_docs=t.quota_storage_docs,
+            quota_storage_bytes_per_file=t.quota_storage_bytes_per_file,
         )
         for t in store.list_tenants()
     ]
@@ -368,7 +372,7 @@ def create_sync_source(
     return _to_sync_response(src)
 
 
-@router.get("/sync/sources", response_model=list[SyncSourceResponse])
+@router.get("/sync/sources", response_model=List[SyncSourceResponse])
 def list_sync_sources(
     auth: Annotated[AuthContext, Depends(get_auth_context)],
     store: Annotated[SqlStore, Depends(get_store)],

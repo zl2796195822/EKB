@@ -161,6 +161,8 @@ class Tenant:
     quota_daily_qa: int = 0
     # M3-5 每租户文档数存储配额（0 = 不限）。
     quota_storage_docs: int = 0
+    # 每租户单文件上传大小上限（字节，0 = 使用全局默认）。
+    quota_storage_bytes_per_file: int = 0
 
 
 @dataclass
@@ -206,6 +208,13 @@ class Chunk:
     content: str
     score: float = 0
     updated_at: str = field(default_factory=utc_now)
+    # PH6 FR-052：引用定位元数据（PDF 页码 / XLSX 工作表 / 段落号 / 文档内路径）。
+    # 这些字段在既有检索路径上默认空缺，仅当摄取阶段产出对应元数据时填充，
+    # dataclass 默认值保证 store.search 构造 Chunk 时不破坏既有调用。
+    page: int | None = None
+    sheet: str | None = None
+    paragraph: int | None = None
+    source_path: str | None = None
 
 
 @dataclass
@@ -230,6 +239,7 @@ class Message:
     created_at: str
     turn_id: str | None = None
     visibility_state: str = "visible"
+    citations: list[dict] | None = None  # PH6 FR-053：回答引用（生成时版本/时间戳）
 
 
 @dataclass

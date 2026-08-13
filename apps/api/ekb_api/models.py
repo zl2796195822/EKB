@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import JSON, Column, Integer, String, Text
+from sqlalchemy import JSON, Boolean, Column, Integer, String, Text
 
 from ekb_api.core.db import Base
 
@@ -19,6 +19,8 @@ class Tenant(Base):
     quota_daily_qa = Column(Integer, nullable=False, default=0)
     # M3-5 每租户文档数存储配额（0 = 不限）。
     quota_storage_docs = Column(Integer, nullable=False, default=0)
+    # 每租户单文件上传大小上限（字节，0 = 使用全局默认）。
+    quota_storage_bytes_per_file = Column(Integer, nullable=False, default=0)
     created_at = Column(String(32), nullable=False)
     updated_at = Column(String(32), nullable=False)
 
@@ -149,6 +151,9 @@ class Message(Base):
     # SSE v2: 消息可见性状态 visible / hidden（被取消/超时/错误替代的占位消息置 hidden）
     visibility_state = Column(String(32), nullable=False, default="visible", index=True)
     created_at = Column(String(32), nullable=False)
+    # PH6 FR-053：本次回答产生的引用（SSE citations 载荷），含生成时文档版本/时间戳，
+    # 便于刷新/分支/版本回溯时复核引用指向的版本。可为空（用户消息 / 未检索到证据）。
+    citations = Column(JSON, nullable=True)
 
 
 class QaTurn(Base):
@@ -298,4 +303,98 @@ class SyncSource(Base):
     error_message = Column(Text, nullable=True)
     retry_count = Column(Integer, nullable=False, default=0)
     created_at = Column(String(32), nullable=False)
+    updated_at = Column(String(32), nullable=False)
+
+
+class LLMProvider(Base):
+    """AI 大模型服务商配置：用户级别的 LLM 接入凭证与参数。
+
+    支持国内外主流大模型平台的统一接入：
+    - 国内：深度求索、硅基流动、智谱、月之暗面、阿里百炼、腾讯混元、字节豆包等
+    - 国外：OpenAI、Anthropic、OpenRouter、Ollama、Gemini、Groq 等
+    - 兼容 OpenAI 协议的自建：New API、LM Studio 等
+    """
+
+    __tablename__ = "llm_providers"
+
+    id = Column(String(36), primary_key=True)
+    tenant_id = Column(String(36), nullable=False, index=True)
+    user_id = Column(String(36), nullable=False, index=True)
+    """关联预设服务商 ID（如果是基于预设创建的自定义实例）"""
+    preset_provider_id = Column(String(64), nullable=True)
+    """服务商唯一标识（预设使用 registry id，自定义使用 uuid）"""
+    provider_key = Column(String(64), nullable=False, index=True)
+    """展示名称"""
+    name = Column(String(128), nullable=False)
+    """logo key 或 logo URL"""
+    logo = Column(String(255), nullable=True)
+    """简介"""
+    description = Column(Text, nullable=True)
+    """官网链接：official / docs / apiKey / models"""
+    websites = Column(JSON, nullable=False, default=dict)
+    """默认聊天端点类型：openai-chat-completions / anthropic-messages / ollama-chat 等"""
+    default_chat_endpoint = Column(String(64), nullable=True)
+    """各端点配置字典：{ endpoint_type: { baseUrl, adapterFamily, reasoningFormatType, modelsApiUrls } }"""
+    endpoint_configs = Column(JSON, nullable=False, default=dict)
+    """认证类型：api-key / oauth / iam-aws / api-key-aws / iam-gcp / iam-azure"""
+    auth_type = Column(String(32), nullable=False, default="api-key")
+    """API Key（加密存储，或为空表示无需密钥如 Ollama）"""
+    api_key = Column(Text, nullable=True)
+    """API Key 标签/备注"""
+    api_key_label = Column(String(128), nullable=True)
+    """API 特性支持：arrayContent / streamOptions / developerRole / serviceTier / verbosity"""
+    api_features = Column(JSON, nullable=False, default=dict)
+    """服务商级额外设置：serviceTier / timeout / rateLimit / extraHeaders / notes"""
+    settings = Column(JSON, nullable=False, default=dict)
+    """模型列表来源：api（拉取接口）/ registry（使用内置目录）"""
+    model_list_source = Column(String(16), nullable=False, default="api")
+    """是否启用（用户开关）"""
+    is_enabled = Column(Boolean, nullable=False, default=False)
+    """创建时间"""
+    created_at = Column(String(32), nullable=False)
+    """更新时间"""
+    updated_at = Column(String(32), nullable=False)
+
+
+class LLMModel(Base):
+    """AI 模型配置：具体某服务商下可用的模型条目。
+
+    每个 Provider 可以有多个 Model（如 deepseek 下有 V4 Flash / V4 Pro / Reasoner / Chat）。
+    模型可以通过 API 拉取同步，也可以手动添加编辑。
+    """
+
+    __tablename__ = "llm_models"
+
+    id = Column(String(36), primary_key=True)
+    tenant_id = Column(String(36), nullable=False, index=True)
+    user_id = Column(String(36), nullable=False, index=True)
+    """所属 LLM Provider"""
+    provider_id = Column(String(36), nullable=False, index=True)
+    """模型唯一 ID，如 deepseek-chat、claude-sonnet-4-20250514"""
+    model_id = Column(String(128), nullable=False)
+    """模型展示名"""
+    display_name = Column(String(256), nullable=False)
+    """模型分类：chat / embedding / reranker / image / reasoning"""
+    model_type = Column(String(32), nullable=False, default="chat")
+    """上下文窗口大小（token 数）"""
+    context_window = Column(Integer, nullable=True)
+    """最大输出 token 数"""
+    max_output_tokens = Column(Integer, nullable=True)
+    """端点类型：继承自 provider 或单独指定"""
+    endpoint_type = Column(String(64), nullable=True)
+    """能力位：vision / toolUse / functionCalling / streaming / reasoning"""
+    capabilities = Column(JSON, nullable=False, default=dict)
+    """输入单价（美元 / 百万 token），仅作展示"""
+    input_price = Column(String(32), nullable=True)
+    """输出单价（美元 / 百万 token），仅作展示"""
+    output_price = Column(String(32), nullable=True)
+    """是否启用该模型"""
+    is_enabled = Column(Boolean, nullable=False, default=True)
+    """是否为用户手动添加"""
+    is_custom = Column(Boolean, nullable=False, default=False)
+    """用户备注"""
+    notes = Column(Text, nullable=True)
+    """创建时间"""
+    created_at = Column(String(32), nullable=False)
+    """更新时间"""
     updated_at = Column(String(32), nullable=False)

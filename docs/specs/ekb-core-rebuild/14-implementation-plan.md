@@ -260,3 +260,15 @@ P0/P1/P2=0、console=0、核心旅程全部真实浏览器通过；推送并部�
 - 新架构决策超出本 Spec 且会改变产品边界。
 
 出现停止条件时保持生产旧版本可用，记录 BLOCKED 和所需用户/外部决策，不用 mock 绕过。
+
+## PH1 foundation local execution record (2026-08-12)
+
+CR-PH1-T01 + CR-PH1-T03 第一真实业务切片已在本地工作树执行：新增 v4_001/v4_002 provenance/runtime migration 与 DB-backed jobs service，补齐 v4 runner、entrypoint fail-closed 和 v4 targeted tests。实现保留历史 v3 migration/schema contract，不修改历史 v3 migration。
+
+本地门禁包括 v4 apply/verify/repeat/rollback dry-run、checksum drift、immutable ledger、tenant-scoped idempotent enqueue、claim/heartbeat/complete/retry/dead-DLQ/outbox、entrypoint migration/verify/admin/config failure no-start，以及相关 v3 migration regression。证据入口为 `docs/evidence/ekb-core-rebuild/ph1/2026-08-12-foundation/`。
+
+状态只记为 `PH1_FOUNDATION_REPAIR_LOCAL_PASS / PENDING SOL REVIEW`：SQLite 与 disposable 本地 PostgreSQL+pgvector 已验证；未执行生产 DSN 切换、生产 migration/deploy/restart、真实 uvicorn 启动或生产管理员初始化。v4 runner 不隐式调用 ORM `create_all`，生产缺少 imported legacy schema 时 fail closed；不得将本记录解释为 PH1 总体 exit gate 已通过。
+
+## Local business closure record (2026-08-13)
+
+本地真实上传批次、开发对象存储、checksum complete、后台 ingest worker、远程 Embedding 缺失时的 `EMBEDDING_UNAVAILABLE` fail-closed、文档中心真实浏览器验收和回归结果见 [`docs/evidence/ekb-core-rebuild/local/2026-08-13-local-business.md`](../../evidence/ekb-core-rebuild/local/2026-08-13-local-business.md)。该记录仅标记已执行的本地切片，不改变 PH1–PH8 的生产阻塞状态；生产 PostgreSQL/pgvector、对象存储、可靠队列、Provider 凭据、部署、备份和回滚仍未执行。

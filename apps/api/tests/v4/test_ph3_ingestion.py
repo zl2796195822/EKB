@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 from ekb_api.core.db import build_engine, prepare_legacy_schema
 from ekb_api.migrations.v4_fullstack import CHAIN
 from ekb_api.models import Tenant
+from ekb_api.services.ingest_worker import process_claimed_job
 from ekb_api.services.ingestion import (
     STAGES,
     IngestNotFound,
@@ -30,6 +31,7 @@ from ekb_api.services.ingestion import (
     create_version_for_item,
 )
 from ekb_api.services.jobs import get_job_service
+from ekb_api.services.storage import LocalFilesystemStorageClient
 
 
 def _apply_chain(engine) -> None:
@@ -88,6 +90,17 @@ def _make_source_object(engine, *, tenant_id: str, object_id: str, sha: str) -> 
                 "'text/plain', 0, '2020-01-01T00:00:00Z')"
             ),
             {"id": object_id, "tenant": tenant_id, "key": f"obj/{object_id}", "sha": sha},
+        )
+
+
+def _put_source_bytes(engine, *, tenant_id: str, object_id: str, sha: str, body: bytes) -> None:
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "UPDATE source_objects SET byte_size=:size, sha256=:sha "
+                "WHERE id=:id AND tenant_id=:tenant"
+            ),
+            {"size": len(body), "sha": sha, "id": object_id, "tenant": tenant_id},
         )
 
 
@@ -164,6 +177,54 @@ def test_create_version_registers_job_and_background_work(tmp_path: Path) -> Non
             ).scalar_one()
             == 1
         )
+
+
+def test_worker_reads_object_then_fails_closed_without_remote_embedding(tmp_path: Path) -> None:
+    engine, tenant = _bootstrap(tmp_path, "ph3-worker-fail.db")
+    body = b"# Worker input\n\nThis must not become a local vector."
+    import hashlib
+
+    sha = hashlib.sha256(body).hexdigest()
+    _put_source_bytes(engine, tenant_id=tenant, object_id="src-1", sha=sha, body=body)
+    outcome = _create_version(
+        engine, tenant_id=tenant, kb_id="kb-1", path="docs/worker.txt", sha=sha, src="src-1"
+    )
+    storage = LocalFilesystemStorageClient(tmp_path / "objects")
+    storage.write_object(tenant_id=tenant, object_key="obj/src-1", data=body)
+    claimed = get_job_service(engine=engine).claim_next(
+        worker_id="worker-test", job_type="document_ingest"
+    )
+    assert claimed is not None
+
+    result = process_claimed_job(engine, claimed, storage=storage, worker_id="worker-test")
+
+    assert result.status == "FAILED"
+    assert result.error_code == "EMBEDDING_UNAVAILABLE"
+    with engine.connect() as connection:
+        job = connection.execute(
+            text("SELECT state, error_code, sanitized_error FROM background_jobs WHERE id=:id"),
+            {"id": claimed.job.id},
+        ).one()
+        ingest = connection.execute(
+            text("SELECT status, error_code FROM ingest_jobs WHERE id=:id"),
+            {"id": outcome["ingest_job_id"]},
+        ).one()
+        document = connection.execute(
+            text("SELECT status, failure_reason FROM documents WHERE id=:id"),
+            {"id": outcome["document_id"]},
+        ).one()
+        chunks = connection.execute(
+            text("SELECT COUNT(*) FROM chunks WHERE document_version_id=:version"),
+            {"version": outcome["version_id"]},
+        ).scalar_one()
+    assert job.state == "DEAD"
+    assert job.error_code == "EMBEDDING_UNAVAILABLE"
+    assert "api_key" not in str(job.sanitized_error)
+    assert ingest.status == "FAILED"
+    assert ingest.error_code == "EMBEDDING_UNAVAILABLE"
+    assert document.status == "FAILED"
+    assert document.failure_reason == "EMBEDDING_UNAVAILABLE"
+    assert chunks == 0
 
 
 def test_identical_bytes_dedup_to_existing_version(tmp_path: Path) -> None:

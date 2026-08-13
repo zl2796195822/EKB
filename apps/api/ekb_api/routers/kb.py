@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Annotated, Optional
+from typing_extensions import Annotated
+from typing import List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, Header, Request, UploadFile
 from starlette import status
@@ -28,7 +29,9 @@ from ekb_api.store import SqlStore
 
 router = APIRouter(prefix="/kb", tags=["kb"])
 
-MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+# 文件大小上限通过 settings.max_upload_bytes 和租户级 quota_storage_bytes_per_file 动态控制
+# 此处保留 LEGACY_UPLOAD_BYTES_FLOOR 作为防御性最低读取上限（实际读取按租户上限+1判断）
+LEGACY_UPLOAD_BYTES_FLOOR = 10 * 1024 * 1024
 ALLOWED_EXTENSIONS = {".txt", ".md", ".pdf", ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx"}
 ALLOWED_MIME_PREFIXES = {
     "text/",
@@ -38,7 +41,20 @@ ALLOWED_MIME_PREFIXES = {
 }
 
 
-@router.get("", response_model=list[KnowledgeBaseResponse])
+def _format_bytes(num_bytes: int) -> str:
+    """将字节数格式化为可读字符串。"""
+    if num_bytes <= 0:
+        return "无限制"
+    units = ["B", "KB", "MB", "GB", "TB"]
+    size = float(num_bytes)
+    unit_idx = 0
+    while size >= 1024 and unit_idx < len(units) - 1:
+        size /= 1024
+        unit_idx += 1
+    return f"{size:.2f} {units[unit_idx]}"
+
+
+@router.get("", response_model=List[KnowledgeBaseResponse])
 def list_knowledge_bases(
     auth: Annotated[AuthContext, Depends(get_auth_context)],
     store: Annotated[SqlStore, Depends(get_store)],
@@ -117,7 +133,7 @@ def delete_knowledge_base(
     _audit(request, auth, store, "kb.delete", "knowledge_base", kb_id)
 
 
-@router.get("/{kb_id}/docs", response_model=list[DocumentResponse])
+@router.get("/{kb_id}/docs", response_model=List[DocumentResponse])
 def list_documents(
     kb_id: str,
     auth: Annotated[AuthContext, Depends(get_auth_context)],
@@ -148,22 +164,31 @@ async def upload_document(
     if not store.get_knowledge_base(auth, kb_id):
         raise ApiError(status.HTTP_404_NOT_FOUND, "NOT_FOUND", "当前授权范围内不存在")
 
-    # M3-5 存储配额：超额拒绝上传（429），不泄露已有文档数。
+    # M3-5 存储配额（文档数量）：超额拒绝上传（429），不泄露已有文档数。
     if not store.check_storage_quota(auth.tenant_id):
         raise ApiError(
             status.HTTP_429_TOO_MANY_REQUESTS,
             "STORAGE_QUOTA_EXCEEDED",
-            "该租户文档数已达存储配额上限",
+            "租户文档数量已达存储配额上限，请删除旧文档后再上传，或联系管理员提升配额",
         )
 
+    # 单文件大小上限：租户级 quota_storage_bytes_per_file 优先，否则全局 settings
+    max_bytes = store.get_effective_max_upload_bytes(auth.tenant_id)
+    read_limit = max_bytes + 1 if max_bytes > 0 else None
+
     _validate_upload_metadata(file)
-    raw_bytes = await file.read(MAX_UPLOAD_BYTES + 1)
-    if len(raw_bytes) > MAX_UPLOAD_BYTES:
+    raw_bytes = await file.read(read_limit) if read_limit else await file.read()
+    if max_bytes > 0 and len(raw_bytes) > max_bytes:
         raise ApiError(
             status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
             "PAYLOAD_TOO_LARGE",
-            "文件超过当前租户限制",
-            {"max_bytes": MAX_UPLOAD_BYTES},
+            f"单文件大小超过上限（当前文件 {_format_bytes(len(raw_bytes))}，上限 {_format_bytes(max_bytes)}）。请压缩或拆分后上传，或联系管理员调整文件大小配额",
+            {
+                "max_bytes": max_bytes,
+                "max_bytes_human": _format_bytes(max_bytes),
+                "actual_bytes": len(raw_bytes),
+                "actual_bytes_human": _format_bytes(len(raw_bytes)),
+            },
         )
 
     filename = title or file.filename or "未命名文档"
@@ -269,7 +294,7 @@ def _kb_manager_or_403(auth: AuthContext, store: SqlStore, kb_id: str) -> None:
     assert_kb_manager(auth, kb_role)
 
 
-@router.get("/{kb_id}/members", response_model=list[KbMemberResponse])
+@router.get("/{kb_id}/members", response_model=List[KbMemberResponse])
 def list_kb_members(
     kb_id: str,
     request: Request,

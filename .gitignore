@@ -28,6 +28,8 @@ drill_workspace/
 .deploy_staging/
 .deploy_helpers/
 .playwright-cli/
+.local-object-storage/
+.local-browser-*.png
 .trae/
 .pmos/settings.yaml
 output/design-qa/

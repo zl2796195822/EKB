@@ -19,14 +19,15 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel, Field
+from sqlalchemy import text
 
 from ekb_api.core.auth import get_live_auth_context
 from ekb_api.core.authorization import CAP_KB_READ, CAP_KB_WRITE, assert_capability
 from ekb_api.core.db import get_engine
 from ekb_api.core.errors import ApiError
-from ekb_api.domain import AuthContext
+from ekb_api.domain import AuthContext, utc_now
 from ekb_api.services.ingestion import (
     IngestNotFound,
     IngestService,
@@ -34,6 +35,7 @@ from ekb_api.services.ingestion import (
     IngestTransitionError,
 )
 from ekb_api.services.storage import (
+    LocalFilesystemStorageClient,
     ObjectStorageUnavailable,
     PathValidationError,
     UploadService,
@@ -66,6 +68,58 @@ class OpenSessionRequest(BaseModel):
 class CompleteUploadRequest(BaseModel):
     sha256: str = Field(min_length=64, max_length=64)
     detected_mime: Optional[str] = Field(default=None, max_length=255)
+
+
+def _local_object_key_parts(object_key: str, tenant_id: str) -> tuple[str, str, str]:
+    parts = object_key.split("/")
+    if len(parts) != 4 or parts[0] != "uploads" or parts[1] != tenant_id:
+        raise ApiError(404, "OBJECT_NOT_FOUND", "对象不存在")
+    return parts[1], parts[2], parts[3]
+
+
+@router.put("/uploads/objects")
+async def put_local_object(
+    request: Request,
+    object_key: str = Query(min_length=1, max_length=1024),
+    auth: Annotated[AuthContext, Depends(get_live_auth_context)] = None,
+) -> dict[str, Any]:
+    """Receive a local-development upload URL without exposing filesystem paths.
+
+    The tenant and item are resolved from the authenticated session. The
+    caller cannot choose another tenant, KB, or arbitrary local path.
+    """
+
+    assert_capability(auth, CAP_KB_WRITE)
+    tenant_id, kb_id, item_id = _local_object_key_parts(object_key, auth.tenant_id)
+    with get_engine().connect() as connection:
+        row = connection.execute(
+            text(
+                "SELECT ui.byte_size FROM upload_items ui "
+                "JOIN upload_batches ub ON ub.id=ui.batch_id "
+                "JOIN upload_sessions us ON us.upload_item_id=ui.id "
+                "WHERE ui.id=:item AND ub.tenant_id=:tenant AND "
+                "ub.knowledge_base_id=:kb AND us.state='ACTIVE' AND us.expires_at > :now"
+            ),
+            {"item": item_id, "tenant": tenant_id, "kb": kb_id, "now": utc_now()},
+        ).first()
+    if row is None:
+        raise ApiError(404, "OBJECT_NOT_FOUND", "上传会话不存在或已失效")
+    data = await request.body()
+    if len(data) != int(row.byte_size):
+        raise ApiError(
+            422,
+            "OBJECT_SIZE_MISMATCH",
+            "上传对象大小与预检不一致",
+            {"expected": int(row.byte_size), "actual": len(data)},
+        )
+    try:
+        client = _uploads().storage
+    except ApiError:
+        raise
+    if not isinstance(client, LocalFilesystemStorageClient):
+        raise ApiError(503, "OBJECT_STORAGE_UNAVAILABLE", "当前开发上传端点不可用")
+    head = client.write_object(tenant_id=tenant_id, object_key=object_key, data=data)
+    return {"object_key": object_key, "byte_size": head.byte_size, "sha256": head.sha256}
 
 
 def _uploads() -> UploadService:
@@ -254,6 +308,8 @@ def _projection_payload(projection: Any) -> dict:
 def _as_dict(value: Any) -> dict:
     if isinstance(value, dict):
         return value
+    if hasattr(value, "as_dict"):
+        return value.as_dict()
     if hasattr(value, "model_dump"):
         return value.model_dump()
     return dict(vars(value))

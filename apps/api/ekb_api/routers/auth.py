@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Annotated
+from typing_extensions import Annotated
 
 from fastapi import APIRouter, Depends, Request
 from starlette import status
@@ -20,8 +20,14 @@ from ekb_api.core.auth import (
     refresh_access_token,
     revoke_refresh_token,
 )
+from ekb_api.services.v3_profile import (
+    revoke_auth_session_by_jti,
+    touch_auth_session,
+    write_auth_session,
+)
 from ekb_api.core.config import Settings, get_settings
 from ekb_api.core.errors import ApiError, request_id_from
+from ekb_api.core.logging import get_logger
 from ekb_api.core.security import verify_signed_payload
 from ekb_api.schemas import (
     LoginRequest,
@@ -34,6 +40,8 @@ from ekb_api.schemas import (
 from ekb_api.store import SqlStore
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+_log = get_logger("ekb.auth")
 
 ACCESS_TOKEN_TTL_SECONDS = 900
 
@@ -88,6 +96,21 @@ def login(
         user_agent_hash=ua_hash,
     )
 
+    # Write auth session for session listing（非致命：失败不阻断登录，但必须留痕）。
+    try:
+        decoded_rt = verify_signed_payload(refresh_token, settings.token_secret) or {}
+        jti = decoded_rt.get("jti")
+        if isinstance(jti, str):
+            write_auth_session(user.id, tenant.id, jti, ip_hash, ua_hash)
+    except Exception as exc:  # noqa: BLE001 - 会话写入失败不应阻断登录
+        _log.warning(
+            "auth.session.write_failed",
+            user_id=user.id,
+            tenant_id=tenant.id,
+            trace_id=trace_id,
+            error=repr(exc),
+        )
+
     return LoginResponse(
         access_token=access_token,
         expires_in=ACCESS_TOKEN_TTL_SECONDS,
@@ -138,6 +161,21 @@ def refresh(
         ip_hash=ip_hash,
         user_agent_hash=ua_hash,
     )
+
+    # Touch session last_used_at（非致命：失败不阻断刷新，但必须留痕）。
+    try:
+        jti = decoded.get("jti")
+        if isinstance(jti, str):
+            touch_auth_session(jti)
+    except Exception as exc:  # noqa: BLE001 - 会话更新失败不应阻断刷新
+        _log.warning(
+            "auth.session.touch_failed",
+            actor_id=actor_id,
+            tenant_id=tenant_id,
+            trace_id=trace_id,
+            error=repr(exc),
+        )
+
     return RefreshResponse(
         access_token=access_token,
         expires_in=ACCESS_TOKEN_TTL_SECONDS,
@@ -159,6 +197,21 @@ def logout(
     tenant_id = str(decoded.get("tenant_id", "")) or None
 
     revoke_refresh_token(payload.refresh_token, settings)
+
+    # Revoke auth session（非致命：失败不阻断登出，但必须留痕）。
+    try:
+        jti = decoded.get("jti")
+        if isinstance(jti, str):
+            revoke_auth_session_by_jti(jti)
+    except Exception as exc:  # noqa: BLE001 - 会话吊销失败不应阻断登出
+        _log.warning(
+            "auth.session.revoke_failed",
+            actor_id=actor_id,
+            tenant_id=tenant_id,
+            trace_id=trace_id,
+            error=repr(exc),
+        )
+
     store.write_audit_log(
         action="auth.logout",
         target_type="session",

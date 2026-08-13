@@ -106,6 +106,11 @@ function defaultBuildIdempotencyKey(kbId: string, item: BulkFileItem): string {
   return `kb:${kbId};p:${item.path};s:${item.size};m:${stamp}`
 }
 
+async function sha256File(file: File): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', await file.arrayBuffer())
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+
 /**
  * 并发上传调度器（信号量模式）。
  *
@@ -179,7 +184,33 @@ async function uploadBulkImpl(
     emit()
     try {
       const idem = buildIdem(kbId, item)
-      const data = mapUpload(await client.uploadDocument(kbId, item.file, idem))
+      const checksum = await sha256File(item.file)
+      const batch = await client.createUploadBatch(kbId, {
+        mode: 'FILE',
+        client_request_id: idem,
+        items: [{
+          client_item_id: item.id,
+          relative_path: item.path,
+          byte_size: item.size,
+          browser_mime: item.file.type || undefined,
+          sha256: checksum,
+        }],
+      })
+      const accepted = batch.items.find((entry) => entry.client_item_id === item.id)
+      if (!accepted?.accepted || !accepted.upload_item_id || !accepted.upload_session?.upload_urls[0]) {
+        throw new Error(accepted?.error_code || '上传预检未接受文件')
+      }
+      await client.putUploadObject(accepted.upload_session.upload_urls[0], item.file)
+      const completed = await client.completeUploadItem(accepted.upload_item_id, {
+        sha256: checksum,
+        detected_mime: accepted.detected_mime ?? (item.file.type || undefined),
+      })
+      const data: UploadAcceptedView = {
+        docId: completed.document_id,
+        jobId: completed.ingest_job_id,
+        status: completed.status,
+        traceId: completed.ingest_job_id,
+      }
       const cur = perFile.get(item.id)!
       perFile.set(item.id, { ...cur, status: 'success', data })
     } catch (error) {
@@ -302,6 +333,6 @@ export const DOCUMENT_CAPABILITIES = [
   {
     id: 'documents.bulk-delete',
     status: 'disabled',
-    reason: '当前 API 契约没有批量删除端点。',
+    reason: '批量删除端点仍在后续治理阶段；单文档删除已接入真实回收站。',
   },
 ] as const satisfies readonly AdapterCapability[]

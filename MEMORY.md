@@ -104,25 +104,25 @@
 - **交付证据**：v3_005 apply/verify/rollback_dry_run=PASS，py_compile=OK，record_access 实写 2 事件 OK；前端 Vitest 11/11 passed，tsc 0 error，Vite build 4644 modules 在 1.54s 内通过。
 
 
-## 2026-08-11 Deployment 部署里程碑（本次交付，验收可访问）
+## 2026-08-11 Deployment 部署里程碑（历史记录，当前状态未重新验证）
 
 > **验收账号**：历史记录中的账号与口令已脱敏；后续只从受管运行环境获取，不在项目记忆中保存。
-> **访问域名**：`https://gjxhj.eu.cc/`（HTTP 80 也开放，兼容国内运营商封 443 的客户链路）。
-> **本地 SSH 转发验收路径**：生产主机地址和账号已脱敏；从受管连接配置建立本地端口转发后打开 `http://localhost:30080/`。
+> **历史访问目标**：`[production host]`（HTTP 80 也开放，兼容国内运营商封 443 的客户链路）。
+> **历史本地 SSH 转发验收路径**：生产主机地址和账号已替换为 `[REDACTED]`；从受管连接配置建立本地端口转发后打开 `[REDACTED]`。
 
-### 目标服务器与接入信息
+### 历史目标服务器与接入信息
 
 - 生产服务器（连接信息已脱敏）使用 CentOS 8，系统自带 Python 3.6 **太旧不能直接跑 EKB API** → 架构选型改为「前端静态 rsync + API Docker 离线镜像 + nginx 反代」。
-- 证书：复用服务器已有 `/etc/nginx/ssl/gjxhj.eu.cc/{fullchain,privkey}.pem`，HTTPS 443 直接可用；HSTS 保守配置 max-age=6 个月。
-- 域名冲突处理：原 `itops.conf`（pandawiki/itops-agent-platform）占用 `server_name gjxhj.eu.cc` 的 80/443 精确匹配，部署时已将其重命名为 `old.gjxhj.eu.cc wwwold.gjxhj.eu.cc` 释放域名给 EKB（配置保存在 `/etc/nginx/conf.d/itops.conf.bak` 可回滚）。
+- 证书：历史部署复用服务器已有 `[REDACTED]` 证书，HTTPS 443 当时可用；HSTS 保守配置 max-age=6 个月。
+- 域名冲突处理：历史部署曾处理既有 Nginx server_name 冲突并释放目标给 EKB；具体域名和备份路径统一记为 `[REDACTED]`。
 
 ### 最终部署架构（解决 Python 3.6 + 国内网络双约束）
 
 ```
-         用户浏览器 (https://gjxhj.eu.cc/)
+         用户浏览器 ([production host])
                  │
                  ▼
-         nginx (80/443, default_server, Host=gjxhj.eu.cc | _)
+         nginx (80/443, default_server, Host=[production host] | _)
             ├── /assets/ /index.html 静态缓存 → /opt/ekb/web/current (Vite dist, rsync 上传)
             ├── /api  |  /healthz  |  /auth  |  /docs  |  /openapi.json
             └── /api/v1/* /qa/* /kb/* /me/* /admin/* /apps/*
@@ -135,7 +135,7 @@
                       └── ekb.sqlite3 (SQLite 生产过渡; 未来切 PG)
 ```
 
-- **API Docker 镜像**：`linux/amd64`，在本机（Mac）用 `docker buildx build --platform linux/amd64 --load` 构建 → `docker save | gzip -6` → `rsync -av --progress` 上传 → 服务器 `docker load` → `docker run -d -p 127.0.0.1:8000:8000 -v /opt/ekb/data:/data --env-file /opt/ekb/api/.env -e EKB_ALLOWED_HOSTS=* -e EKB_ALLOWED_ORIGINS=* ekb/ekb-api:latest`。
+- **API Docker 镜像**：`linux/amd64`，在本机（Mac）用 `docker buildx build --platform linux/amd64 --load` 构建 → `docker save | gzip -6` → `rsync -av --progress` 上传 → 服务器 `docker load` → `docker run` 的生产目标和 origins 均从受管运行环境注入；具体连接参数记为 `[REDACTED]`。
 - **前端静态**：本机 `pnpm -C apps/web build` 产物 → rsync 到 `/opt/ekb/web/releases/<ts>` → `ln -sfn` 切 `current/`，原子切换零宕机，index.html 禁用缓存（no-cache/no-store），`assets/` 缓存 1 年（public, immutable）。
 - **Nginx 组织方式**：`/etc/nginx/conf.d/ekb.conf`（80+443 两个 server block，default_server） + `/etc/nginx/ekb-api-locations.inc`（API 反代片段） + `/etc/nginx/ekb-spa-locations.inc`（SPA 静态 + 安全 deny 片段）。80 与 443 使用相同 include，避免复制粘贴漂移。
 
@@ -147,18 +147,18 @@
 | D-2 | 容器启动 uvicorn `IndexError: 4 in parents[4]` | `core/config.py` `_load_dotenv()` 硬编码向上 4 层，在 Docker 内 `/app/ekb_api/core/config.py` 只有 3 层 parents | 改为循环 `[here, *here.parents[:8]]` 搜索 `.env`，找不到直接返回（Docker 通过 `--env-file` 注入） |
 | D-3 | `POST /auth/login` 返回 404 Not Found | API 真实路由前缀是 `/api/v1/auth/login`（main.py `include_router(..., prefix="/api/v1")`），之前以为是裸 `/auth` | nginx location 正则已覆盖 `/api`；登录验收端点统一用 `/api/v1/auth/login` |
 | D-4 | 验收账号登录曾返回 `UNAUTHENTICATED` | 旧 systemd 服务遗留口令哈希与受管验收凭据不一致；entrypoint 首次执行时迁移还没建 users 表就报 `no such table: users` | 在受管环境幂等更新验收账号哈希；同时修复 entrypoint 迁移调用参数缺失。项目记忆不保存凭据。 |
-| D-5 | 登录走 nginx 返回 `Invalid host header`，直连 127.0.0.1:8000 OK | FastAPI `TrustedHostMiddleware` `allowed_hosts` 只含 `127.0.0.1/localhost/settings.api_host`，Host=gjxhj.eu.cc 被拒 | main.py 支持 `EKB_ALLOWED_HOSTS` CSV 环境变量 + 识别 `"*"` 通配；容器运行时 `-e EKB_ALLOWED_HOSTS=*`，同时 `.env` 持久化两行保证容器重建不丢失 |
+| D-5 | 登录走 nginx 返回 `Invalid host header`，直连 127.0.0.1:8000 OK | FastAPI `TrustedHostMiddleware` `allowed_hosts` 只含 `127.0.0.1/localhost/settings.api_host`，生产 Host 被拒 | main.py 支持 `EKB_ALLOWED_HOSTS` CSV 环境变量 + 识别 `"*"` 通配；容器运行时从受管环境注入，保证容器重建不丢失 |
 | D-6 | entrypoint 迁移报错 `the following arguments are required: --database-url` | entrypoint 直接调用 `migrate_main()`（空 args）触发 argparse | 改为先读 `EKB_DATABASE_URL / DATABASE_URL / get_settings().database_url` 显式传 `["--database-url", db_url]`，捕获 `SystemExit(0)` 为成功 |
 | D-7 | nginx 配置 `set $web_root` 写文件时被 bash 外层双引号展开成空 → `invalid number of arguments in "set"` | heredoc 嵌在 `ssh "..."` 双引号里，`$web_root $uri $host` 都被 bash 展开 | 改为 heredoc 用单引号包 EOF 再按行号 `sed -i` 精确替换；API 与 SPA 公共片段拆成 `.inc` 文件避免复制 |
 
-### 实跑验收证据（本次）
+### 历史实跑验收证据（当时记录，当前未重新验证）
 
 - **容器**：`ekb-api:latest`（ID=6d04a555eb31，488MB），状态 `Up (healthy)`，docker restart unless-stopped，memory 1G / cpu 1.0，仅 bind 127.0.0.1 防外部直接访问。
 - **nginx**：`nginx -t` syntax ok + test successful；80/443 LISTEN；`/healthz-nginx` 返回 `{"ok":true,"service":"nginx","scheme":"http(s)"}`。
 - **API 直连**：使用受管验收凭据调用 `/api/v1/auth/login` 曾签发有效 access token；随后访问 `/api/v1/me` 的 owner capabilities 生效。凭据和 token 不在记忆中保存。
-- **HTTP 反代（Host=gjxhj.eu.cc）**：同样请求经 nginx 80，token 长度一致，证明 TrustedHost 白名单已生效。
-- **HTTPS 反代（`--resolve gjxhj.eu.cc:443:127.0.0.1` 跳过 DNS）**：证书链有效，token 400 chars，443 链路就绪。
-- **SPA 前端**：`curl http://127.0.0.1/ Host=gjxhj.eu.cc` 返回完整 Vite `<doctype html><html lang="zh-CN"><meta name="theme-color" content="#f6f7f3"><svg icon>`（app-v2 主题色），静态链路贯通。
+- **HTTP 反代**：历史上曾经 Nginx 反代验证，token 长度一致，证明当时 TrustedHost 白名单生效；目标统一记为 `[production host]`。
+- **HTTPS 反代**：历史上曾用受管解析方式验证证书链和 443 链路；具体目标统一记为 `[production host]`。
+- **SPA 前端**：历史上曾返回完整 Vite HTML（app-v2 主题色），静态链路当时贯通；具体 URL 和 Host 统一记为 `[REDACTED]`。
 - **本机 SSH 转发验收**：Mac 本机端口转发曾验证登录和 SPA HTML；验收凭据已脱敏。
 
 ### 未来每次部署的标准操作流程（scripts/deploy 自动实现）
@@ -166,15 +166,15 @@
 1. `pnpm -C apps/web build` → 生成 Vite dist。
 2. `docker buildx build --platform linux/amd64 --load -t ekb/ekb-api:latest -f apps/api/Dockerfile apps/api`（layer cache 命中通常 <10s）。
 3. `docker save ekb/ekb-api:latest | gzip -6 > /tmp/ekb-deploy/ekb-api-amd64.tar.gz`。
-4. `rsync -e 'ssh -p 37307'` 上传前端 dist + 镜像 tar.gz 到服务器。
+4. `rsync` 通过受管 SSH 连接上传前端 dist + 镜像 tar.gz 到服务器；端口和账号统一记为 `[REDACTED]`。
 5. 服务器：`nginx` 前端目录原子切 `current` symlink → 加载/切换容器 → 从受管环境确保验收账号可用；不在命令或记忆中硬编码口令。
 6. 健康检查：`GET /healthz` 直连 + 经 nginx；使用受管凭据登录并访问 `/me`；`GET /` 必须是 SPA HTML。
 7. 失败回滚：前端回滚 symlink 到上一个 release 目录；`docker tag` 回滚上一个 `ekb-api:previous` → `docker run` 旧镜像。
 
 ### 未决/后续
 
-- 当前生产库仍是 SQLite `/opt/ekb/data/ekb.sqlite3`；按 MEMORY 中 P0 计划，下一阶段迁移到 PostgreSQL + pgvector，届时需要将容器 `DATABASE_URL` 切到内网 PG，`/data` 仅保留 Fernet master key、tmp、runs。
-- 域名 DNS：用户需将 `gjxhj.eu.cc` 的 A 记录解析到 `103.236.93.60`（若走 Cloudflare 则开 DNS only 或 Full SSL，避免 Flexible 模式把 443 变 80 绕回）。目前未真实公网 DNS 验证，用 `--resolve` + SSH 转发模拟证明链路 OK。
+- 历史记录中的生产库曾是 SQLite `/opt/ekb/data/[REDACTED]`；按 MEMORY 中 P0 计划，下一阶段迁移到 PostgreSQL + pgvector，届时需要将容器 `DATABASE_URL` 切到受管内网 PG，`/data` 仅保留 Fernet master key、tmp、runs。
+- 域名 DNS：历史记录曾要求将 `[production host]` 解析到 `[production host]`；目前不把 DNS、生产 IP 或连接目标视为当前可验证事实。
 - 未接入真实对象存储，附件/头像仍在 SQLite BLOB 或本地 `/data`；后续 MinIO/S3 接入后 nginx 需新增 `/files/` presigned 路由或直接反代 S3 兼容网关。
 - 镜像构建层仍能优化：目前全层 COPY 每次 174MB rsync；可拆成依赖层 + 代码层，进一步把 `docker save | gzip` 产物从 174MB 压到 ~40MB，rsync 时间从 80s → 10s 级。
 
@@ -350,7 +350,7 @@ Phase 5 只把 AssistantPage 头部按钮改了 tooltip，但没加 phase 胶囊
 ✓ 验收账号幂等初始化曾完成；具体账号和口令不在项目记忆中保存
 
 ======== 浏览器 UI 验收 ========
-✓ 登录页正常加载（http://localhost:30080/，通过 SSH 端口转发访问服务器 nginx）：
+✓ 登录页历史上曾正常加载（[REDACTED]，通过受管 SSH 端口转发访问服务器 nginx）：
     标题 "EKB 企业知识库"，邮箱/密码输入框，"登录工作台" 主面板，产品介绍 Hero
 ✓ Dashboard 登录后正常渲染：
     左侧 Rail（工作台/知识库/AI助手/文档中心/团队与权限/数据看板/应用中心/回收站/个人中心）
@@ -365,25 +365,25 @@ Phase 5 只把 AssistantPage 头部按钮改了 tooltip，但没加 phase 胶囊
     → 证明 AssistantPage 的 Star toggle 已真实触发后端写入
 ```
 
-### 部署架构与本轮运维细节（写入项目记忆，后续复用时参考）
+### 历史部署架构与运维细节（仅供复盘，当前未重新验证）
 
 **架构结论**：本轮 **不使用 deploy.sh 的 venv+systemd 分支**（`/opt/ekb/api/venv` 在服务器上不存在，deploy.sh Step 4 会失败）。实际运行架构是：
 
 ```
-用户浏览器 → gjxhj.eu.cc (Nginx 80/443，SSL 证书 /etc/nginx/ssl/gjxhj.eu.cc/*)
+用户浏览器 → [production host] (Nginx 80/443，SSL 证书 [REDACTED])
             ├── /opt/ekb/web/current/*.html + assets/  (SPA 静态，rsync 直推 + ln -sfn 原子切换)
             └── /api/* → 127.0.0.1:8000  (Docker 容器 ekb-api，仅绑定 loopback，避免外部直连)
 Docker 容器配置（服务器 docker inspect）：
     image:  ekb/ekb-api:latest （174 MB，Python 3.11-slim）
-    ports:  127.0.0.1:8000->8000/tcp
+    ports:  [REDACTED]->8000/tcp
     volumes:/opt/ekb/data:/data（SQLite / 备份）
     restart: unless-stopped，memory_limit 1g，cpu_quota 1.0（按项目记忆约束）
-    env:    EKB_ALLOWED_HOSTS=* （ECHO 兼容性），EKB_DEV_USER_*=admin，EKB_DATABASE_URL=sqlite:////data/ekb.sqlite3
+    env:    EKB_ALLOWED_HOSTS=[REDACTED]（ECHO 兼容性），EKB_DEV_USER_*=[REDACTED]，EKB_DATABASE_URL=[REDACTED]
 Nginx 配置：
-    /etc/nginx/conf.d/ekb.conf  —— 80/443 default_server，server_name gjxhj.eu.cc _
+    /etc/nginx/conf.d/ekb.conf  —— 80/443 default_server，server_name [production host] _
       include /etc/nginx/ekb-api-locations.inc  (API 前缀路由)
       include /etc/nginx/ekb-spa-locations.inc  (SPA try_files)
-    /etc/nginx/conf.d/ekb_high_ports.conf —— 30080/8080 额外虚拟主机（用于端口转发无 Host 头调试）
+    /etc/nginx/conf.d/ekb_high_ports.conf —— [REDACTED] 额外虚拟主机（用于端口转发无 Host 头调试）
 **注意前端路径层级**：Nginx 的 `root $web_root`（即 `/opt/ekb/web/current`）期望下面直接有 index.html，
 不能是 `current/dist/index.html`（否则 403）。rsync 上传时如果用 release dir 包了 dist/ 子目录，
 必须在切换软链后额外 `cp -a $RELEASE_DIR/dist/. $RELEASE_DIR/` 扁平化。
@@ -393,11 +393,11 @@ Nginx 配置：
 1. 本地打 `tar czf ekb-api-code.tar.gz ekb_api/ ensure_admin.py` → `scp` 到 `/tmp/ekb-api-update.tar.gz`
 2. 远程 `tar xzf` 后 `docker cp /tmp/ekb-api-newcode/ekb_api/. ekb-api:/app/ekb_api/`
 3. `docker restart ekb-api` → wait healthz
-4. 前端 dist `rsync -a web/dist/` → `root@remote:/opt/ekb/web/releases/$TAG/dist/`
+4. 前端 dist `rsync -a web/dist/` → `[REDACTED]`
 5. `ln -sfn $RELEASE /opt/ekb/web/current` → **重要**：`cp -a dist/. .` 扁平化（否则 403）
 6. `nginx -s reload`
 7. 从受管环境幂等初始化验收账号；禁止在脚本参数、日志或项目记忆中硬编码口令
-8. 用 curl + SSH 端口转发（`ssh -fNL 30080:127.0.0.1:80`）验收（因为公网 DNS/SSL 可能未就绪，但 30080 转发总能验证）。
+8. 用 curl + 受管 SSH 端口转发验收（具体端口、目标和账号统一记为 `[REDACTED]`；公网 DNS/SSL 状态不在项目记忆中保存）。
 ```
 
 ## 2026-08-12 EKB Core Rebuild Tier 3 Spec 里程碑
@@ -418,3 +418,17 @@ Nginx 配置：
 - 已脱敏并收紧 `scripts/deploy/` 风险脚本：生产目标和 SSH 用户改为运行时必填；可选密码只在 SSH helper 内从运行时环境注入，缺失 `sshpass` 不回退交互式输入；缺失/占位目标、默认管理员身份或缺少管理员运行时设置时 fail closed；日志和远程验证不打印凭据、代理、provider 端点或原始响应。
 - PH0 证据索引：`docs/evidence/ekb-core-rebuild/ph0/2026-08-12-baseline/manifest.md`。已完成 bash/Python 语法、目标 fail-closed、secret scan（仅文件/行模式）、Markdown 链接和 FR/NFR/AC/Phase 静态交叉检查；`git diff --check` 通过。
 - 生产 health、schema ledger、备份状态和浏览器只读检查未通过安全可审计的受管连接执行，证据明确记录 `BLOCKED/NOT RUN`；PH1–PH8、生产部署、备份恢复、迁移和验收仍未完成。证据入口为 `docs/evidence/ekb-core-rebuild/ph0/2026-08-12-baseline/manifest.md`，验证记录为 `.../verification.md`。Sol 需先审查 diff、证据和脚本行为，再决定是否提交/推送。
+
+## 2026-08-12 CR-PH1 foundation local slice
+
+- 在不改历史 v3 migration、不提交/推送/部署的前提下，完成 CR-PH1-T01 + CR-PH1-T03 第一真实业务切片：v4_001/v4_002 additive provenance/runtime migration、append-only ledger/audit、checksum/历史事实 fail-closed、DB-backed jobs/attempts/leases/heartbeats/outbox，以及 entrypoint migration/verify/admin/runtime configuration fail-closed。
+- 本地验证覆盖 v4 migration lifecycle、checksum drift、immutable ledger、租户隔离幂等 enqueue、claim/heartbeat/complete/CAS、lease expiry reclaim、retry/max-attempt DEAD/DLQ/outbox 和 entrypoint no-start failure paths；相关 v3 migration regression 保持通过。证据入口为 `docs/evidence/ekb-core-rebuild/ph1/2026-08-12-foundation/manifest.md`，验证记录为 `.../verification.md`。
+- SQLite v4/v3 suites 与一次 disposable 本地 PostgreSQL+pgvector apply/verify/repeat 已通过；PG 覆盖 JSONB/time bindings、租户/attempt 唯一约束、lease/CAS、双 worker single-claim、retry lifecycle 与 provenance 负向不可变保护。v4 runner 禁止隐式 ORM `create_all`，测试 fixture 显式 bootstrap，生产缺少 imported schema 时 fail closed。
+- 未执行生产 DSN/生产 PostgreSQL、生产 migration/deploy/restart、真实 uvicorn、管理员初始化、备份恢复或外部 provider；精确 disposable 容器已在验证后移除，PH1 总体 exit gate 仍待 Sol 审查及后续切片。下一串行任务为 upload→parse→chunk→index→RAG。
+
+## 2026-08-13 本地真实业务闭环
+
+- 继续既有工作区完成本地真实上传批次、显式开发对象存储、checksum complete、后台 ingest worker 和文档中心浏览器闭环；真实 Chrome 可看到服务端文档的已就绪与失败状态。
+- 统一为 LLM-only：聊天和 Embedding 只走远程受管 Provider/Model；缺少远程 Embedding 时 fail closed 为 `EMBEDDING_UNAVAILABLE`，不回退本地模型或伪向量。
+- 验证：后端 `153 passed, 2 skipped`；前端 typecheck、49 tests、build 通过；官方 npm registry 生产依赖审计为 0 vulnerabilities；本次修改范围精确 ruff 与 `git diff --check` 通过。
+- 证据：`docs/evidence/ekb-core-rebuild/local/2026-08-13-local-business.md`。生产 PostgreSQL/pgvector、对象存储、可靠队列/Worker/Scheduler、Provider 凭据、服务器备份部署回滚仍未执行；不得用 mock 代替，也未在此记录凭据或私密地址。
