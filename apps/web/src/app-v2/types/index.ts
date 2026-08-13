@@ -227,7 +227,14 @@ export type {
   RunStatus,
 } from './apps'
 export type { V2Services } from './services'
-export type { AttachmentUploadResult, AttachmentUploadView, AttachmentsServices } from './attachments'
+export type {
+  AttachmentPromotionInput,
+  AttachmentPromotionResult,
+  AttachmentPromotionView,
+  AttachmentUploadResult,
+  AttachmentUploadView,
+  AttachmentsServices,
+} from './attachments'
 export type {
   IdentityApiClient,
   IdentityListUsersInput,

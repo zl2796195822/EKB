@@ -1,0 +1,24 @@
+/* Theme bridge: semantic tokens are defined in tokens.css; this file contains only global theme behavior. */
+
+html,
+body,
+#root {
+  background-color: var(--color-bg-canvas);
+  color: var(--color-text-primary);
+}
+
+::selection {
+  background: var(--color-selected);
+  color: var(--color-text-primary);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}

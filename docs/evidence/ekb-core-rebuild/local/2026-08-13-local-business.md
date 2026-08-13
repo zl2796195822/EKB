@@ -71,3 +71,10 @@ API 五步链已实际返回成功状态：登录、知识库列表、batch 创�
 - 未执行生产 PostgreSQL/pgvector 原子切库、生产对象存储、可靠队列/Worker/Scheduler、外部 LLM/Embedding 凭据配置、服务器备份/部署/回滚或生产浏览器验收。
 - 本次服务器入口检查实际执行 `bash scripts/deploy/deploy.sh --skip-tests`，因运行时未提供 `DEPLOY_HOST` 以退出码 `64` fail closed；未建立 SSH、未执行备份、迁移、重启或线上写入。
 - 这些动作需要已配置且可审计的生产基础设施、稳定出网和用户批准的部署窗口；本地缺少 Provider 凭据时保持 fail closed，不用 mock 代替。
+
+## 2026-08-13 DONE-LOCAL 追加
+
+- 真实 `POST /api/v1/attachments/{attachment_id}/promotions` 已验证：租户/owner/live ACL、路径冲突、回收站保留、幂等与并发处理均覆盖；复用 attachment `source_object_id` 创建 document/version/job，返回 `202 QUEUED`，worker 状态投影一致。
+- 前端已补助手提升入口；LLM-only 主题支持 `light/dark/auto` semantic tokens。
+- 验证：backend `343 passed, 2 skipped`；web `51 passed`、typecheck/build 通过；ruff/compileall/diff check 通过；真实浏览器登录后 API 返回 `202`，数据库 `source_object_id` 一致。
+- `NOT RUN/BLOCKED`：生产 PostgreSQL/对象存储/队列、服务器备份/部署/重启、生产浏览器未执行，原因是没有运行时 `DEPLOY_HOST`/受管凭据。不得把本地 SQLite 或 `QUEUED` 写成生产完成。`git diff --check` 通过。

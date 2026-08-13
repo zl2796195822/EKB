@@ -1,7 +1,16 @@
-import { Brain, CaretDown, Check, Cpu, Globe, Paperclip, PaperPlaneTilt, Stop, X } from '@phosphor-icons/react'
+import { ArrowUp, Brain, CaretDown, Check, Cpu, Globe, Paperclip, PaperPlaneTilt, Stop, X } from '@phosphor-icons/react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
-import type { ComposerCapabilitiesInfo, ComposerModelInfo, ThinkingLevel } from '../../types'
+import type {
+  AdapterError,
+  AttachmentPromotionInput,
+  AttachmentPromotionResult,
+  AttachmentPromotionView,
+  ComposerCapabilitiesInfo,
+  ComposerModelInfo,
+  KnowledgeBaseView,
+  ThinkingLevel,
+} from '../../types'
 
 export interface ComposerSelectionState {
   readonly attachmentDocIds: readonly string[]
@@ -27,6 +36,17 @@ interface AssistantComposerProps {
   readonly onSubmit: (event: FormEvent<HTMLFormElement>) => void
   readonly onCancel: () => void
   readonly onPickAttachments?: () => Promise<Array<{ readonly docId: string; readonly title: string }>>
+  readonly knowledgeBases: readonly KnowledgeBaseView[]
+  readonly selectedKnowledgeBaseId: string
+  readonly onPromoteAttachment?: (
+    attachmentId: string,
+    input: AttachmentPromotionInput,
+  ) => Promise<AttachmentPromotionResult>
+}
+
+interface PromotionUiState {
+  readonly data?: AttachmentPromotionView
+  readonly error?: AdapterError
 }
 
 function ToggleButton(props: {
@@ -83,10 +103,18 @@ export function AssistantComposer({
   onSubmit,
   onCancel,
   onPickAttachments,
+  knowledgeBases,
+  selectedKnowledgeBaseId,
+  onPromoteAttachment,
 }: AssistantComposerProps) {
   const [panelOpen, setPanelOpen] = useState(false)
   const [activeTab, setActiveTab] = useState<PaneTab>('model')
   const menuRef = useRef<HTMLDivElement | null>(null)
+  const [promotionAttachmentId, setPromotionAttachmentId] = useState<string | null>(null)
+  const [promotionTargetKnowledgeBaseId, setPromotionTargetKnowledgeBaseId] = useState('')
+  const [promotionRelativePath, setPromotionRelativePath] = useState('')
+  const [promotionSubmitting, setPromotionSubmitting] = useState(false)
+  const [promotionStates, setPromotionStates] = useState<Readonly<Record<string, PromotionUiState>>>({})
 
   useEffect(() => {
     if (!panelOpen) return
@@ -149,6 +177,40 @@ export function AssistantComposer({
     const nextLabels = { ...selection.attachmentLabels }
     delete nextLabels[docId]
     onSelectionChange({ ...selection, attachmentDocIds: nextIds, attachmentLabels: nextLabels })
+    if (promotionAttachmentId === docId) setPromotionAttachmentId(null)
+  }
+
+  const openPromotion = (attachmentId: string) => {
+    setPromotionAttachmentId(attachmentId)
+    setPromotionTargetKnowledgeBaseId(selectedKnowledgeBaseId || knowledgeBases[0]?.id || '')
+    setPromotionRelativePath(selection.attachmentLabels[attachmentId] ?? attachmentId)
+    setPromotionSubmitting(false)
+  }
+
+  const closePromotion = () => {
+    if (promotionSubmitting) return
+    setPromotionAttachmentId(null)
+  }
+
+  const submitPromotion = async () => {
+    if (!promotionAttachmentId || !onPromoteAttachment || promotionSubmitting) return
+    const relativePath = promotionRelativePath.trim()
+    if (!promotionTargetKnowledgeBaseId || !relativePath) return
+    setPromotionSubmitting(true)
+    const result = await onPromoteAttachment(promotionAttachmentId, {
+      targetKnowledgeBaseId: promotionTargetKnowledgeBaseId,
+      relativePath,
+    })
+    if (result.state === 'ready' && result.data) {
+      setPromotionStates((current) => ({ ...current, [promotionAttachmentId]: { data: result.data } }))
+      setPromotionAttachmentId(null)
+    } else {
+      setPromotionStates((current) => ({
+        ...current,
+        [promotionAttachmentId]: { error: result.error ?? { code: 'PROMOTION_FAILED', message: '附件提升失败。' } },
+      }))
+    }
+    setPromotionSubmitting(false)
   }
 
   const chooseThinking = (value: ThinkingLevel) => {
@@ -170,11 +232,26 @@ export function AssistantComposer({
       {selection.attachmentDocIds.length > 0 ? (
         <div className="v2-m4-composer-attachments" aria-label="已添加的附件">
           {selection.attachmentDocIds.map((docId) => (
-            <span key={docId} className="v2-m4-attachment-chip">
+            <div key={docId} className="v2-m4-attachment-item">
+              <span className="v2-m4-attachment-chip">
               <Paperclip size={12} aria-hidden="true" />
               <span className="v2-m4-attachment-chip__title">
                 {selection.attachmentLabels[docId] ?? docId}
               </span>
+              {onPromoteAttachment ? (
+                <button
+                  type="button"
+                  className="v2-m4-attachment-chip__promote"
+                  onClick={() => openPromotion(docId)}
+                  aria-expanded={promotionAttachmentId === docId}
+                  aria-label={`提升附件 ${selection.attachmentLabels[docId] ?? docId} 到知识库`}
+                  disabled={streaming || knowledgeBases.length === 0}
+                  title={knowledgeBases.length > 0 ? '提升到知识库' : '没有可用的授权知识库'}
+                >
+                  <ArrowUp size={12} aria-hidden="true" />
+                  提升
+                </button>
+              ) : null}
               <button
                 type="button"
                 className="v2-m4-attachment-chip__remove"
@@ -184,7 +261,63 @@ export function AssistantComposer({
               >
                 <X size={12} aria-hidden="true" />
               </button>
-            </span>
+              </span>
+              {promotionStates[docId]?.data ? (
+                <div className="v2-m4-attachment-promotion-result" role="status">
+                  <strong>状态：{promotionStates[docId].data.status}</strong>
+                  <span>promotion_id：{promotionStates[docId].data.promotionId}</span>
+                  <span>job_id：{promotionStates[docId].data.ingestJobId}</span>
+                </div>
+              ) : null}
+              {promotionAttachmentId === docId ? (
+                <div className="v2-m4-attachment-promotion" role="group" aria-label="提升附件到知识库">
+                  <label>
+                    <span>目标知识库</span>
+                    <select
+                      aria-label="选择提升目标知识库"
+                      value={promotionTargetKnowledgeBaseId}
+                      onChange={(event) => setPromotionTargetKnowledgeBaseId(event.target.value)}
+                      disabled={promotionSubmitting}
+                    >
+                      <option value="">请选择</option>
+                      {knowledgeBases.map((knowledgeBase) => (
+                        <option value={knowledgeBase.id} key={knowledgeBase.id}>
+                          {knowledgeBase.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    <span>知识库相对路径</span>
+                    <input
+                      aria-label="输入知识库相对路径"
+                      value={promotionRelativePath}
+                      onChange={(event) => setPromotionRelativePath(event.target.value)}
+                      placeholder="例如：资料/附件.pdf"
+                      maxLength={4096}
+                      disabled={promotionSubmitting}
+                    />
+                  </label>
+                  {promotionStates[docId]?.error ? (
+                    <div className="v2-m4-attachment-promotion-error" role="alert">
+                      {promotionStates[docId].error.status ? `${promotionStates[docId].error.status} ` : ''}
+                      <strong>{promotionStates[docId].error.code}</strong>{' '}
+                      {promotionStates[docId].error.message}
+                    </div>
+                  ) : null}
+                  <div className="v2-m4-attachment-promotion-actions">
+                    <button type="button" onClick={closePromotion} disabled={promotionSubmitting}>取消</button>
+                    <button
+                      type="button"
+                      onClick={() => void submitPromotion()}
+                      disabled={promotionSubmitting || !promotionTargetKnowledgeBaseId || !promotionRelativePath.trim()}
+                    >
+                      {promotionSubmitting ? '提交中…' : '确认提升'}
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
           ))}
         </div>
       ) : null}

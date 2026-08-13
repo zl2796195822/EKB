@@ -21,7 +21,7 @@ from __future__ import annotations
 import hashlib
 from typing import Annotated, Any, Optional
 
-from fastapi import APIRouter, Body, Depends, Path, Query, Request
+from fastapi import APIRouter, Body, Depends, Path, Query, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy import Engine, text
 
@@ -34,6 +34,10 @@ from ekb_api.domain import AuthContext
 from ekb_api.embedding import embed_batch
 from ekb_api.parsing import parse as _parse
 from ekb_api.services.attachment_processor import ProcessingConfig, process_attachment
+from ekb_api.services.attachment_promotions import (
+    AttachmentPromotionService,
+    PromotionError,
+)
 from ekb_api.services.attachments import (
     AttachmentError,
     AttachmentMessageBindingError,
@@ -140,6 +144,12 @@ class AttachmentSessionRequest(BaseModel):
     byte_size: int = Field(gt=0, le=100 * 1024 * 1024)
     sha256: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-fA-F]{64}$")
     conversation_id: Optional[str] = Field(default=None, max_length=128)
+
+
+class AttachmentPromotionRequest(BaseModel):
+    target_knowledge_base_id: str = Field(min_length=1, max_length=128)
+    relative_path: str = Field(min_length=1, max_length=4096)
+    client_request_id: str = Field(min_length=1, max_length=128)
 
 
 def _register_payload(body: dict[str, Any]) -> dict[str, Any]:
@@ -272,6 +282,34 @@ def get_attachment(
     except Exception as exc:
         raise _translate(exc) from exc
     return rec.as_dict()
+
+
+@router.post(
+    "/{attachment_id}/promotions",
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def promote_attachment(
+    attachment_id: Annotated[str, Path()],
+    payload: AttachmentPromotionRequest,
+    auth: Annotated[AuthContext, Depends(get_live_auth_context)],
+) -> dict[str, Any]:
+    """Queue a real PH3 ingest for the attachment's existing source object."""
+    assert_capability(auth, CAP_KB_WRITE)
+    try:
+        result = AttachmentPromotionService(_engine()).promote(
+            tenant_id=auth.tenant_id,
+            actor_id=auth.actor_id,
+            attachment_id=attachment_id,
+            target_knowledge_base_id=payload.target_knowledge_base_id,
+            relative_path=payload.relative_path,
+            client_request_id=payload.client_request_id,
+            request_id=_request_id(auth),
+        )
+    except PromotionError as exc:
+        raise ApiError(exc.status_code, exc.code, exc.message, exc.details) from exc
+    except Exception as exc:
+        raise _translate(exc) from exc
+    return result.as_dict()
 
 
 @router.get("")

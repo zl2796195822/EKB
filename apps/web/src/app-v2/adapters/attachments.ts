@@ -1,8 +1,19 @@
 import type { ApiClient } from '../../lib/api'
-import type { AdapterCapability, AdapterError, AttachmentsServices, AttachmentUploadResult } from '../types'
+import type {
+  AdapterCapability,
+  AdapterError,
+  AttachmentPromotionResult,
+  AttachmentsServices,
+  AttachmentUploadResult,
+} from '../types'
 import { stateForError, toAdapterError } from './index'
 
 function errorResult(error: unknown, fallbackMessage: string): AttachmentUploadResult {
+  const mapped: AdapterError = toAdapterError(error, fallbackMessage)
+  return { state: stateForError(mapped), error: mapped }
+}
+
+function promotionErrorResult(error: unknown, fallbackMessage: string): AttachmentPromotionResult {
   const mapped: AdapterError = toAdapterError(error, fallbackMessage)
   return { state: stateForError(mapped), error: mapped }
 }
@@ -43,6 +54,32 @@ export function createAttachmentsAdapter(client: ApiClient): AttachmentsServices
         return errorResult(error, '附件上传或处理失败')
       }
     },
+    promote: async (attachmentId, input) => {
+      try {
+        const response = await client.promoteAttachment(attachmentId, {
+          target_knowledge_base_id: input.targetKnowledgeBaseId,
+          relative_path: input.relativePath,
+          client_request_id: crypto.randomUUID(),
+        })
+        return {
+          state: 'ready',
+          data: {
+            promotionId: response.promotion_id,
+            attachmentId: response.attachment_id,
+            targetKnowledgeBaseId: response.target_knowledge_base_id,
+            normalizedRelativePath: response.normalized_relative_path,
+            clientRequestId: response.client_request_id,
+            documentId: response.document_id,
+            documentVersionId: response.document_version_id,
+            ingestJobId: response.ingest_job_id,
+            status: response.status,
+            requestId: response.request_id,
+          },
+        }
+      } catch (error) {
+        return promotionErrorResult(error, '附件提升到知识库失败')
+      }
+    },
   }
 }
 
@@ -51,5 +88,10 @@ export const ATTACHMENT_CAPABILITIES = [
     id: 'attachments.upload-process-context',
     status: 'available',
     reason: '浏览器上传、远程处理和问答上下文使用真实附件端点。',
+  },
+  {
+    id: 'attachments.promote-to-knowledge-base',
+    status: 'available',
+    reason: '附件提升通过真实 POST /attachments/{attachment_id}/promotions 入队，不显示假成功。',
   },
 ] as const satisfies readonly AdapterCapability[]

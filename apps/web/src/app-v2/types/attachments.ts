@@ -15,6 +15,34 @@ export interface AttachmentUploadResult {
   readonly error?: AdapterError
 }
 
+export interface AttachmentPromotionView {
+  readonly promotionId: string
+  readonly attachmentId: string
+  readonly targetKnowledgeBaseId: string
+  readonly normalizedRelativePath: string
+  readonly clientRequestId: string
+  readonly documentId: string
+  readonly documentVersionId: string
+  readonly ingestJobId: string
+  readonly status: string
+  readonly requestId: string
+}
+
+export interface AttachmentPromotionInput {
+  readonly targetKnowledgeBaseId: string
+  readonly relativePath: string
+}
+
+export interface AttachmentPromotionResult {
+  readonly state: PageState
+  readonly data?: AttachmentPromotionView
+  readonly error?: AdapterError
+}
+
 export interface AttachmentsServices {
   readonly upload: (file: File, conversationId?: string) => Promise<AttachmentUploadResult>
+  readonly promote: (
+    attachmentId: string,
+    input: AttachmentPromotionInput,
+  ) => Promise<AttachmentPromotionResult>
 }

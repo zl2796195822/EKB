@@ -175,6 +175,12 @@ export function AssistantPage({ services }: V2PageProps) {
     return picked
   }, [isStreaming, selectedConversationId, services.attachments])
 
+  const handlePromoteAttachment = useCallback(
+    (attachmentId: string, input: import('../types').AttachmentPromotionInput) =>
+      services.attachments.promote(attachmentId, input),
+    [services.attachments],
+  )
+
   const loadKnowledgeBases = useCallback(async () => {
     setKnowledgeState('loading')
     const result = await services.knowledge.list()
@@ -731,6 +737,9 @@ export function AssistantPage({ services }: V2PageProps) {
           onSubmit={handleSend}
           onCancel={() => void handleCancel()}
           onPickAttachments={handlePickAttachments}
+          knowledgeBases={knowledgeBases}
+          selectedKnowledgeBaseId={selectedKbId}
+          onPromoteAttachment={handlePromoteAttachment}
         />
       </main>
       <AssistantContextPanel

@@ -435,3 +435,9 @@ Nginx 配置：
 - 本次续作补齐真实附件聊天链路：浏览器可完成 session → 受保护对象 PUT → process → 带 attachment_doc_ids 的 SSE ask；附件按 tenant/owner/conversation/status 校验，独立于 KB ID，并持久化附件引用。前端 thinking level 在 API 边界归一化为 canonical `light/medium/high`，避免旧 UI 值触发 400。全量后端 `331 passed, 2 skipped`；前端 typecheck、49 tests、build、npm production audit 通过；Playwright 真实附件问答显示阶段完成、seq=10 和附件引用。生产 PostgreSQL/pgvector、对象存储、可靠队列/Worker/Scheduler、Provider 凭据、服务器备份部署回滚仍未执行。
 - 又收紧图片真实性：Vision 仅使用当前用户配置且 capability 明确支持 Vision 的远程模型，发送 typed image content；无远程 Vision/OCR 时 fail closed，不写本地占位文本；远程 S3 session 返回 presigned PUT，本地开发才走受保护 PUT。回归 `333 passed, 2 skipped`，无凭据写入。
 - 服务器部署入口检查因未提供运行时 `DEPLOY_HOST` 以退出码 64 fail closed；未执行 SSH、备份、迁移、重启或线上写入。最新浏览器附件问答 session/PUT/process/ask 全部 200，阶段完成、seq=22。提交 `ebc0c3e` 已推送并与远端 SHA 一致。
+## 2026-08-13 Promotion and theme local slice
+
+- DONE-LOCAL：真实 POST /api/v1/attachments/{attachment_id}/promotions；校验 tenant/owner/live KB ACL、路径冲突/回收站保留/幂等/并发；复用 attachment source_object_id 创建 document/version/ingest job，返回 HTTP 202、状态 QUEUED，worker 投影真实状态，不把队列写成成功。
+- DONE-LOCAL：助手附件“提升”入口和真实错误/状态/ID 显示；主题支持 semantic tokens、light/dark/auto、系统主题和 storage 同步、reduced-motion；LLM-only，不使用本地模型/mock。
+- 验证：后端 343 passed, 2 skipped；前端 51 passed、typecheck/build 通过；ruff、compileall、git diff --check 通过；真实浏览器登录后实调 KB 与 promotion API 返回 202，数据库确认 document_version.source_object_id 与 attachment 一致。
+- NOT RUN/BLOCKED：生产 PostgreSQL/pgvector、对象存储、可靠队列/Worker/Scheduler、服务器备份/部署/重启/生产浏览器；运行时 DEPLOY_HOST 和受管凭据未配置，不猜测、不输出、不落盘。生产未完成，不能标记 PH0–PH8 全部完成。

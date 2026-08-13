@@ -31,7 +31,7 @@ from datetime import datetime, timedelta
 from typing import Any, Optional
 from uuid import uuid4
 
-from sqlalchemy import Engine, text
+from sqlalchemy import Engine, inspect, text
 
 from ekb_api.domain import utc_now
 from ekb_api.services.parsers.registry import is_retryable, sanitize_detail
@@ -49,6 +49,54 @@ ACTIVE_STATES = frozenset({"WAITING", *STAGES})
 INGEST_JOB_TYPE = "document_ingest"
 DEFAULT_MAX_ATTEMPTS = 3
 DEFAULT_LEASE_SECONDS = 300
+
+
+def _sync_promotion_status(
+    connection,
+    *,
+    tenant_id: str,
+    ingest_job_id: str,
+    status: str,
+    from_statuses: tuple[str, ...],
+) -> None:
+    """Project a real PH3 job transition onto its optional PH5 promotion row."""
+    if status not in {"PROCESSING", "SUCCEEDED", "FAILED"}:
+        raise ValueError(f"unsupported promotion status: {status}")
+    if not inspect(connection).has_table("attachment_promotions"):
+        return
+    placeholders = ",".join(f":from_{index}" for index in range(len(from_statuses)))
+    params: dict[str, Any] = {
+        "tenant": tenant_id,
+        "job": ingest_job_id,
+        "status": status,
+    }
+    params.update({f"from_{index}": value for index, value in enumerate(from_statuses)})
+    connection.execute(
+        text(
+            "UPDATE attachment_promotions SET status=:status "
+            "WHERE tenant_id=:tenant AND ingest_job_id=:job "
+            f"AND status IN ({placeholders})"
+        ),
+        params,
+    )
+
+
+def sync_promotion_status_for_job(
+    engine: Engine,
+    *,
+    tenant_id: str,
+    ingest_job_id: str,
+    status: str,
+) -> None:
+    """Best-effort projection for failures that occur before an ingest attempt."""
+    with engine.begin() as connection:
+        _sync_promotion_status(
+            connection,
+            tenant_id=tenant_id,
+            ingest_job_id=ingest_job_id,
+            status=status,
+            from_statuses=("QUEUED", "PROCESSING", "FAILED"),
+        )
 
 _NEXT_STATE = {"WAITING": STAGES[0]}
 for _i, _stage in enumerate(STAGES):
@@ -470,6 +518,13 @@ class IngestService:
                 ),
                 {"dv": str(job.document_version_id), "tenant": tenant_id},
             )
+            _sync_promotion_status(
+                connection,
+                tenant_id=tenant_id,
+                ingest_job_id=ingest_job_id,
+                status="PROCESSING",
+                from_statuses=("QUEUED", "FAILED"),
+            )
             return _row_to_attempt(self._require_attempt(connection, tenant_id, attempt_id))
 
     def run_stage(
@@ -565,6 +620,13 @@ class IngestService:
                 ),
                 {"dv": version_id, "now": current, "doc": str(job.doc_id), "tenant": tenant_id},
             )
+            _sync_promotion_status(
+                connection,
+                tenant_id=tenant_id,
+                ingest_job_id=str(job.id),
+                status="SUCCEEDED",
+                from_statuses=("QUEUED", "PROCESSING"),
+            )
             return self._projection(connection, tenant_id, str(job.id))
 
     def fail(
@@ -605,6 +667,13 @@ class IngestService:
                 job_row=job,
                 status="QUEUED" if retry else "FAILED",
                 now=current,
+            )
+            _sync_promotion_status(
+                connection,
+                tenant_id=tenant_id,
+                ingest_job_id=str(job.id),
+                status="FAILED",
+                from_statuses=("QUEUED", "PROCESSING", "FAILED"),
             )
             connection.execute(
                 text(
@@ -653,6 +722,13 @@ class IngestService:
             )
             self._bump(
                 connection, tenant_id=tenant_id, job_row=job, status="CANCELLED", now=current
+            )
+            _sync_promotion_status(
+                connection,
+                tenant_id=tenant_id,
+                ingest_job_id=ingest_job_id,
+                status="FAILED",
+                from_statuses=("QUEUED", "PROCESSING", "FAILED"),
             )
             connection.execute(
                 text("UPDATE ingest_jobs SET active_attempt_id=NULL WHERE id=:id AND tenant_id=:t"),
@@ -741,6 +817,13 @@ class IngestService:
                 job = self._require_job(connection, tenant_id, str(row.ingest_job_id))
                 self._bump(
                     connection, tenant_id=tenant_id, job_row=job, status="QUEUED", now=current
+                )
+                _sync_promotion_status(
+                    connection,
+                    tenant_id=tenant_id,
+                    ingest_job_id=str(row.ingest_job_id),
+                    status="FAILED",
+                    from_statuses=("QUEUED", "PROCESSING", "FAILED"),
                 )
                 connection.execute(
                     text(

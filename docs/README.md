@@ -41,3 +41,13 @@ CR-PH1-T01 + CR-PH1-T03 的第一真实业务切片已在本地工作树实现�
 ## Local business closure evidence (2026-08-13)
 
 本地真实上传/对象写入/checksum complete/后台解析失败闭环、LLM-only Provider/Embedding/Vision/OCR fail-closed、附件问答引用、文档中心真实浏览器验收和回归结果记录于 [`evidence/ekb-core-rebuild/local/2026-08-13-local-business.md`](./evidence/ekb-core-rebuild/local/2026-08-13-local-business.md)。该证据明确区分本地 SQLite/开发对象存储与生产 PostgreSQL/pgvector、对象存储、队列、Worker、Scheduler、Provider 及部署前置；未满足生产前置时不得标记 PH1–PH8 完成。
+
+## Local business closure update (2026-08-13)
+
+本地 DONE-LOCAL 已追加附件 promotion 与主题/助手切片证据：真实 `POST /api/v1/attachments/{attachment_id}/promotions` 覆盖租户/owner/live ACL、路径冲突、回收站保留、幂等、并发，复用 `source_object_id` 创建 document/version/job，返回 `202 QUEUED` 并完成 worker 状态投影；前端助手提升入口支持，LLM-only 主题支持 `light/dark/auto` semantic tokens。验证为 backend `343 passed, 2 skipped`、web `51 passed`、typecheck/build、ruff/compileall/diff check，以及真实浏览器登录后 API `202` 与数据库 `source_object_id` 一致。生产 PostgreSQL/对象存储/队列、服务器备份部署重启和生产浏览器仍 `NOT RUN/BLOCKED`，因无运行时 `DEPLOY_HOST`/受管凭据；本地 SQLite 或 `QUEUED` 不代表生产完成。
+## 2026-08-13 Promotion and theme local slice
+
+- DONE-LOCAL：真实 POST /api/v1/attachments/{attachment_id}/promotions；校验 tenant/owner/live KB ACL、路径冲突/回收站保留/幂等/并发；复用 attachment source_object_id 创建 document/version/ingest job，返回 HTTP 202、状态 QUEUED，worker 投影真实状态，不把队列写成成功。
+- DONE-LOCAL：助手附件“提升”入口和真实错误/状态/ID 显示；主题支持 semantic tokens、light/dark/auto、系统主题和 storage 同步、reduced-motion；LLM-only，不使用本地模型/mock。
+- 验证：后端 343 passed, 2 skipped；前端 51 passed、typecheck/build 通过；ruff、compileall、git diff --check 通过；真实浏览器登录后实调 KB 与 promotion API 返回 202，数据库确认 document_version.source_object_id 与 attachment 一致。
+- NOT RUN/BLOCKED：生产 PostgreSQL/pgvector、对象存储、可靠队列/Worker/Scheduler、服务器备份/部署/重启/生产浏览器；运行时 DEPLOY_HOST 和受管凭据未配置，不猜测、不输出、不落盘。生产未完成，不能标记 PH0–PH8 全部完成。

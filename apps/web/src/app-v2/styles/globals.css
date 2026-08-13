@@ -1,4 +1,5 @@
 @import './tokens.css';
+@import './theme.css';
 @import './components.css';
 @import './dashboard.css';
 @import './module-map.css';
@@ -10,8 +11,8 @@
 @import './trash.css';
 
 :root {
-  color: var(--v2-color-ink);
-  background: var(--v2-color-canvas);
+  color: var(--color-text-primary);
+  background: var(--color-bg-canvas);
   font-family: var(--v2-font-sans);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -31,7 +32,9 @@ body,
 }
 
 body {
-  background: var(--v2-color-canvas);
+  background: var(--color-bg-canvas);
+  color: var(--color-text-primary);
+  transition: background-color 160ms ease, color 160ms ease;
 }
 
 button,
@@ -83,10 +86,10 @@ a {
   width: min(100%, 860px);
   margin: 0 auto;
   padding: 36px;
-  border: 1px solid var(--v2-color-border);
+  border: 1px solid var(--color-border);
   border-radius: var(--v2-radius-md);
-  background: var(--v2-color-surface);
-  box-shadow: var(--v2-shadow-card);
+  background: var(--color-surface-raised);
+  box-shadow: var(--shadow-raised);
 }
 
 .v2-page-placeholder h1 {
@@ -112,15 +115,15 @@ a {
 
 .v2-state-panel {
   padding: 16px;
-  border: 1px solid var(--v2-color-border);
+  border: 1px solid var(--color-border);
   border-radius: var(--v2-radius-sm);
-  background: var(--v2-color-primary-soft);
-  color: var(--v2-color-ink);
+  background: var(--color-info-surface);
+  color: var(--color-text-primary);
 }
 
 .v2-state-panel p {
   margin: 8px 0 0;
-  color: var(--v2-color-ink-soft);
+  color: var(--color-text-secondary);
   font-size: var(--v2-font-size-md);
   line-height: 1.6;
 }
@@ -128,22 +131,22 @@ a {
 .v2-state-panel small {
   display: block;
   margin-top: 8px;
-  color: var(--v2-color-muted);
+  color: var(--color-text-muted);
 }
 
 .v2-state-panel[data-state='error'] {
-  border-color: #f3c8d0;
-  background: var(--v2-color-danger-soft);
+  border-color: var(--color-danger);
+  background: var(--color-danger-surface);
 }
 
 .v2-state-panel[data-state='permission-denied'],
 .v2-state-panel[data-state='disabled'],
 .v2-state-panel[data-state='unavailable'] {
-  background: var(--v2-color-warning-soft);
+  background: var(--color-warning-surface);
 }
 
 .v2-state-panel[data-state='empty'] {
-  background: #fbfcff;
+  background: var(--color-bg-subtle);
 }
 
 @media (max-width: 980px) {

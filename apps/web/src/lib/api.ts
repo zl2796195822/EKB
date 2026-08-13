@@ -220,6 +220,19 @@ export interface AttachmentSessionResponse {
   object_key: string
 }
 
+export interface AttachmentPromotionResponse {
+  promotion_id: string
+  attachment_id: string
+  target_knowledge_base_id: string
+  normalized_relative_path: string
+  client_request_id: string
+  document_id: string
+  document_version_id: string
+  ingest_job_id: string
+  status: string
+  request_id: string
+}
+
 /** 后端 GET /qa/capabilities 响应（snake_case，和 schemas.py 对齐） */
 export interface QaModelInfo {
   id: string
@@ -600,6 +613,23 @@ export class ApiClient {
     return this.request(`/attachments/${encodeURIComponent(attachmentId)}/process`, {
       method: 'POST',
     })
+  }
+
+  async promoteAttachment(
+    attachmentId: string,
+    payload: {
+      target_knowledge_base_id: string
+      relative_path: string
+      client_request_id: string
+    },
+  ): Promise<AttachmentPromotionResponse> {
+    return this.request<AttachmentPromotionResponse>(
+      `/attachments/${encodeURIComponent(attachmentId)}/promotions`,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      },
+    )
   }
 
   async completeUploadItem(

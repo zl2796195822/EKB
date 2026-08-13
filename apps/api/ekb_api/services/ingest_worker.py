@@ -17,7 +17,11 @@ from sqlalchemy import Engine, text
 from ekb_api.chunking import split_sections
 from ekb_api.domain import utc_now
 from ekb_api.embedding import EmbeddingError, embed_batch
-from ekb_api.services.ingestion import STAGES, IngestService
+from ekb_api.services.ingestion import (
+    STAGES,
+    IngestService,
+    sync_promotion_status_for_job,
+)
 from ekb_api.services.jobs import ClaimedJob, JobService
 from ekb_api.services.parsers import (
     ParserError,
@@ -348,14 +352,25 @@ def _fail_claim(
                 detail=sanitize_detail(detail),
             )
     finally:
-        jobs.fail(
-            tenant_id=claimed.job.tenant_id,
-            job_id=claimed.job.id,
-            worker_id=owner,
-            error_code=code,
-            sanitized_error={"code": code, "retryable": is_retryable(code)},
-            retryable=is_retryable(code),
-        )
+        try:
+            jobs.fail(
+                tenant_id=claimed.job.tenant_id,
+                job_id=claimed.job.id,
+                worker_id=owner,
+                error_code=code,
+                sanitized_error={"code": code, "retryable": is_retryable(code)},
+                retryable=is_retryable(code),
+            )
+        finally:
+            # A failure can happen before IngestService.start_attempt (for
+            # example, the source object is missing), so the projection must
+            # also be closed by job id rather than only by active attempt.
+            sync_promotion_status_for_job(
+                engine,
+                tenant_id=claimed.job.tenant_id,
+                ingest_job_id=str(claimed.job.payload.get("ingest_job_id", "")),
+                status="FAILED",
+            )
 
 
 def run_ingest_tick(

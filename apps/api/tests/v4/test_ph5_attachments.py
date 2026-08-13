@@ -23,12 +23,23 @@ import json
 import pytest
 from sqlalchemy import text
 
+from ekb_api.core.auth import get_live_auth_context
+from ekb_api.core.authorization import CAP_KB_WRITE
 from ekb_api.core.db import build_engine, prepare_legacy_schema
+from ekb_api.domain import AuthContext, TenantRole
 from ekb_api.migrations.v4_fullstack import CHAIN
 from ekb_api.services.attachment_processor import (
     LocalBytesStore,
     ProcessingConfig,
     process_attachment,
+)
+from ekb_api.services.attachment_promotions import (
+    AttachmentPromotionService,
+    PromotionError,
+    PromotionForbidden,
+    PromotionPathConflict,
+    PromotionPathReservedByTrash,
+    PromotionTargetNotFound,
 )
 from ekb_api.services.attachments import (
     AttachmentNotFound,
@@ -37,6 +48,7 @@ from ekb_api.services.attachments import (
     AttachmentStateConflict,
     AttachmentStatus,
 )
+from ekb_api.services.ingestion import STAGES, IngestService
 from ekb_api.services.ocr import OcrResult, OcrUnavailable, run_ocr
 from ekb_api.services.vision import decide_image_mode
 
@@ -161,6 +173,28 @@ def _process(env, attachment_id: str, store: LocalBytesStore, *, vision: bool):
                               vision=_FakeVision(vision), ocr=_FakeOcr())
     return process_attachment(svc, tenant_id=env["tenant"], actor_id=env["user"],
                               attachment_id=attachment_id, storage=store, config=config)
+
+
+def _target_kb(env) -> str:
+    with env["engine"].connect() as conn:
+        return str(
+            conn.execute(
+                text("SELECT id FROM knowledge_bases WHERE tenant_id=:t ORDER BY id LIMIT 1"),
+                {"t": env["tenant"]},
+            ).scalar_one()
+        )
+
+
+def _promote(env, attachment_id: str, *, path: str, request: str):
+    return AttachmentPromotionService(env["engine"]).promote(
+        tenant_id=env["tenant"],
+        actor_id=env["user"],
+        attachment_id=attachment_id,
+        target_knowledge_base_id=_target_kb(env),
+        relative_path=path,
+        client_request_id=request,
+        request_id="trace-ph5-promotion",
+    )
 
 
 # ---- migration chain ------------------------------------------------------
@@ -327,3 +361,302 @@ def test_run_ocr_requires_remote_provider() -> None:
     assert ok.text.startswith("[OCR]")
     with pytest.raises(OcrUnavailable):
         run_ocr(None, b"1234", mime="image/png")
+
+
+# ---- promotion ------------------------------------------------------------
+
+
+def test_attachment_promotion_reuses_source_and_stays_queued(env) -> None:
+    store = LocalBytesStore()
+    body = b"promotion source body"
+    store.put("obj-promo", body)
+    rec_id = _register(env, "obj-promo", "text/plain", len(body), "cr-promo")
+    _process(env, rec_id, store, vision=False)
+
+    result = _promote(env, rec_id, path="promoted/source.txt", request="promo-1")
+    assert result.status == "QUEUED"
+    assert result.document_id and result.document_version_id and result.ingest_job_id
+    with env["engine"].connect() as conn:
+        version = conn.execute(
+            text(
+                "SELECT source_object_id FROM document_versions WHERE id=:version"
+            ),
+            {"version": result.document_version_id},
+        ).scalar_one()
+        job = conn.execute(
+            text("SELECT status FROM ingest_jobs WHERE id=:job"),
+            {"job": result.ingest_job_id},
+        ).scalar_one()
+        promotion = conn.execute(
+            text(
+                "SELECT status, document_version_id, ingest_job_id "
+                "FROM attachment_promotions WHERE id=:id"
+            ),
+            {"id": result.promotion_id},
+        ).one()
+    attachment = AttachmentService(env["engine"]).get(
+        tenant_id=env["tenant"], attachment_id=rec_id
+    )
+    assert str(version) == attachment.source_object_id
+    assert job == "QUEUED"
+    assert promotion.status == "QUEUED"
+    assert promotion.document_version_id == result.document_version_id
+    assert promotion.ingest_job_id == result.ingest_job_id
+
+
+def test_attachment_promotion_status_follows_real_ingest_lifecycle(env) -> None:
+    store = LocalBytesStore()
+    body = b"promotion lifecycle"
+    store.put("obj-lifecycle", body)
+    rec_id = _register(env, "obj-lifecycle", "text/plain", len(body), "cr-lifecycle")
+    _process(env, rec_id, store, vision=False)
+    result = _promote(env, rec_id, path="promoted/lifecycle.txt", request="lifecycle-1")
+    ingest = IngestService(env["engine"])
+
+    attempt = ingest.start_attempt(
+        tenant_id=env["tenant"],
+        ingest_job_id=result.ingest_job_id,
+        lease_owner="promotion-test-worker",
+    )
+    with env["engine"].connect() as conn:
+        assert conn.execute(
+            text("SELECT status FROM attachment_promotions WHERE id=:id"),
+            {"id": result.promotion_id},
+        ).scalar_one() == "PROCESSING"
+
+    for stage in STAGES:
+        ingest.run_stage(
+            tenant_id=env["tenant"],
+            attempt_id=attempt.id,
+            stage=stage,
+            progress_current=1,
+            progress_total=len(STAGES),
+        )
+    ingest.succeed(tenant_id=env["tenant"], attempt_id=attempt.id)
+    with env["engine"].connect() as conn:
+        assert conn.execute(
+            text("SELECT status FROM attachment_promotions WHERE id=:id"),
+            {"id": result.promotion_id},
+        ).scalar_one() == "SUCCEEDED"
+
+
+def test_attachment_promotion_failure_is_projected_as_failed(env) -> None:
+    store = LocalBytesStore()
+    body = b"promotion failure"
+    store.put("obj-failure", body)
+    rec_id = _register(env, "obj-failure", "text/plain", len(body), "cr-failure")
+    _process(env, rec_id, store, vision=False)
+    result = _promote(env, rec_id, path="promoted/failure.txt", request="failure-1")
+    ingest = IngestService(env["engine"])
+    attempt = ingest.start_attempt(
+        tenant_id=env["tenant"],
+        ingest_job_id=result.ingest_job_id,
+        lease_owner="promotion-test-worker",
+    )
+    ingest.fail(
+        tenant_id=env["tenant"],
+        attempt_id=attempt.id,
+        error_code="PARSER_ENCRYPTED",
+    )
+    with env["engine"].connect() as conn:
+        assert conn.execute(
+            text("SELECT status FROM attachment_promotions WHERE id=:id"),
+            {"id": result.promotion_id},
+        ).scalar_one() == "FAILED"
+
+
+def test_attachment_promotion_is_idempotent_by_client_request(env) -> None:
+    store = LocalBytesStore()
+    body = b"idempotent promotion"
+    store.put("obj-idem", body)
+    rec_id = _register(env, "obj-idem", "text/plain", len(body), "cr-idem")
+    _process(env, rec_id, store, vision=False)
+
+    first = _promote(env, rec_id, path="promoted/idempotent.txt", request="same-request")
+    second = _promote(env, rec_id, path="promoted/idempotent.txt", request="same-request")
+    assert second == first
+    with env["engine"].connect() as conn:
+        assert conn.execute(
+            text(
+                "SELECT COUNT(*) FROM attachment_promotions WHERE attachment_id=:a"
+            ),
+            {"a": rec_id},
+        ).scalar_one() == 1
+        assert conn.execute(
+            text("SELECT COUNT(*) FROM document_versions WHERE source_object_id=:s"),
+            {"s": "obj-idem"},
+        ).scalar_one() == 1
+
+
+def test_attachment_promotion_idempotency_does_not_bypass_owner(env) -> None:
+    store = LocalBytesStore()
+    body = b"idempotency owner boundary"
+    store.put("obj-owner-boundary", body)
+    rec_id = _register(env, "obj-owner-boundary", "text/plain", len(body), "cr-owner-boundary")
+    _process(env, rec_id, store, vision=False)
+    _promote(env, rec_id, path="promoted/owner-boundary.txt", request="owner-boundary-1")
+
+    with pytest.raises(AttachmentOwnershipError):
+        AttachmentPromotionService(env["engine"]).promote(
+            tenant_id=env["tenant"],
+            actor_id="different-actor",
+            attachment_id=rec_id,
+            target_knowledge_base_id=_target_kb(env),
+            relative_path="promoted/owner-boundary.txt",
+            client_request_id="owner-boundary-1",
+            request_id="trace-other-actor",
+        )
+
+
+def test_attachment_promotion_rejects_not_ready_and_traversal(env) -> None:
+    rec_id = _register(env, "obj-not-ready", "text/plain", 5, "cr-not-ready")
+    with pytest.raises(AttachmentStateConflict):
+        _promote(env, rec_id, path="safe/file.txt", request="not-ready")
+
+    store = LocalBytesStore()
+    store.put("obj-path", b"path content")
+    ready_id = _register(env, "obj-path", "text/plain", 12, "cr-path")
+    _process(env, ready_id, store, vision=False)
+    with pytest.raises(PromotionError):
+        _promote(env, ready_id, path="../escape.txt", request="bad-path")
+
+
+def test_attachment_promotion_rejects_path_conflict_and_trash_reserved(env) -> None:
+    store = LocalBytesStore()
+    body = b"conflict content"
+    store.put("obj-conflict", body)
+    rec_id = _register(env, "obj-conflict", "text/plain", len(body), "cr-conflict")
+    _process(env, rec_id, store, vision=False)
+    kb = _target_kb(env)
+    path = "promoted/conflict.txt"
+
+    with env["engine"].begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO documents "
+                "(id, tenant_id, kb_id, title, status, version, mime_type, checksum, "
+                "chunk_count, source_type, created_at, updated_at, normalized_relative_path) "
+                "VALUES (:id,:tenant,:kb,'existing','READY',1,'text/plain','x',0,'UPLOAD',"
+                ":now,:now,:path)"
+            ),
+            {
+                "id": "existing-doc",
+                "tenant": env["tenant"],
+                "kb": kb,
+                "now": "2026-08-12T00:00:00Z",
+                "path": path,
+            },
+        )
+    with pytest.raises(PromotionPathConflict):
+        _promote(env, rec_id, path=path, request="conflict-1")
+
+    with env["engine"].begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE documents SET deleted_at=NULL, status='DELETED' "
+                "WHERE id='existing-doc'"
+            ),
+            {},
+        )
+    with pytest.raises(PromotionPathReservedByTrash):
+        _promote(env, rec_id, path=path, request="conflict-2")
+
+
+def test_attachment_promotion_enforces_owner_and_target_tenant(env) -> None:
+    store = LocalBytesStore()
+    body = b"tenant boundary"
+    store.put("obj-tenant", body)
+    rec_id = _register(env, "obj-tenant", "text/plain", len(body), "cr-tenant")
+    _process(env, rec_id, store, vision=False)
+    service = AttachmentPromotionService(env["engine"])
+
+    with pytest.raises(AttachmentOwnershipError):
+        service.promote(
+            tenant_id=env["tenant"],
+            actor_id="other-user",
+            attachment_id=rec_id,
+            target_knowledge_base_id=_target_kb(env),
+            relative_path="promoted/tenant.txt",
+            client_request_id="owner-fail",
+            request_id="trace",
+        )
+
+
+def test_attachment_promotion_uses_live_tenant_role_not_legacy_user_role(env) -> None:
+    store = LocalBytesStore()
+    body = b"live ACL boundary"
+    store.put("obj-live-acl", body)
+    rec_id = _register(env, "obj-live-acl", "text/plain", len(body), "cr-live-acl")
+    _process(env, rec_id, store, vision=False)
+    kb = _target_kb(env)
+    service = AttachmentPromotionService(env["engine"])
+    with env["engine"].begin() as conn:
+        member_role_id = conn.execute(
+            text("SELECT id FROM tenant_roles WHERE tenant_id=:t AND slug='member'"),
+            {"t": env["tenant"]},
+        ).scalar_one()
+        conn.execute(
+            text(
+                "UPDATE tenant_memberships SET role_id=:role "
+                "WHERE tenant_id=:t AND user_id=:u"
+            ),
+            {"role": member_role_id, "t": env["tenant"], "u": env["user"]},
+        )
+        conn.execute(
+            text("DELETE FROM kb_memberships WHERE tenant_id=:t AND kb_id=:kb AND user_id=:u"),
+            {"t": env["tenant"], "kb": kb, "u": env["user"]},
+        )
+        legacy_role = conn.execute(
+            text("SELECT role FROM users WHERE id=:u"), {"u": env["user"]}
+        ).scalar_one()
+    assert str(legacy_role).upper() == "OWNER"
+    with pytest.raises(PromotionForbidden):
+        _promote(env, rec_id, path="promoted/live-acl.txt", request="live-acl-1")
+    with pytest.raises(PromotionTargetNotFound):
+        service.promote(
+            tenant_id=env["tenant"],
+            actor_id=env["user"],
+            attachment_id=rec_id,
+            target_knowledge_base_id="kb-from-other-tenant",
+            relative_path="promoted/tenant.txt",
+            client_request_id="tenant-fail",
+            request_id="trace",
+        )
+
+
+def test_attachment_promotion_http_contract_returns_202(env, monkeypatch) -> None:
+    store = LocalBytesStore()
+    body = b"http promotion"
+    store.put("obj-http", body)
+    rec_id = _register(env, "obj-http", "text/plain", len(body), "cr-http")
+    _process(env, rec_id, store, vision=False)
+
+    from fastapi.testclient import TestClient
+
+    import ekb_api.routers.attachments as attachment_router
+    from ekb_api.main import app
+
+    auth = AuthContext(
+        actor_id=env["user"],
+        tenant_id=env["tenant"],
+        tenant_role=TenantRole.OWNER,
+        platform_role="NONE",
+        capabilities=[CAP_KB_WRITE],
+        policy_version=1,
+        trace_id="trace-http-promotion",
+    )
+    monkeypatch.setattr(attachment_router, "_engine", lambda: env["engine"])
+    app.dependency_overrides[get_live_auth_context] = lambda: auth
+    try:
+        response = TestClient(app).post(
+            f"/api/v1/attachments/{rec_id}/promotions",
+            json={
+                "target_knowledge_base_id": _target_kb(env),
+                "relative_path": "promoted/http.txt",
+                "client_request_id": "http-promotion-1",
+            },
+        )
+    finally:
+        app.dependency_overrides.pop(get_live_auth_context, None)
+    assert response.status_code == 202, response.text
+    assert response.json()["status"] == "QUEUED"
