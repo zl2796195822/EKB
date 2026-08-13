@@ -53,6 +53,19 @@ export async function runM3ContractTests(): Promise<void> {
         job_id: 'job-1', error: null,
       }],
     }),
+    listUploadBatches: async () => ({
+      items: [{
+        id: 'batch-1', kb_id: 'kb-1', mode: 'FILE', status: 'processing', item_count: 1, total_bytes: 4,
+        created_at: '2026-08-09T00:00:00Z', updated_at: '2026-08-09T00:01:00Z', counts: { processing: 1 },
+        items: [{
+          id: 'item-1', client_item_id: 'client-1', relative_path: 'docs/real.txt', status: 'processing',
+          source_status: 'UPLOADED', byte_size: 4, uploaded_bytes: 4, stage: 'PARSING', attempt_id: 'attempt-1',
+          attempt_no: 1, attempts: 1, progress: { unit: 'pages', current: 2, total: 4 }, version_id: 'version-1',
+          job_id: 'job-1', error: null,
+        }],
+      }],
+      limit: 30,
+    }),
     retryIngestJob: async (jobId: string) => ({ success: true, attempt_id: `attempt-retry-${jobId}`, attempt_no: 2 }),
     cancelIngestJob: async () => ({ status: 'CANCELLED' }),
     abortUploadItem: async () => ({ success: true, item_id: 'item-1', status: 'ABORTED' }),
@@ -77,6 +90,8 @@ export async function runM3ContractTests(): Promise<void> {
   assert(uploadResult.data?.docId === 'doc-2' && uploadResult.data.jobId === 'job-2', 'upload adapter should expose accepted metadata')
   const batchResult = await documents.getUploadBatch('batch-1')
   assert(batchResult.data?.status === 'processing' && batchResult.data.items[0]?.attemptId === 'attempt-1', 'upload center should map server batch/item metadata')
+  const batchListResult = await documents.listUploadBatches()
+  assert(batchListResult.data?.[0]?.id === 'batch-1' && batchListResult.data[0].items[0]?.jobId === 'job-1', 'upload center list adapter should map server batch projections')
   const retried = await documents.retryUploadJob('job-1')
   assert(retried.data?.attemptNo === 2, 'upload center retry should preserve server attempt number')
   const cancelled = await documents.cancelUploadJob('job-1')

@@ -1143,6 +1143,25 @@ class UploadService:
             counts=counts,
         )
 
+    def list_batches(self, *, tenant_id: str, limit: int = 30) -> list[BatchProjection]:
+        """Return the most recently updated upload batches for one tenant."""
+
+        bounded_limit = max(1, min(100, int(limit)))
+        with self.engine.connect() as connection:
+            batch_ids = connection.execute(
+                text(
+                    "SELECT id FROM upload_batches "
+                    "WHERE tenant_id=:tenant "
+                    "ORDER BY updated_at DESC, created_at DESC, id DESC "
+                    "LIMIT :limit"
+                ),
+                {"tenant": tenant_id, "limit": bounded_limit},
+            ).scalars().all()
+        return [
+            self.get_batch(tenant_id=tenant_id, batch_id=str(batch_id))
+            for batch_id in batch_ids
+        ]
+
     def _item_projection(self, connection, item_row, *, tenant_id: str) -> ItemProjection:
         version_id = None
         job_id = None

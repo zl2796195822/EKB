@@ -355,6 +355,14 @@ export function createDocumentsAdapter(client: ApiClient): DocumentsServices {
         return errorResult(error, '版本差异加载失败')
       }
     },
+    listUploadBatches: async () => {
+      try {
+        const data = (await client.listUploadBatches(30)).items.map(mapUploadBatch)
+        return { state: stateForData(data), data }
+      } catch (error) {
+        return errorResult(error, '上传批次列表加载失败')
+      }
+    },
     getUploadBatch: async (batchId) => {
       try {
         return { state: 'ready', data: mapUploadBatch(await client.getUploadBatch(batchId)) }

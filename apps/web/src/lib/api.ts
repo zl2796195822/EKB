@@ -39,6 +39,7 @@ import type {
   TurnCancelResponse,
   TurnPhase,
   UploadAcceptedResponse,
+  UploadBatchListResponse,
   UploadBatchProjection,
   UploadBatchResponse,
   TenantCreate,
@@ -641,6 +642,10 @@ export class ApiClient {
 
   async getUploadBatch(batchId: string): Promise<UploadBatchProjection> {
     return this.request<UploadBatchProjection>(`/kb/uploads/batches/${encodeURIComponent(batchId)}`)
+  }
+
+  async listUploadBatches(limit = 30): Promise<UploadBatchListResponse> {
+    return this.request<UploadBatchListResponse>(`/kb/uploads/batches${buildQuery({ limit })}`)
   }
 
   async retryIngestJob(jobId: string): Promise<{ success: boolean; attempt_id: string; attempt_no: number }> {

@@ -146,6 +146,104 @@ def test_projection_is_tenant_scoped(env) -> None:
     assert "不存在" in str(exc_info.value) or "NOT_FOUND" in str(exc_info.value)
 
 
+def test_list_batches_orders_by_updated_at_and_clamps_limit(env) -> None:
+    service = UploadService(env["engine"], storage_client=env["storage"])
+    batch_ids = [_create_batch(env, count=1)[1] for _ in range(3)]
+    with env["engine"].begin() as connection:
+        for index, batch_id in enumerate(batch_ids):
+            connection.execute(
+                text(
+                    "UPDATE upload_batches SET created_at=:created, updated_at=:updated "
+                    "WHERE id=:id"
+                ),
+                {
+                    "id": batch_id,
+                    "created": f"2026-08-13T00:0{index}:00Z",
+                    "updated": f"2026-08-13T00:1{index}:00Z",
+                },
+            )
+
+    assert [batch.id for batch in service.list_batches(tenant_id=env["tenant"], limit=2)] == [
+        batch_ids[2],
+        batch_ids[1],
+    ]
+    assert len(service.list_batches(tenant_id=env["tenant"], limit=0)) == 1
+    assert len(service.list_batches(tenant_id=env["tenant"], limit=1000)) == 3
+
+
+def test_list_batches_is_tenant_scoped(env) -> None:
+    service, own_batch_id, _ = _create_batch(env, count=1)
+    other_tenant = f"tenant-b-{uuid4().hex}"
+    other_user = f"user-b-{uuid4().hex}"
+    other_kb = f"kb-b-{uuid4().hex}"
+    with env["engine"].begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO tenants "
+                "(id, name, role, policy_version, model_routing_key, egress_policy, "
+                "quota_daily_qa, quota_storage_docs, quota_storage_bytes_per_file, "
+                "created_at, updated_at) VALUES "
+                "(:id, :name, 'OWNER', 1, 'default', 'allow', 0, 0, 0, "
+                "'2026-08-13T00:00:00Z', '2026-08-13T00:00:00Z')"
+            ),
+            {"id": other_tenant, "name": other_tenant},
+        )
+        connection.execute(
+            text(
+                "INSERT INTO users (id, name, email, password_hash, tenant_id, role, "
+                "created_at, updated_at) VALUES "
+                "(:id, :name, :email, 'test-only', :tenant, 'OWNER', "
+                "'2026-08-13T00:00:00Z', '2026-08-13T00:00:00Z')"
+            ),
+            {
+                "id": other_user,
+                "name": other_user,
+                "email": f"{other_user}@example.test",
+                "tenant": other_tenant,
+            },
+        )
+        connection.execute(
+            text(
+                "INSERT INTO knowledge_bases "
+                "(id, tenant_id, name, description, visibility, role, document_count, "
+                "created_at, updated_at) VALUES "
+                "(:id, :tenant, :name, '', 'PRIVATE', 'OWNER', 0, "
+                "'2026-08-13T00:00:00Z', '2026-08-13T00:00:00Z')"
+            ),
+            {"id": other_kb, "tenant": other_tenant, "name": other_kb},
+        )
+    _, other_batch_id, _ = _create_batch(
+        {**env, "tenant": other_tenant, "user": other_user, "kb": other_kb}, count=1
+    )
+
+    assert [batch.id for batch in service.list_batches(tenant_id=env["tenant"])] == [own_batch_id]
+    assert [batch.id for batch in service.list_batches(tenant_id=other_tenant)] == [other_batch_id]
+
+
+def test_list_batches_route_returns_authenticated_tenant_projection(env, monkeypatch) -> None:
+    service, batch_id, _ = _create_batch(env, count=1)
+    auth = AuthContext(
+        actor_id=env["user"],
+        tenant_id=env["tenant"],
+        tenant_role=TenantRole.OWNER,
+        platform_role="NONE",
+        capabilities=[CAP_KB_READ],
+        policy_version=1,
+        trace_id="upload-center-list-route-test",
+    )
+    monkeypatch.setattr(kb_upload, "_uploads", lambda: service)
+    app.dependency_overrides[get_live_auth_context] = lambda: auth
+    try:
+        with TestClient(app) as client:
+            response = client.get("/api/v1/kb/uploads/batches?limit=1")
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        assert payload["limit"] == 1
+        assert [item["id"] for item in payload["items"]] == [batch_id]
+    finally:
+        app.dependency_overrides.pop(get_live_auth_context, None)
+
+
 def test_retry_and_cancel_routes_are_real_and_tenant_bound(env, monkeypatch) -> None:
     _, _, item_ids = _create_batch(env, count=1)
     job_id = _create_job_for_item(env, item_ids[0], suffix="route")

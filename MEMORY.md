@@ -467,3 +467,10 @@ Nginx 配置：
 - DONE-LOCAL：`services/embedding.py` 使用真实 OpenAI-compatible 远程客户端；worker 绑定 `tenant+actor+KB ACTIVE profile/generation`。无配置或无 ACTIVE profile/generation 时保持 `EMBEDDING_UNAVAILABLE` fail-closed，不写 READY。
 - 远程响应校验 `count`、向量 dimension 与非有限值；不使用本地模型或伪向量。真实外部 Provider 未调用。
 - 验证：Embedding 定向 `40 passed`；全量后端 `358 passed, 2 skipped`；Ruff、compileall、`git diff --check` 通过。生产 Provider 出网/凭据、PostgreSQL/pgvector、部署仍 `NOT RUN/BLOCKED`；不记录凭据、token 或私密地址，不代表全 PH3/PH8 完成。
+
+## 2026-08-13 CR-PH3-T06 Upload Center 跨设备批次列表本地收尾
+
+- DONE-LOCAL（增量收尾）：新增租户作用域 `GET /api/v1/kb/uploads/batches`，服务端对 `limit` 实施 `1–100` 有界约束（默认 `30`）；Upload Center 列表以服务端 batch projection 为权威来源，`localStorage` 的 `ekb.upload-center.batch-refs.v1` 仅用于 fallback/reconciliation，不作为跨设备列表真值。此前“仅恢复已知 batch refs”的记录保留为历史快照。
+- 浏览器证据（2026-08-13）：使用现有本地开发账号重新建立登录后，删除 `ekb.upload-center.batch-refs.v1` 并 reload `/#/documents`，真实服务端 batch 被恢复并显示：真实文件 `HANDOFF-2026-08-12.md`，失败阶段 `CHUNKING / 50%`，attempt `1/1`，显示 job id 和 `EMBEDDING_UNAVAILABLE`。不记录 access/refresh token、密码、私有地址或 opaque secret。
+- 验证：backend full pytest `361 passed, 2 skipped`；web `52 passed`；web typecheck/build 通过。
+- 生产/服务器工作仍 `NOT RUN/BLOCKED`：当前运行时没有生产目标（统一写作 `[production host]`）或受管凭据（统一写作 `[REDACTED]`）。不标记生产部署，不标记全 PH3 或 PH8 完成。

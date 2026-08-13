@@ -105,6 +105,11 @@ export interface UploadBatchProjection {
   counts?: Record<string, number>
 }
 
+export interface UploadBatchListResponse {
+  items: UploadBatchProjection[]
+  limit: number
+}
+
 export interface DocumentRetryResponse {
   status: 'accepted' | string
   trace_id: string

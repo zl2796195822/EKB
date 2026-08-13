@@ -105,6 +105,7 @@ export interface DocumentsServices {
   readonly retry: (kbId: string, docId: string) => Promise<{ readonly state: PageState; readonly data?: { readonly status: string; readonly traceId: string }; readonly error?: AdapterError }>
   readonly listVersions: (kbId: string, docId: string) => Promise<DocumentVersionsResult>
   readonly diff: (kbId: string, docId: string, from: number, to: number) => Promise<DocumentDiffResult>
+  readonly listUploadBatches: () => Promise<{ readonly state: PageState; readonly data?: readonly UploadBatchView[]; readonly error?: AdapterError }>
   readonly getUploadBatch: (batchId: string) => Promise<UploadBatchResult>
   readonly retryUploadJob: (jobId: string) => Promise<UploadBatchActionResult>
   readonly cancelUploadJob: (jobId: string) => Promise<UploadBatchActionResult>

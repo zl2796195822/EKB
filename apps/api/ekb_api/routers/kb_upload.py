@@ -239,6 +239,19 @@ def read_batch(
     return _as_dict(service.get_batch(tenant_id=auth.tenant_id, batch_id=batch_id))
 
 
+@router.get("/uploads/batches")
+def list_batches(
+    auth: Annotated[AuthContext, Depends(get_live_auth_context)],
+    limit: int = Query(default=30, ge=1, le=100),
+) -> dict:
+    """List recent upload batches for the authenticated tenant."""
+
+    assert_capability(auth, CAP_KB_READ)
+    service = _uploads()
+    projections = service.list_batches(tenant_id=auth.tenant_id, limit=limit)
+    return {"items": [_as_dict(projection) for projection in projections], "limit": limit}
+
+
 # ---- Ingestion control ----------------------------------------------------
 
 

@@ -109,6 +109,8 @@ export function DocumentsPage({ services }: V2PageProps) {
   }, [services.documents, services.knowledge])
 
   const loadUploadCenter = useCallback(async () => {
+    setUploadCenterState('loading')
+    const errors: AdapterError[] = []
     let batchIds: string[] = []
     try {
       const stored = JSON.parse(window.localStorage.getItem(UPLOAD_CENTER_STORAGE_KEY) ?? '[]') as unknown
@@ -118,18 +120,30 @@ export function DocumentsPage({ services }: V2PageProps) {
           .filter((value): value is string => typeof value === 'string' && value.length > 0 && value.length <= 128)
       }
     } catch {
-      setUploadErrors([{ code: 'UPLOAD_CENTER_STORAGE_INVALID', message: '上传中心本地索引不可读，未使用本地样本替代。' }])
+      errors.push({ code: 'UPLOAD_CENTER_STORAGE_INVALID', message: '上传中心本地索引不可读，未使用本地样本替代。' })
     }
-    const uniqueIds = Array.from(new Set(batchIds)).slice(-30)
-    if (uniqueIds.length === 0) {
-      setUploadBatches([])
-      setUploadCenterState('empty')
-      return
+
+    const listResult = await services.documents.listUploadBatches()
+    if (listResult.error) errors.push(listResult.error)
+    const serverBatches = (listResult.data ?? []).slice(0, 30)
+    const knownIds = new Set(serverBatches.map((batch) => batch.id))
+    const fallbackIds = Array.from(new Set(batchIds))
+      .slice(-30)
+      .filter((batchId) => !knownIds.has(batchId))
+      .slice(0, Math.max(0, 30 - serverBatches.length))
+    const fallbackResults = await Promise.all(fallbackIds.map((batchId) => services.documents.getUploadBatch(batchId)))
+    const fallbackBatches = fallbackResults.flatMap((result) => {
+      if (result.error) errors.push(result.error)
+      return result.data ? [result.data] : []
+    })
+    const loaded: UploadBatchView[] = []
+    const seen = new Set<string>()
+    for (const batch of [...serverBatches, ...fallbackBatches]) {
+      if (seen.has(batch.id)) continue
+      seen.add(batch.id)
+      loaded.push(batch)
+      if (loaded.length >= 30) break
     }
-    setUploadCenterState('loading')
-    const results = await Promise.all(uniqueIds.map((batchId) => services.documents.getUploadBatch(batchId)))
-    const loaded = results.flatMap((result) => result.data ? [result.data] : [])
-    const errors = results.flatMap((result) => result.error ? [result.error] : [])
     setUploadBatches(loaded)
     setUploadErrors(errors)
     setUploadCenterState(loaded.length > 0 ? 'ready' : errors.length > 0 ? 'error' : 'empty')
