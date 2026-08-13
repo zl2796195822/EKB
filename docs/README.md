@@ -67,6 +67,15 @@ CR-PH1-T01 + CR-PH1-T03 的第一真实业务切片已在本地工作树实现�
 本地真实浏览器证据（2026-08-13）：使用现有本地开发账号登录后，从 `Analytics → 运营与治理 → 作业中心` 看到 5 条真实作业（4 `SUCCEEDED`、1 `DEAD`），其中一条文档 ingest 作业显示 `EMBEDDING_UNAVAILABLE`；cleanup projection 显示 `retention_purge` 总数 4，全部 `SUCCEEDED`；缺少 lease/heartbeat 时页面显示 unavailable。该会话过期登录阶段有 3 条较早 auth-related console errors，因此不宣称 console=0；Jobs Center 本身数据加载成功。页面显示 job id，但本文不记录完整 opaque ID、凭据、token 或私有地址。
 
 验证：Web `57 passed in 8 files`，typecheck/build 通过，`git diff --check` 通过。后端未改动，沿用既有全量 `361 passed, 2 skipped` 结果；本次切片未重新运行后端测试。生产目标、服务器备份、部署、回滚均 `NOT RUN/BLOCKED`，统一以 `[production host]` 与 `[REDACTED]` 表示缺失项；LLM-only、无本地模型、无 mock 边界保持不变。
+
+## Dashboard semantic-theme local closure (2026-08-13)
+
+- DONE-LOCAL 仅覆盖 Dashboard route：`apps/web/src/app-v2/pages/DashboardPage.tsx` 的全部 31 个 page-level raw `#hex`/`rgb`/`rgba` 颜色字面量已替换为 tokens/theme 中已有的 semantic variables；未改变 backend/API/data behavior，未引入 fake data。
+- 新增 `apps/web/src/app-v2/tests/v3.dashboard-theme.test.ts` source contract test，断言 DashboardPage 不包含 raw color literals。
+- 本地浏览器证据：2026-08-13 认证后打开 `/#/dashboard`，真实显示 4 个 documents、3 个 knowledge spaces、trends、recent activity 和 governance proxy states。设置当前认证会话 localStorage 的 `v2.theme=dark` 后 reload，Dashboard 仍以真实数据渲染并应用主题状态。
+- 当前会话累计有 13 条较早 auth-related console errors；不宣称 `console=0`、full route matrix 或 visual contrast score，且未观察到新的 Dashboard data failure。证据不记录 token、password 或 private address。
+- 验证：Web `58 passed in 9 files`、typecheck/build、`git diff --check` 通过；backend 未改动，不宣称新的 backend suite。生产 target、server backup/deploy/rollback `NOT RUN/BLOCKED`，统一以 `[production host]` / `[REDACTED]` 表示。
+- 本条是 Dashboard route migration 的边界记录，不宣称 `FR-001–006`、PH2 或 PH0–PH8 全部完成；LLM-only、无本地模型、无 mock 边界保持不变。详细证据见 [`evidence/ekb-core-rebuild/local/2026-08-13-local-business.md`](./evidence/ekb-core-rebuild/local/2026-08-13-local-business.md)。
 ## 2026-08-13 Promotion and theme local slice
 
 - DONE-LOCAL：真实 POST /api/v1/attachments/{attachment_id}/promotions；校验 tenant/owner/live KB ACL、路径冲突/回收站保留/幂等/并发；复用 attachment source_object_id 创建 document/version/ingest job，返回 HTTP 202、状态 QUEUED，worker 投影真实状态，不把队列写成成功。

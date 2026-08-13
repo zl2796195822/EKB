@@ -99,10 +99,10 @@ function DaySelect({ label, options, value, onChange, loading, caption }: DaySel
             zIndex: 40,
             margin: 0,
             padding: 4,
-            background: '#fff',
-            border: '1px solid #E2E8F0',
+            background: 'var(--color-surface)',
+            border: '1px solid var(--color-border)',
             borderRadius: 8,
-            boxShadow: '0 8px 24px -8px rgba(15,23,42,0.18)',
+            boxShadow: 'var(--shadow-popover)',
             listStyle: 'none',
             minWidth: 140,
           }}
@@ -122,8 +122,8 @@ function DaySelect({ label, options, value, onChange, loading, caption }: DaySel
                   width: '100%',
                   textAlign: 'left',
                   padding: '6px 10px',
-                  background: opt.days === value ? '#EFF6FF' : 'transparent',
-                  color: opt.days === value ? '#1D4ED8' : '#0F172A',
+                  background: opt.days === value ? 'var(--color-selected)' : 'transparent',
+                  color: opt.days === value ? 'var(--color-info-text)' : 'var(--color-text-primary)',
                   borderRadius: 6,
                   border: 'none',
                   fontSize: 12,
@@ -159,9 +159,9 @@ function FilterPills({ options, value, onChange }: FilterPillProps) {
           style={{
             padding: '3px 10px',
             borderRadius: 999,
-            border: `1px solid ${opt.id === value ? '#3B82F6' : '#E2E8F0'}`,
-            background: opt.id === value ? '#EFF6FF' : '#fff',
-            color: opt.id === value ? '#1D4ED8' : '#475569',
+            border: `1px solid ${opt.id === value ? 'var(--color-info)' : 'var(--color-border)'}`,
+            background: opt.id === value ? 'var(--color-selected)' : 'var(--color-surface)',
+            color: opt.id === value ? 'var(--color-info-text)' : 'var(--color-text-secondary)',
             fontSize: 11,
             fontWeight: 500,
             cursor: 'pointer',
@@ -456,29 +456,29 @@ export function DashboardPage({ services, session }: V2PageProps) {
                   style={{
                     padding: '10px 12px',
                     borderRadius: 8,
-                    border: '1px dashed #E2E8F0',
-                    background: '#F8FAFC',
+                    border: '1px dashed var(--color-border)',
+                    background: 'var(--color-bg-subtle)',
                     fontSize: 11,
-                    color: '#64748B',
+                    color: 'var(--color-text-muted)',
                     lineHeight: 1.6,
                   }}
                 >
-                  <strong style={{ color: '#0F172A' }}>v4 P2 · 内容治理阶段</strong>
+                  <strong style={{ color: 'var(--color-text-primary)' }}>v4 P2 · 内容治理阶段</strong>
                   <br />
                   文件夹 / 标签 / 收藏 / 分享等独立端点落地后，此处切换为真实 Top Tags。
                   当前用 <code>knowledge_bases</code> 概览做近似占位：
                 </div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                  <span className="v2-dashboard-tag-chip" style={{ padding: '3px 10px', borderRadius: 999, background: '#EFF6FF', color: '#1D4ED8', fontSize: 11 }}>
+                  <span className="v2-dashboard-tag-chip" style={{ padding: '3px 10px', borderRadius: 999, background: 'var(--color-info-surface)', color: 'var(--color-info-text)', fontSize: 11 }}>
                     知识空间 {overview.kbCount.toLocaleString('zh-CN')} 个
                   </span>
-                  <span className="v2-dashboard-tag-chip" style={{ padding: '3px 10px', borderRadius: 999, background: '#ECFDF5', color: '#047857', fontSize: 11 }}>
+                  <span className="v2-dashboard-tag-chip" style={{ padding: '3px 10px', borderRadius: 999, background: 'var(--color-success-surface)', color: 'var(--color-success-text)', fontSize: 11 }}>
                     文档总数 {overview.docCount.toLocaleString('zh-CN')} 篇
                   </span>
-                  <span className="v2-dashboard-tag-chip" style={{ padding: '3px 10px', borderRadius: 999, background: '#FFF7ED', color: '#C2410C', fontSize: 11 }}>
+                  <span className="v2-dashboard-tag-chip" style={{ padding: '3px 10px', borderRadius: 999, background: 'var(--color-warning-surface)', color: 'var(--color-warning-text)', fontSize: 11 }}>
                     团队成员 {overview.memberCount.toLocaleString('zh-CN')} 人
                   </span>
-                  <span className="v2-dashboard-tag-chip" style={{ padding: '3px 10px', borderRadius: 999, background: '#F1F5F9', color: '#334155', fontSize: 11 }}>
+                  <span className="v2-dashboard-tag-chip" style={{ padding: '3px 10px', borderRadius: 999, background: 'var(--color-hover)', color: 'var(--color-text-secondary)', fontSize: 11 }}>
                     近 {overview.days} 天访问 {overview.accesses.toLocaleString('zh-CN')}
                   </span>
                 </div>
@@ -512,14 +512,14 @@ export function DashboardPage({ services, session }: V2PageProps) {
                   style={{
                     padding: '10px 12px',
                     borderRadius: 8,
-                    border: '1px dashed #E2E8F0',
-                    background: '#F8FAFC',
+                    border: '1px dashed var(--color-border)',
+                    background: 'var(--color-bg-subtle)',
                     fontSize: 11,
-                    color: '#64748B',
+                    color: 'var(--color-text-muted)',
                     lineHeight: 1.6,
                   }}
                 >
-                  <strong style={{ color: '#0F172A' }}>v4 P2 · 治理指标</strong>
+                  <strong style={{ color: 'var(--color-text-primary)' }}>v4 P2 · 治理指标</strong>
                   <br />
                   专用健康度端点尚未提供，以下为 QA 规模与空间文档密度的近似卡，不作为正式治理依据。
                 </div>
@@ -528,8 +528,8 @@ export function DashboardPage({ services, session }: V2PageProps) {
                     style={{
                       padding: '8px 10px',
                       borderRadius: 6,
-                      background: 'linear-gradient(135deg, #ECFDF5 0%, #D1FAE5 100%)',
-                      color: '#065F46',
+                      background: 'linear-gradient(135deg, var(--color-success-surface) 0%, var(--color-success-surface) 100%)',
+                      color: 'var(--color-success-text)',
                       fontSize: 11,
                     }}
                   >
@@ -544,8 +544,8 @@ export function DashboardPage({ services, session }: V2PageProps) {
                     style={{
                       padding: '8px 10px',
                       borderRadius: 6,
-                      background: 'linear-gradient(135deg, #EFF6FF 0%, #DBEAFE 100%)',
-                      color: '#1E40AF',
+                      background: 'linear-gradient(135deg, var(--color-info-surface) 0%, var(--color-info-surface) 100%)',
+                      color: 'var(--color-info-text)',
                       fontSize: 11,
                     }}
                   >
@@ -569,7 +569,7 @@ export function DashboardPage({ services, session }: V2PageProps) {
         <span>隐私政策</span>
         <span>帮助中心</span>
         <span>联系我们</span>
-        <span style={{ marginLeft: 'auto', fontFamily: 'ui-monospace, JetBrains Mono, Menlo, monospace', fontSize: 10, color: '#94A3B8' }}>
+        <span style={{ marginLeft: 'auto', fontFamily: 'ui-monospace, JetBrains Mono, Menlo, monospace', fontSize: 10, color: 'var(--color-text-muted)' }}>
           {anyLoading ? '同步中…' : `已同步 · ${new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}`}
         </span>
       </footer>

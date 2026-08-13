@@ -480,3 +480,12 @@ Nginx 配置：
 - DONE-LOCAL：现有 Analytics `GovernancePanel` 增加真实「作业中心」Tab，使用当前租户作用域的 `GET /api/v1/jobs`、`GET /api/v1/jobs/cleanup` 和 `POST /api/v1/jobs/{job_id}/cancel`。页面展示服务端 state counts、job type、safe timestamps、lease/heartbeat availability、脱敏 error metadata、job id 及 cleanup `total/by_state/recent`；payload、`tenant_id`、Provider 原始响应和私有地址排除。仅对 `QUEUED`/`RUNNING`/`RETRY_WAIT` 提供取消，操作后重新加载服务端状态。
 - 浏览器（2026-08-13）：现有本地开发账号认证后，`Analytics → 运营与治理 → 作业中心` 展示 5 条真实作业（4 `SUCCEEDED`、1 `DEAD`），含一条文档 ingest 作业的 `EMBEDDING_UNAVAILABLE`；cleanup projection 为 `retention_purge` 总数 4、全部 `SUCCEEDED`；缺少 lease/heartbeat 时显示 unavailable。过期认证阶段已有 3 条较早 auth-related console errors，不宣称 console=0；Jobs Center 数据加载成功。未记录凭据、token、私有地址或完整 opaque ID。
 - 验证：web `57 passed in 8 files`、typecheck/build、`git diff --check` 通过；后端未改动，沿用既有全量 `361 passed, 2 skipped`，本切片未重新运行后端测试。生产目标、服务器备份、部署、回滚仍 `NOT RUN/BLOCKED`，统一使用 `[production host]` / `[REDACTED]`。保持 LLM-only、无本地模型、无 mock，不标记 PH2 或 PH0–PH8 全部完成。
+
+## 2026-08-13 Dashboard semantic-theme local slice
+
+- DONE-LOCAL 仅覆盖 Dashboard route：`apps/web/src/app-v2/pages/DashboardPage.tsx` 中全部 31 个 page-level raw `#hex`/`rgb`/`rgba` 颜色字面量已替换为 tokens/theme 中已有的 semantic variables；未改变 backend/API/data behavior，未引入 fake data。
+- 新增 `apps/web/src/app-v2/tests/v3.dashboard-theme.test.ts` source contract test，断言 DashboardPage 不包含 raw color literals。
+- 本地浏览器（2026-08-13）：认证后打开 `/#/dashboard`，真实显示 4 个 documents、3 个 knowledge spaces、trends、recent activity 和 governance proxy states；设置当前认证会话 localStorage 的 `v2.theme=dark` 后 reload，Dashboard 仍以真实数据渲染并应用主题状态。
+- 当前会话累计有 13 条较早 auth-related console errors；不宣称 `console=0`、full route matrix 或 visual contrast score，未观察到新的 Dashboard data failure。记忆不记录 token、password 或 private address。
+- 验证：Web `58 passed in 9 files`、typecheck/build、`git diff --check` 通过；backend 未改动，不宣称新的 backend suite。
+- 生产 target、server backup/deploy/rollback `NOT RUN/BLOCKED`，原因是没有 production target/managed credentials，统一使用 `[production host]` / `[REDACTED]`。本条只记录 Dashboard route migration，不宣称 `FR-001–006`、PH2 或 PH0–PH8 全部完成；LLM-only、无本地模型、无 mock 边界保持不变。
