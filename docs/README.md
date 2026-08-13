@@ -142,5 +142,11 @@ CR-PH1-T01 + CR-PH1-T03 的第一真实业务切片已在本地工作树实现�
 
 - DONE-LOCAL：在 v4 schema 下，`store.save_message` 为 legacy QA 消息自动创建/激活 root branch，并写入 `branch_id`、`parent_message_id`、`content_hash`；无 v4 列时保持 legacy 路径。
 - 验证：`bridge-check` 临时 SQLite 为 `PASS`；PH4 `32 passed`；API `28 passed`；ruff/compileall `passed`。
-- `qa.py` 的多轮 history graph bridge 尚未完成；当前浏览器未认证。本地开发切片不宣称 PH4 或 PH0–PH8 全部完成。
+- 该条记录当时尚未完成；后续已由 2026-08-14 qa.py active-branch history bridge 本地收口条目完成。当前浏览器未认证。本地开发切片不宣称 PH4 或 PH0–PH8 全部完成。
 - 生产/服务器（`[production host]`）、备份、部署、回滚均 `NOT RUN/BLOCKED`；不记录密码、token、API key 或私密地址。证据见 [`docs/evidence/ekb-core-rebuild/local/2026-08-14-chat-branch-bridge.md`](./evidence/ekb-core-rebuild/local/2026-08-14-chat-branch-bridge.md)。
+
+## qa.py active branch history local closure (2026-08-14)
+
+- DONE-LOCAL：`/api/v1/qa/ask` 多轮 history 优先按 `tenant + actor` 读取 active branch materialization，过滤 `HIDDEN` 消息和当前 turn；branch graph 或旧 schema 不可用时回退 `store.list_messages`。
+- 验证：tests/test_multi_turn.py：11 passed（包含 active-branch regression）；PH4 `32 passed`；隔离临时 SQLite API `28 passed`；`compileall` passed；`git diff --check` passed；本地 `/healthz` `200`。
+- 当前浏览器未认证。本地业务切片不宣称 PH0–PH8 全部完成；生产服务器（`[production host]`）、备份、部署、回滚仍 `NOT RUN/BLOCKED`。证据见 [`evidence/ekb-core-rebuild/local/2026-08-14-qa-active-branch-history.md`](./evidence/ekb-core-rebuild/local/2026-08-14-qa-active-branch-history.md)。不记录密码、token、API key 或私密地址。

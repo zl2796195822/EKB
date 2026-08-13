@@ -10,6 +10,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path, Request
 from fastapi.responses import StreamingResponse
+from sqlalchemy.exc import SQLAlchemyError
 
 from ekb_api.core.audit import (
     RESULT_DEGRADED,
@@ -71,6 +72,12 @@ from ekb_api.schemas import (
 )
 from ekb_api.services import rag as rag
 from ekb_api.services.attachments import AttachmentError, AttachmentService
+from ekb_api.services.conversations import (
+    BranchNotFound,
+    ChatGraphError,
+    ConversationGraphService,
+    ConversationNotFound,
+)
 from ekb_api.store import SqlStore
 
 router = APIRouter(prefix="/qa", tags=["qa"])
@@ -102,6 +109,146 @@ def _build_kb_evidence(kb_chunks: list, max_citations: int) -> list[str]:
         if body:
             evidence_texts.append(f"[证据{len(evidence_texts) + 1} — 知识库]\n{header}\n{body}")
     return evidence_texts
+
+
+def _not_current_history_turn(message, *, turn_id: str, turn_started: float) -> bool:
+    message_turn_id = getattr(message, "turn_id", None)
+    if message_turn_id:
+        return message_turn_id != turn_id
+    try:
+        message_created_at = getattr(message, "created_at", None)
+        if message_created_at is None:
+            return True
+        if isinstance(message_created_at, (int, float)):
+            return message_created_at <= turn_started
+        return True
+    except Exception:  # noqa: BLE001 - legacy message objects are best-effort
+        return True
+
+
+def _map_history_messages(
+    messages: list,
+    *,
+    turn_id: str,
+    turn_started: float,
+    hidden_message_ids: set[str] | None = None,
+    sort_messages: bool = False,
+) -> list[dict]:
+    """Normalize graph/legacy messages into the existing LLM history shape."""
+
+    hidden_ids = hidden_message_ids or set()
+    filtered_messages = [
+        message
+        for message in messages
+        if getattr(message, "visibility_state", None) != MessageVisibility.HIDDEN.value
+        and str(getattr(message, "id", "")) not in hidden_ids
+        and _not_current_history_turn(message, turn_id=turn_id, turn_started=turn_started)
+    ]
+    if sort_messages:
+        filtered_messages.sort(key=lambda message: message.created_at)
+
+    history_messages: list[dict] = []
+    for message in filtered_messages:
+        try:
+            role = _map_role_ekb_to_llm(message.role)
+        except ValueError:
+            continue
+        history_messages.append({"role": role, "content": str(message.content)})
+    return history_messages
+
+
+def _graph_hidden_message_ids(
+    store: SqlStore,
+    auth: AuthContext,
+    conversation_id: str,
+    messages: list,
+) -> set[str]:
+    """Read visibility for graph MessageViews without widening their scope."""
+
+    hidden_ids: set[str] = set()
+    for message in messages:
+        message_id = str(getattr(message, "id", ""))
+        if not message_id:
+            raise ChatGraphError("graph message has no id")
+        visibility_state = getattr(message, "visibility_state", None)
+        if visibility_state is None:
+            stored_message = store.get_message(auth, message_id)
+            if stored_message is None:
+                raise ChatGraphError("graph message visibility lookup failed")
+            if (
+                getattr(stored_message, "tenant_id", None) != auth.tenant_id
+                or getattr(stored_message, "conversation_id", None) != conversation_id
+            ):
+                raise ChatGraphError("graph message scope mismatch")
+            visibility_state = getattr(stored_message, "visibility_state", None)
+        if visibility_state == MessageVisibility.HIDDEN.value:
+            hidden_ids.add(message_id)
+    return hidden_ids
+
+
+def _build_history_messages(
+    store: SqlStore,
+    auth: AuthContext,
+    conversation_id: str,
+    *,
+    turn_id: str,
+    turn_started: float,
+) -> list[dict]:
+    """Prefer the actor-scoped active branch, retaining the legacy fallback."""
+
+    graph_messages: list | None = None
+    hidden_message_ids: set[str] = set()
+    try:
+        graph = ConversationGraphService(get_engine())
+        graph_conversation = graph.load_conversation(
+            tenant_id=auth.tenant_id,
+            conversation_id=conversation_id,
+            actor_id=auth.actor_id,
+        )
+        active_branch_id = graph_conversation.get("active_branch_id")
+        if not active_branch_id:
+            raise BranchNotFound(conversation_id)
+        graph_messages = graph.branch_messages(
+            tenant_id=auth.tenant_id,
+            branch_id=str(active_branch_id),
+        )
+        if any(
+            getattr(message, "conversation_id", None) != conversation_id
+            for message in graph_messages
+        ):
+            raise ChatGraphError("active branch materialization scope mismatch")
+        hidden_message_ids = _graph_hidden_message_ids(
+            store,
+            auth,
+            conversation_id,
+            graph_messages,
+        )
+    except (
+        BranchNotFound,
+        ChatGraphError,
+        ConversationNotFound,
+        RuntimeError,
+        SQLAlchemyError,
+    ) as exc:
+        logger.warning(
+            "qa/multi_turn graph history fallback error_type=%s",
+            type(exc).__name__,
+        )
+
+    if graph_messages is not None:
+        return _map_history_messages(
+            graph_messages,
+            turn_id=turn_id,
+            turn_started=turn_started,
+            hidden_message_ids=hidden_message_ids,
+        )
+
+    return _map_history_messages(
+        store.list_messages(auth, conversation_id),
+        turn_id=turn_id,
+        turn_started=turn_started,
+        sort_messages=True,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -623,35 +770,13 @@ async def ask(
             compaction_start = 0.0
 
             if settings.multi_turn_enabled and conversation is not None:
-                raw_msgs = store.list_messages(auth, conversation.id)
-                filtered_msgs = [
-                    m for m in raw_msgs
-                    if getattr(m, "visibility_state", None) != MessageVisibility.HIDDEN.value
-                ]
-                filtered_msgs.sort(key=lambda m: m.created_at)
-
-                def _not_current_turn(m) -> bool:
-                    m_turn_id = getattr(m, "turn_id", None)
-                    if m_turn_id:
-                        return m_turn_id != turn_id
-                    try:
-                        m_created = getattr(m, "created_at", None)
-                        if m_created is None:
-                            return True
-                        if isinstance(m_created, (int, float)):
-                            return m_created <= turn_started
-                        return True
-                    except Exception:
-                        return True
-                filtered_msgs = [m for m in filtered_msgs if _not_current_turn(m)]
-
-                history_messages = []
-                for m in filtered_msgs:
-                    try:
-                        role = _map_role_ekb_to_llm(m.role)
-                    except ValueError:
-                        continue
-                    history_messages.append({"role": role, "content": str(m.content)})
+                history_messages = _build_history_messages(
+                    store,
+                    auth,
+                    conversation.id,
+                    turn_id=turn_id,
+                    turn_started=turn_started,
+                )
 
                 if history_messages:
                     tl = _normalize_thinking_level(thinking_level or "medium", use_deep_thinking)

@@ -20,6 +20,7 @@ os.environ["EKB_DATABASE_URL"] = f"sqlite:///{_TEST_DB}"
 import dataclasses
 import json
 from typing import Any
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -317,7 +318,117 @@ class TestMultiTurnIntegration:
         assert current_content_a not in concat, "本轮 ASSISTANT 占位消息不应出现在 history 里"
         assert "历史问题1" in concat or len(hist) >= 1
 
-    # ---------- 测试 3: compaction_performed SSE 事件 ----------
+    # ---------- 测试 3: v4 active branch 不混入 sibling/root 后续 ----------
+
+    def test_active_branch_history_excludes_sibling_and_root_tail(self, monkeypatch) -> None:
+        from ekb_api.routers import qa as qa_ns
+        from ekb_api.store import SqlStore
+
+        _patch_store_conv(monkeypatch)
+        _settings_patch(monkeypatch, multi_turn_enabled=True)
+
+        token = _login()
+        capture: dict[str, Any] = {}
+        graph_calls: dict[str, dict[str, str]] = {}
+        fallback_called = False
+
+        class _Graph:
+            def __init__(self, engine) -> None:
+                self.engine = engine
+
+            def load_conversation(self, **kwargs):
+                graph_calls["load"] = kwargs
+                return {"id": "c_branch", "active_branch_id": "branch_active"}
+
+            def branch_messages(self, **kwargs):
+                graph_calls["branch"] = kwargs
+                return [
+                    SimpleNamespace(
+                        id="root_q",
+                        conversation_id="c_branch",
+                        role="user",
+                        content="祖先问题",
+                        created_at="2026-01-01T00:01:00Z",
+                        turn_id="turn_root",
+                        visibility_state=MessageVisibility.VISIBLE.value,
+                    ),
+                    SimpleNamespace(
+                        id="active_a",
+                        conversation_id="c_branch",
+                        role="assistant",
+                        content="当前分支回答",
+                        created_at="2026-01-01T00:02:00Z",
+                        turn_id="turn_active",
+                        visibility_state=MessageVisibility.VISIBLE.value,
+                    ),
+                    SimpleNamespace(
+                        id="hidden_active",
+                        conversation_id="c_branch",
+                        role="assistant",
+                        content="隐藏分支占位",
+                        created_at="2026-01-01T00:03:00Z",
+                        turn_id="turn_hidden",
+                        visibility_state=MessageVisibility.HIDDEN.value,
+                    ),
+                ]
+
+        def _list_msgs(store_self, auth, conversation_id):
+            nonlocal fallback_called
+            fallback_called = True
+            return [
+                Message(
+                    id="root_tail",
+                    tenant_id=auth.tenant_id,
+                    conversation_id=conversation_id,
+                    role="ASSISTANT",
+                    content="root 后续答案",
+                    created_at="2026-01-01T00:04:00Z",
+                    turn_id="turn_root_tail",
+                ),
+                Message(
+                    id="sibling_a",
+                    tenant_id=auth.tenant_id,
+                    conversation_id=conversation_id,
+                    role="ASSISTANT",
+                    content="sibling 分支答案",
+                    created_at="2026-01-01T00:05:00Z",
+                    turn_id="turn_sibling",
+                ),
+            ]
+
+        def _gen_stream(question, evidence_texts, **kwargs):
+            capture["history"] = kwargs.get("history_messages")
+            yield from _stream_gen("branch ok")
+
+        monkeypatch.setattr(qa_ns, "ConversationGraphService", _Graph)
+        monkeypatch.setattr(qa_ns, "get_engine", lambda: object())
+        monkeypatch.setattr(SqlStore, "list_messages", _list_msgs)
+        monkeypatch.setattr(qa_ns, "retrieve", lambda *a, **kw: [])
+        monkeypatch.setattr(qa_ns, "generate_answer_stream", _gen_stream)
+
+        resp = client.post(
+            "/api/v1/qa/ask",
+            headers={"Authorization": f"Bearer {token}", "Accept": "text/event-stream"},
+            json={
+                "question": "当前分支问题",
+                "kb_ids": [],
+                "conversation_id": "c_branch",
+                "options": {"stream_version": 2},
+            },
+        )
+        assert resp.status_code == 200, resp.text
+        history = capture.get("history") or []
+        contents = [message["content"] for message in history]
+        assert contents == ["祖先问题", "当前分支回答"]
+        assert "root 后续答案" not in contents
+        assert "sibling 分支答案" not in contents
+        assert "隐藏分支占位" not in contents
+        assert fallback_called is False
+        assert graph_calls["load"]["tenant_id"] == graph_calls["branch"]["tenant_id"]
+        assert graph_calls["load"]["actor_id"]
+        assert graph_calls["branch"]["branch_id"] == "branch_active"
+
+    # ---------- 测试 4: compaction_performed SSE 事件 ----------
 
     def test_compaction_event_emitted(self, monkeypatch) -> None:
         from ekb_api.routers import qa as qa_ns
@@ -376,7 +487,7 @@ class TestMultiTurnIntegration:
             assert payload.get("rounds_compressed") == 2
             assert payload.get("method") == "llm_summary"
 
-    # ---------- 测试 4: feature flag 关闭时 history_messages=None ----------
+    # ---------- 测试 5: feature flag 关闭时 history_messages=None ----------
 
     def test_feature_flag_off_no_history(self, monkeypatch) -> None:
         from ekb_api.routers import qa as qa_ns
@@ -410,7 +521,7 @@ class TestMultiTurnIntegration:
             f"multi_turn_enabled=False 时 history_messages 应为 None，实际: {capture.get('history')!r}"
         )
 
-    # ---------- 测试 5: capabilities 扩展字段 ----------
+    # ---------- 测试 6: capabilities 扩展字段 ----------
 
     def test_capabilities_response_extended(self) -> None:
         token = _login()
@@ -428,7 +539,7 @@ class TestMultiTurnIntegration:
         assert body["context_window_tokens"] == settings.llm_context_window
         assert body["compaction_enabled"] == settings.multi_turn_enabled
 
-    # ---------- 测试 6: 拒答二次确认透传 history_messages ----------
+    # ---------- 测试 7: 拒答二次确认透传 history_messages ----------
 
     def test_rejection_confirmation_passes_history(self, monkeypatch) -> None:
         from ekb_api.routers import qa as qa_ns
