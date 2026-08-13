@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from io import BytesIO
 from typing import Optional, Protocol, runtime_checkable
 
 # ---- Stable error codes (04-knowledge-base.md §8) -------------------------
@@ -317,6 +318,259 @@ class DocxParser(_LibreOfficeBackedParser):
         return ParseResult(sections=sections)
 
 
+class XlsxParser:
+    """Extract searchable, cell-addressed content from an OOXML workbook.
+
+    ``data_only=True`` intentionally reads cached cell values and never
+    evaluates formulas or macros.  Each non-empty row becomes a section so
+    retrieval can preserve worksheet and row provenance without putting cell
+    values into parser metadata.
+    """
+
+    parser_id = "xlsx"
+    parser_version = "xlsx-v1.0"
+    _mimes = ("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",)
+
+    def supports(self, mime: str) -> bool:
+        return mime in self._mimes
+
+    def parse(self, raw_bytes: bytes, *, filename: str, mime: str) -> ParseResult:
+        if not raw_bytes:
+            raise ParserError(
+                FILE_EMPTY,
+                "文件内容为空",
+                detail={"detected_mime": mime, "byte_size": 0},
+            )
+        try:
+            from openpyxl import load_workbook
+        except ImportError as exc:  # pragma: no cover - dependency is declared
+            raise ParserError(
+                MIME_UNSUPPORTED,
+                "Excel 解析依赖不可用",
+                detail={"detected_mime": mime, "reason": "dependency-missing"},
+            ) from exc
+
+        workbook = None
+        try:
+            # OOXML .xlsx is read-only here: formulas are not executed, and
+            # keep_vba remains disabled so a macro project is never run.
+            workbook = load_workbook(
+                BytesIO(raw_bytes), read_only=True, data_only=True, keep_vba=False
+            )
+            sheet_count = len(workbook.worksheets)
+            sections: list[ParsedSection] = []
+            populated_sheets = 0
+
+            for worksheet in workbook.worksheets:
+                sheet_sections = 0
+                for row_index, row in enumerate(worksheet.iter_rows(), start=1):
+                    cells: list[tuple[str, str]] = []
+                    for cell in row:
+                        value = cell.value
+                        if value is None:
+                            continue
+                        rendered = _render_office_value(value)
+                        if not rendered:
+                            continue
+                        cells.append((cell.coordinate, rendered))
+                    if not cells:
+                        continue
+
+                    sheet_sections += 1
+                    sections.append(
+                        ParsedSection(
+                            section_path=[filename, worksheet.title, f"第 {row_index} 行"],
+                            content="\n".join(
+                                f"{address}={value}" for address, value in cells
+                            ),
+                            meta={
+                                "format": "xlsx",
+                                "sheet": worksheet.title,
+                                "row": row_index,
+                                "cell_count": len(cells),
+                                "cell_addresses": [address for address, _ in cells],
+                            },
+                        )
+                    )
+                if sheet_sections:
+                    populated_sheets += 1
+
+            if not sections:
+                raise ParserError(
+                    PARSER_CORRUPT,
+                    "Excel 工作簿未提取到内容",
+                    detail={"detected_mime": mime, "reason": "no-cell-content"},
+                )
+            return ParseResult(
+                sections=sections,
+                metadata={
+                    "format": "xlsx",
+                    "sheets": sheet_count,
+                    "populated_sheets": populated_sheets,
+                    "sections": len(sections),
+                },
+            )
+        except ParserError:
+            raise
+        except Exception as exc:
+            raise ParserError(
+                PARSER_CORRUPT,
+                "Excel 解析失败",
+                detail={"detected_mime": mime, "reason": "xlsx-read-error"},
+            ) from exc
+        finally:
+            if workbook is not None:
+                workbook.close()
+
+
+class PptxParser:
+    """Extract text, tables and readable speaker notes from OOXML slides."""
+
+    parser_id = "pptx"
+    parser_version = "pptx-v1.0"
+    _mimes = (
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    )
+
+    def supports(self, mime: str) -> bool:
+        return mime in self._mimes
+
+    def parse(self, raw_bytes: bytes, *, filename: str, mime: str) -> ParseResult:
+        if not raw_bytes:
+            raise ParserError(
+                FILE_EMPTY,
+                "文件内容为空",
+                detail={"detected_mime": mime, "byte_size": 0},
+            )
+        try:
+            from pptx import Presentation
+        except ImportError as exc:  # pragma: no cover - dependency is declared
+            raise ParserError(
+                MIME_UNSUPPORTED,
+                "演示文稿解析依赖不可用",
+                detail={"detected_mime": mime, "reason": "dependency-missing"},
+            ) from exc
+
+        try:
+            presentation = Presentation(BytesIO(raw_bytes))
+            sections: list[ParsedSection] = []
+            slide_count = len(presentation.slides)
+            for slide_index, slide in enumerate(presentation.slides, start=1):
+                shape_lines, text_shape_count, table_shape_count = _extract_slide_shapes(slide)
+                notes_text = _extract_slide_notes(slide)
+                if notes_text:
+                    shape_lines.append(("备注", notes_text))
+                if not shape_lines:
+                    continue
+
+                title = _slide_title(slide) or f"幻灯片 {slide_index}"
+                sections.append(
+                    ParsedSection(
+                        section_path=[filename, f"第 {slide_index} 页", title],
+                        content="\n".join(
+                            f"{label}: {text}" for label, text in shape_lines
+                        ),
+                        meta={
+                            "format": "pptx",
+                            "slide": slide_index,
+                            "shape_count": len(slide.shapes),
+                            "text_shape_count": text_shape_count,
+                            "table_shape_count": table_shape_count,
+                            "has_notes": bool(notes_text),
+                        },
+                    )
+                )
+
+            if not sections:
+                raise ParserError(
+                    PARSER_CORRUPT,
+                    "演示文稿未提取到文本",
+                    detail={"detected_mime": mime, "reason": "no-text-content"},
+                )
+            return ParseResult(
+                sections=sections,
+                metadata={
+                    "format": "pptx",
+                    "slides": slide_count,
+                    "populated_slides": len(sections),
+                    "sections": len(sections),
+                },
+            )
+        except ParserError:
+            raise
+        except Exception as exc:
+            raise ParserError(
+                PARSER_CORRUPT,
+                "演示文稿解析失败",
+                detail={"detected_mime": mime, "reason": "pptx-read-error"},
+            ) from exc
+
+
+def _render_office_value(value: object) -> str:
+    """Render a cell value without putting it in an error or metadata field."""
+
+    if isinstance(value, (bytes, bytearray)):
+        return f"<binary:{len(value)} bytes>"
+    return str(value).strip()
+
+
+def _extract_slide_shapes(slide: object) -> tuple[list[tuple[str, str]], int, int]:
+    lines: list[tuple[str, str]] = []
+    text_shape_count = 0
+    table_shape_count = 0
+
+    def visit(shape: object) -> None:
+        nonlocal text_shape_count, table_shape_count
+        has_table = bool(getattr(shape, "has_table", False))
+        if has_table:
+            table_shape_count += 1
+            table = shape.table  # type: ignore[attr-defined]
+            for row_index, row in enumerate(table.rows, start=1):
+                values = []
+                for column_index, cell in enumerate(row.cells, start=1):
+                    cell_text = cell.text.strip()
+                    if cell_text:
+                        values.append(f"R{row_index}C{column_index}={cell_text}")
+                if values:
+                    lines.append(("表格", " | ".join(values)))
+        elif bool(getattr(shape, "has_text_frame", False)):
+            text = shape.text_frame.text.strip()  # type: ignore[attr-defined]
+            if text:
+                text_shape_count += 1
+                lines.append((getattr(shape, "name", "文本框"), text))
+
+        nested_shapes = getattr(shape, "shapes", None)
+        if nested_shapes is not None:
+            for child in nested_shapes:
+                visit(child)
+
+    for shape in slide.shapes:  # type: ignore[attr-defined]
+        visit(shape)
+    return lines, text_shape_count, table_shape_count
+
+
+def _extract_slide_notes(slide: object) -> str:
+    """Read notes only through python-pptx's safe text-frame projection."""
+
+    try:
+        notes_frame = slide.notes_slide.notes_text_frame  # type: ignore[attr-defined]
+        return notes_frame.text.strip()
+    except Exception:
+        # Notes are optional.  A malformed/unavailable notes part must not
+        # expose a library exception or discard otherwise valid slide text.
+        return ""
+
+
+def _slide_title(slide: object) -> str:
+    try:
+        title_shape = slide.shapes.title  # type: ignore[attr-defined]
+        if title_shape is not None and bool(getattr(title_shape, "has_text_frame", False)):
+            return title_shape.text_frame.text.strip()  # type: ignore[attr-defined]
+    except Exception:
+        return ""
+    return ""
+
+
 class ParserRegistry:
     """Resolves a MIME type to a concrete parser implementation."""
 
@@ -325,6 +579,8 @@ class ParserRegistry:
         self.register(TxtParser())
         self.register(PdfParser())
         self.register(DocxParser())
+        self.register(XlsxParser())
+        self.register(PptxParser())
 
     def register(self, parser: Parser) -> None:
         self._parsers.insert(0, parser)
