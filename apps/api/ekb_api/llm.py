@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import math
@@ -154,6 +155,7 @@ def build_messages_for_generation(
     history_messages: list[dict],
     evidence_texts: list[str],
     current_question: str,
+    image_data_urls: list[str] | None = None,
 ) -> list[dict]:
     """把 system_prompt + 历史消息 + 证据上下文 + 当前问题 组装成 LLM messages 数组。
 
@@ -176,8 +178,31 @@ def build_messages_for_generation(
         )
         messages.append({"role": "system", "name": "context", "content": evidence_content})
 
-    messages.append({"role": "user", "content": current_question})
+    if image_data_urls:
+        content: list[dict] = [{"type": "text", "text": current_question}]
+        content.extend({"type": "image_url", "image_url": {"url": url}} for url in image_data_urls)
+        messages.append({"role": "user", "content": content})
+    else:
+        messages.append({"role": "user", "content": current_question})
     return messages
+
+
+def _image_data_urls(image_attachments: list[dict] | None) -> list[str]:
+    urls: list[str] = []
+    for item in image_attachments or []:
+        raw = item.get("bytes") if isinstance(item, dict) else None
+        mime = str(item.get("mime") or "application/octet-stream") if isinstance(item, dict) else "application/octet-stream"
+        if isinstance(raw, bytes) and raw:
+            urls.append(f"data:{mime};base64,{base64.b64encode(raw).decode('ascii')}")
+    return urls
+
+
+def _contains_image_content(messages: list[dict]) -> bool:
+    return any(
+        isinstance(message.get("content"), list)
+        and any(part.get("type") == "image_url" for part in message["content"] if isinstance(part, dict))
+        for message in messages
+    )
 
 
 class LlmError(Exception):
@@ -186,6 +211,18 @@ class LlmError(Exception):
 
 class CircuitOpenError(LlmError):
     """熔断器开闸，请求被短路（未发往外网）。"""
+
+
+def _model_for_provider(provider: ModelProvider, requested: str | None) -> str:
+    """Translate the UI provider/model id to the upstream model id."""
+    if not requested or requested == provider.name:
+        return provider.model
+    prefix = f"{provider.name.split('/', 1)[0]}/"
+    if requested.startswith(prefix):
+        return requested[len(prefix) :]
+    if requested.endswith(f"/{provider.model}"):
+        return provider.model
+    return requested
 
 
 def _resolve_reasoning_effort(thinking_level: str) -> str:
@@ -341,6 +378,9 @@ def chat(
         raise CircuitOpenError("LLM 熔断器开闸，请求被短路")
 
     providers = get_runtime_chat_providers(tenant_id=tenant_id, user_id=user_id)
+    has_image_content = _contains_image_content(messages)
+    if has_image_content:
+        providers = [provider for provider in providers if provider.supports_vision]
     if provider_name:
         preferred = [p for p in providers if p.name == provider_name]
         if not preferred:
@@ -349,7 +389,17 @@ def chat(
                 if "/" in p.name and p.name.split("/", 1)[0] == provider_name
             ]
         providers = preferred or providers
+    if has_image_content and model:
+        providers = [
+            provider
+            for provider in providers
+            if provider.model == model
+            or provider.name == model
+            or provider.name.endswith(f"/{model}")
+        ]
     if not providers:
+        if has_image_content:
+            raise LlmError("请求选择的远程 LLM 模型不支持 Vision")
         raise LlmError("未配置任何 chat provider（请在「AI 模型配置中心」启用一个服务商）")
 
     settings = get_settings()
@@ -361,7 +411,7 @@ def chat(
             result = _call_provider(
                 provider, messages,
                 temperature=effective_temperature,
-                model=model,
+                model=_model_for_provider(provider, model),
                 reasoning_effort=reasoning_effort,
             )
             LLM_DURATION.observe(time.perf_counter() - t0, provider=provider.name)
@@ -619,6 +669,9 @@ def chat_stream(
         raise CircuitOpenError("LLM 熔断器开闸，请求被短路")
 
     providers = get_runtime_chat_providers(tenant_id=tenant_id, user_id=user_id)
+    has_image_content = _contains_image_content(messages)
+    if has_image_content:
+        providers = [provider for provider in providers if provider.supports_vision]
     if provider_name:
         preferred = [p for p in providers if p.name == provider_name]
         if not preferred:
@@ -627,7 +680,17 @@ def chat_stream(
                 if "/" in p.name and p.name.split("/", 1)[0] == provider_name
             ]
         providers = preferred or providers
+    if has_image_content and model:
+        providers = [
+            provider
+            for provider in providers
+            if provider.model == model
+            or provider.name == model
+            or provider.name.endswith(f"/{model}")
+        ]
     if not providers:
+        if has_image_content:
+            raise LlmError("请求选择的远程 LLM 模型不支持 Vision")
         raise LlmError("未配置任何 chat provider（请在「AI 模型配置中心」启用一个服务商）")
 
     settings = get_settings()
@@ -639,7 +702,7 @@ def chat_stream(
             gen = _call_provider_stream(
                 provider, messages,
                 temperature=effective_temperature,
-                model=model,
+                model=_model_for_provider(provider, model),
                 reasoning_effort=reasoning_effort,
             )
             # peek 第一个 token 确认 provider 可用
@@ -678,6 +741,7 @@ def generate_answer_stream(
     history_messages: list[dict] | None = None,
     tenant_id: str | None = None,
     user_id: str | None = None,
+    image_attachments: list[dict] | None = None,
 ):
     """流式生成答案：yield content delta。
 
@@ -695,6 +759,7 @@ def generate_answer_stream(
     deep_hint = _deep_hint_for(tl)
     evidence_texts = list(evidence_texts or [])
     effective_deep_thinking = tl != "light"
+    image_data_urls = _image_data_urls(image_attachments)
     settings = get_settings()
     temperature = _resolve_temperature(tl, settings.llm_temperature)
 
@@ -728,8 +793,14 @@ def generate_answer_stream(
                 f"问题：{question}\n\n"
                 "回答："
             )
+        user_content: str | list[dict] = prompt
+        if image_data_urls:
+            user_content = [{"type": "text", "text": prompt}]
+            user_content.extend(
+                {"type": "image_url", "image_url": {"url": url}} for url in image_data_urls
+            )
         yield from chat_stream(
-            [{"role": "user", "content": prompt}],
+            [{"role": "user", "content": user_content}],
             temperature=temperature,
             reasoning_effort=reasoning_effort,
             provider_name=route.provider_name if route else None,
@@ -749,6 +820,7 @@ def generate_answer_stream(
             history_messages=history_messages,
             evidence_texts=evidence_texts,
             current_question=question,
+            image_data_urls=image_data_urls,
         )
         yield from chat_stream(
             messages,

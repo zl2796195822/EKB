@@ -77,6 +77,7 @@ class ModelProvider:
     api_key: str
     model: str
     timeout_seconds: float = 30.0
+    supports_vision: bool = False
 
 
 @dataclass(frozen=True)
@@ -236,6 +237,9 @@ def _parse_providers() -> list[ModelProvider]:
                 kind = item.get("kind", "chat")
                 if kind not in ("chat", "embedding"):
                     kind = "chat"
+                capabilities = item.get("capabilities")
+                if not isinstance(capabilities, dict):
+                    capabilities = {}
                 providers.append(
                     ModelProvider(
                         name=str(item.get("name", f"{kind}-provider")),
@@ -244,6 +248,9 @@ def _parse_providers() -> list[ModelProvider]:
                         api_key=str(item.get("api_key", "")),
                         model=str(item.get("model", "")),
                         timeout_seconds=float(item.get("timeout", 30)),
+                        supports_vision=bool(
+                            item.get("supports_vision") or capabilities.get("vision", False)
+                        ),
                     )
                 )
         except (json.JSONDecodeError, TypeError, ValueError):
@@ -473,7 +480,7 @@ def _load_runtime_model_providers_from_db(
                 model_rows = session.execute(
                     text(
                         """
-                        SELECT model_id, display_name, model_type
+                        SELECT model_id, display_name, model_type, capabilities
                         FROM llm_models
                         WHERE provider_id = :pid AND is_enabled = 1
                         ORDER BY created_at ASC
@@ -485,6 +492,12 @@ def _load_runtime_model_providers_from_db(
                 models_to_use: list[tuple[str, str]] = []  # [(model_id, display_name)]
                 for m in model_rows:
                     mid, mname, mtype = str(m[0]), str(m[1] or m[0]), (m[2] or "chat")
+                    model_capabilities = m[3] or {}
+                    if isinstance(model_capabilities, str):
+                        try:
+                            model_capabilities = json.loads(model_capabilities)
+                        except (TypeError, ValueError):
+                            model_capabilities = {}
                     if kind == "chat" and not (mtype and "embedding" in mtype.lower()):
                         models_to_use.append((mid, mname))
                     elif kind == "embedding" and mtype and "embedding" in mtype.lower():
@@ -500,6 +513,10 @@ def _load_runtime_model_providers_from_db(
                             api_key=api_key,
                             model=mid,
                             timeout_seconds=timeout_seconds,
+                            supports_vision=bool(
+                                isinstance(model_capabilities, dict)
+                                and model_capabilities.get("vision") is True
+                            ),
                         )
                     )
     except _LLMConfigUnavailable:

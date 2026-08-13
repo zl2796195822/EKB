@@ -72,7 +72,7 @@ def build_attachment_citations(
             break
         chunks = attachment.get("chunks") or []
         body = str(attachment.get("text") or "").strip()
-        if not body and not chunks:
+        if not body and not chunks and attachment.get("usage_mode") != "VISION":
             continue
         index = offset + len(items) + 1
         items.append(

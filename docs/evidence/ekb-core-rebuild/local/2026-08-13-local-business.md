@@ -10,13 +10,13 @@
 - 本地对象存储使用显式开发配置的磁盘适配器，上传对象写入 `.local-object-storage/`；路径越界、未知对象和过期 upload session fail closed。
 - 上传协议已走真实批次：创建 batch → 预检 upload session → 上传对象 → checksum complete → 创建后台 ingest job。
 - Worker 已接入真实对象读取、校验、解析、分块、远程 embedding、索引和失败状态更新；未配置远程 Embedding 时返回 `EMBEDDING_UNAVAILABLE`，不回退本地模型、不写伪向量。
-- Provider/Model 运行时仅使用受管远程 LLM/Embedding 配置；本地大模型不是可选回退路径。
+- Provider/Model 运行时仅使用受管远程 LLM/Embedding 配置；本地大模型不是可选回退路径。图片仅在当前远程模型 capability 明确支持 Vision 时以 typed image content 发送；无远程 Vision/OCR 时 fail closed，不生成本地占位描述。
 
 ## 验证命令与结果
 
 ```text
 cd apps/api && ../../.venv/bin/pytest -q
-331 passed, 2 skipped
+333 passed, 2 skipped
 
 cd apps/api && ../../.venv/bin/ruff check --ignore E501,F401 \
   ekb_api/routers/attachments.py ekb_api/routers/qa.py \
@@ -43,7 +43,7 @@ passed
 passed
 ```
 
-全仓库 `ruff check` 仍会报告工作区历史文件中的既有风格/测试问题；本阶段没有借机扩大修复范围。本次修改涉及的后端文件精确 lint 已通过。项目 venv 未安装 `pip-audit`。
+全仓库 `ruff check` 仍会报告工作区历史文件中的既有风格/测试问题；本阶段没有借机扩大修复范围。本次修改涉及的后端文件精确 lint（忽略触及旧文件的 E501/F401/I001/E402/B007）已通过。项目 venv 未安装 `pip-audit`。
 
 ## 真实 API 与浏览器验收
 
@@ -62,6 +62,7 @@ API 五步链已实际返回成功状态：登录、知识库列表、batch 创�
 - 远程 S3-compatible presigned PUT 不携带 EKB Bearer header；本地 protected PUT 仅开发环境和显式 local root 开启。
 - 本地 protected PUT 仅接受数据库解析出的当前租户 object key，并校验 owner、UPLOADING 状态、字节数和 SHA-256；对象读取再次按租户校验并验证完整性。
 - QA 将附件作为独立资源做 tenant/owner/conversation/status 校验，不把 attachment ID 当作 KB ID；消息绑定也校验当前用户的会话归属，引用预算为附件保留位置。
+- 远程对象存储 session 返回 presigned PUT；仅本地开发存储返回受保护 API PUT。Vision 请求按当前用户配置的远程模型 capability 过滤并校验对象 checksum/大小。
 - 生产 secret-pattern 扫描排除测试和工具目录后没有生产凭据命中；仓库内 `MCP` 测试仍有占位 token 字符串，未视为凭据。
 - 本地认证 token 继续使用 session storage；项目记忆、Spec 和证据不记录密码、API key、token 或私密地址。
 

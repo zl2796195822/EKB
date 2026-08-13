@@ -28,6 +28,7 @@ from sqlalchemy import Engine, text
 from ekb_api.chunking import split_sections as _split_sections
 from ekb_api.core.auth import get_live_auth_context
 from ekb_api.core.authorization import CAP_KB_WRITE, CAP_QA_ASK, assert_capability
+from ekb_api.core.config import get_runtime_chat_providers
 from ekb_api.core.errors import ApiError
 from ekb_api.domain import AuthContext
 from ekb_api.embedding import embed_batch
@@ -194,9 +195,27 @@ def create_attachment_session(
         )
     except Exception as exc:
         raise _translate(exc) from exc
+    from ekb_api.services.storage import LocalFilesystemStorageClient, build_storage_client
+
+    try:
+        storage = build_storage_client()
+        if isinstance(storage, LocalFilesystemStorageClient):
+            upload_url = f"/api/v1/attachments/objects?attachment_id={rec.id}"
+        else:
+            presigned = storage.put_presigned(
+                tenant_id=auth.tenant_id,
+                object_key=object_key,
+                byte_size=rec.byte_size,
+                method="SINGLE",
+                part_size=None,
+                expires_in_seconds=3600,
+            )
+            upload_url = presigned.upload_urls[0]
+    except Exception as exc:
+        raise _translate(exc) from exc
     return {
         "attachment": rec.as_dict(),
-        "upload_url": f"/api/v1/attachments/objects?attachment_id={rec.id}",
+        "upload_url": upload_url,
         "object_key": object_key,
     }
 
@@ -279,7 +298,10 @@ def process_attachment_endpoint(
         config = ProcessingConfig(
             parser=_parse, chunker=_split_sections,
             embed=lambda texts: embed_batch(texts, tenant_id=auth.tenant_id, user_id=auth.actor_id),
-            vision=RuntimeVisionCapability(), ocr=None,
+            vision=RuntimeVisionCapability(
+                get_runtime_chat_providers(tenant_id=auth.tenant_id, user_id=auth.actor_id)
+            ),
+            ocr=None,
         )
         result = process_attachment(
             _service(), tenant_id=auth.tenant_id, actor_id=auth.actor_id,

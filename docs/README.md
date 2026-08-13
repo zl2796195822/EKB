@@ -40,4 +40,4 @@ CR-PH1-T01 + CR-PH1-T03 的第一真实业务切片已在本地工作树实现�
 
 ## Local business closure evidence (2026-08-13)
 
-本地真实上传/对象写入/checksum complete/后台解析失败闭环、LLM-only Provider/Embedding fail-closed、文档中心真实浏览器验收和回归结果记录于 [`evidence/ekb-core-rebuild/local/2026-08-13-local-business.md`](./evidence/ekb-core-rebuild/local/2026-08-13-local-business.md)。该证据明确区分本地 SQLite/开发对象存储与生产 PostgreSQL/pgvector、对象存储、队列、Worker、Scheduler、Provider 及部署前置；未满足生产前置时不得标记 PH1–PH8 完成。
+本地真实上传/对象写入/checksum complete/后台解析失败闭环、LLM-only Provider/Embedding/Vision/OCR fail-closed、附件问答引用、文档中心真实浏览器验收和回归结果记录于 [`evidence/ekb-core-rebuild/local/2026-08-13-local-business.md`](./evidence/ekb-core-rebuild/local/2026-08-13-local-business.md)。该证据明确区分本地 SQLite/开发对象存储与生产 PostgreSQL/pgvector、对象存储、队列、Worker、Scheduler、Provider 及部署前置；未满足生产前置时不得标记 PH1–PH8 完成。

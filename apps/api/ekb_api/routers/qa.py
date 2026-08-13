@@ -260,6 +260,7 @@ async def ask(
 
     # 附件上下文必须先通过租户/所有者/状态校验；它不是 KB 检索范围。
     attachment_contexts: list[dict] = []
+    image_attachments: list[dict] = []
     if payload.options.attachment_doc_ids:
         try:
             attachment_contexts = AttachmentService(get_engine()).load_context(
@@ -268,6 +269,20 @@ async def ask(
                 attachment_ids=list(payload.options.attachment_doc_ids),
                 conversation_id=conversation.id,
             )
+            attachment_service = AttachmentService(get_engine())
+            for attachment in attachment_contexts:
+                if attachment.get("usage_mode") == "VISION":
+                    image_bytes = attachment_service.read_image_bytes(
+                        tenant_id=auth.tenant_id,
+                        owner_user_id=auth.actor_id,
+                        attachment_id=str(attachment["attachment_id"]),
+                        conversation_id=conversation.id,
+                    )
+                    if len(image_bytes) > 20 * 1024 * 1024:
+                        raise ApiError(413, "VISION_PAYLOAD_TOO_LARGE", "图片超过远程 Vision 请求大小限制")
+                    image_attachments.append(
+                        {"bytes": image_bytes, "mime": attachment.get("mime", "image/*")}
+                    )
         except AttachmentError as exc:
             raise ApiError(
                 404,
@@ -353,6 +368,7 @@ async def ask(
                 return []
             attachment_count = sum(
                 bool(str(attachment.get("text") or "").strip())
+                or attachment.get("usage_mode") == "VISION"
                 for attachment in attachment_contexts
             )
             if attachment_count == 0:
@@ -563,6 +579,7 @@ async def ask(
             # 用户显式选择的附件必须保留上下文配额，不能被 KB 前五条命中挤掉。
             usable_attachment_count = sum(
                 bool(str(attachment.get("text") or "").strip())
+                or attachment.get("usage_mode") == "VISION"
                 for attachment in attachment_contexts
             )
             evidence_budget = max(
@@ -591,7 +608,9 @@ async def ask(
                 raw_kb_ids,
                 chunks,
                 has_attachment_evidence=any(
-                    str(attachment.get("text") or "").strip() for attachment in attachment_contexts
+                    str(attachment.get("text") or "").strip()
+                    or attachment.get("usage_mode") == "VISION"
+                    for attachment in attachment_contexts
                 ),
             ):
                 store.update_message_content(
@@ -888,6 +907,7 @@ async def ask(
                         history_messages=history_messages,
                         tenant_id=auth.tenant_id,
                         user_id=auth.actor_id,
+                        image_attachments=image_attachments,
                     )
                     # 同一 gen 实例共享锁，避免 wait_for(timeout=2s) 放弃线程后，
                     # in-flight 的 next(gen) 与下一轮新 to_thread 并发重入。
@@ -1103,6 +1123,7 @@ async def ask(
             # paragraph/source_path/updated_at/score），并持久化到消息 metadata_redacted.citations。
             citation_attachment_count = sum(
                 bool(str(attachment.get("text") or "").strip())
+                or attachment.get("usage_mode") == "VISION"
                 for attachment in attachment_contexts
             )
             citations_payload: list[dict] = rag.build_citations(

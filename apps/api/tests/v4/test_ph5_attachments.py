@@ -37,7 +37,7 @@ from ekb_api.services.attachments import (
     AttachmentStateConflict,
     AttachmentStatus,
 )
-from ekb_api.services.ocr import OcrResult, run_ocr
+from ekb_api.services.ocr import OcrResult, OcrUnavailable, run_ocr
 from ekb_api.services.vision import decide_image_mode
 
 # 1x1 PNG used to exercise image processing paths.
@@ -272,7 +272,7 @@ def test_process_image_ocr_fallback_when_no_vision(env) -> None:
     assert result["degraded"] is False  # real fake OCR available
 
 
-def test_process_image_ocr_local_degraded_without_provider(env) -> None:
+def test_process_image_fails_closed_without_remote_ocr(env) -> None:
     store = LocalBytesStore()
     store.put("obj-img3", _PNG)
     rec_id = _register(env, "obj-img3", "image/png", len(_PNG), "cr-img3")
@@ -281,9 +281,8 @@ def test_process_image_ocr_local_degraded_without_provider(env) -> None:
                               vision=_FakeVision(False), ocr=None)
     result = process_attachment(svc, tenant_id=env["tenant"], actor_id=env["user"],
                                 attachment_id=rec_id, storage=store, config=config)
-    assert result["status"] == AttachmentStatus.READY
-    assert result["usage_mode"] == "OCR_FALLBACK"
-    assert result["degraded"] is True
+    assert result["status"] == AttachmentStatus.FAILED
+    assert "远程 OCR/caption" in result["detail"]["error"]
 
 
 # ---- bind -----------------------------------------------------------------
@@ -322,10 +321,9 @@ def test_decide_image_mode_delegates_to_capability() -> None:
     assert decide_image_mode(_FakeVision(False)) == ("OCR_FALLBACK", "OCR")
 
 
-def test_run_ocr_never_raises() -> None:
+def test_run_ocr_requires_remote_provider() -> None:
     ok = run_ocr(_FakeOcr(), b"1234", mime="image/png")
     assert isinstance(ok, OcrResult)
     assert ok.text.startswith("[OCR]")
-    degraded = run_ocr(None, b"1234", mime="image/png")
-    assert degraded.degraded is True
-    assert degraded.text  # non-empty, usable as fallback context
+    with pytest.raises(OcrUnavailable):
+        run_ocr(None, b"1234", mime="image/png")

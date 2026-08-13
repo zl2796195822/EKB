@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from ekb_api.core.config import get_settings, Settings
+from ekb_api.core.config import ModelProvider, Settings, get_settings
 from ekb_api.llm import (
     _deep_hint_for,
     _map_role_ekb_to_llm,
@@ -10,6 +10,7 @@ from ekb_api.llm import (
     build_system_prompt_template,
     estimate_messages_tokens,
     estimate_text_tokens,
+    _model_for_provider,
 )
 
 
@@ -46,6 +47,16 @@ class TestEstimateTextTokens:
 
     def test_estimate_text_tokens_empty(self):
         assert estimate_text_tokens("") == 2
+
+    def test_model_route_id_is_normalized_for_upstream(self):
+        provider = ModelProvider(
+            name="deepseek/deepseek-v4-pro",
+            kind="chat",
+            base_url="https://provider.example.invalid/chat/completions",
+            api_key="key",
+            model="deepseek-v4-pro",
+        )
+        assert _model_for_provider(provider, provider.name) == "deepseek-v4-pro"
 
 
 class TestEstimateMessagesTokens:
@@ -181,6 +192,18 @@ class TestBuildMessagesForGeneration:
         )
         assert messages[1]["role"] == "user"
         assert messages[2]["role"] == "assistant"
+
+    def test_image_attachment_uses_typed_remote_content(self):
+        messages = build_messages_for_generation(
+            system_prompt="SP",
+            history_messages=[],
+            evidence_texts=[],
+            current_question="看这张图",
+            image_data_urls=["data:image/png;base64,AA=="],
+        )
+        assert messages[-1]["role"] == "user"
+        assert messages[-1]["content"][0] == {"type": "text", "text": "看这张图"}
+        assert messages[-1]["content"][1]["type"] == "image_url"
 
 
 from unittest.mock import patch, MagicMock

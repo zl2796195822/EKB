@@ -561,6 +561,7 @@ class AttachmentService:
                     {"a": attachment_id, "t": tenant_id},
                 ).all()
                 texts: list[str] = []
+                usage_modes: set[str] = set()
                 for artifact in artifacts:
                     metadata = artifact[0]
                     if isinstance(metadata, str):
@@ -568,8 +569,20 @@ class AttachmentService:
                             metadata = json.loads(metadata)
                         except json.JSONDecodeError:
                             metadata = {}
-                    if isinstance(metadata, dict) and metadata.get("ocr_text"):
-                        texts.append(str(metadata["ocr_text"]))
+                    if isinstance(metadata, dict):
+                        if metadata.get("usage_mode"):
+                            usage_modes.add(str(metadata["usage_mode"]))
+                        if metadata.get("ocr_text"):
+                            texts.append(str(metadata["ocr_text"]))
+                image_row = conn.execute(
+                    text(
+                        "SELECT method FROM image_artifacts "
+                        "WHERE attachment_id=:a AND tenant_id=:t ORDER BY id LIMIT 1"
+                    ),
+                    {"a": attachment_id, "t": tenant_id},
+                ).first()
+                if image_row is not None and str(image_row[0]) == "NATIVE_VISION":
+                    usage_modes.add("VISION")
                 texts.extend(str(chunk[2]) for chunk in chunks if str(chunk[2]).strip())
                 contexts.append(
                     {
@@ -585,9 +598,56 @@ class AttachmentService:
                             for chunk in chunks
                         ],
                         "text": "\n\n".join(texts)[:100_000],
+                        "usage_mode": (
+                            "VISION" if "VISION" in usage_modes
+                            else (sorted(usage_modes)[0] if usage_modes else "RETRIEVAL")
+                        ),
                     }
                 )
         return contexts
+
+    def read_image_bytes(
+        self,
+        *,
+        tenant_id: str,
+        owner_user_id: str,
+        attachment_id: str,
+        conversation_id: Optional[str] = None,
+    ) -> bytes:
+        """Read a vision attachment through the configured object-store boundary."""
+        record = self.get(tenant_id=tenant_id, attachment_id=attachment_id)
+        if record.owner_user_id != owner_user_id:
+            raise AttachmentOwnershipError(attachment_id, owner_user_id)
+        if conversation_id and record.conversation_id not in (None, conversation_id):
+            raise AttachmentOwnershipError(attachment_id, owner_user_id)
+        if record.status not in (AttachmentStatus.READY, AttachmentStatus.ATTACHED):
+            raise AttachmentStateConflict(attachment_id, record.status, AttachmentStatus.READY)
+        with self._engine.connect() as conn:
+            image = conn.execute(
+                text(
+                    "SELECT 1 FROM image_artifacts "
+                    "WHERE attachment_id=:a AND tenant_id=:t AND method='NATIVE_VISION' LIMIT 1"
+                ),
+                {"a": attachment_id, "t": tenant_id},
+            ).first()
+            source = conn.execute(
+                text(
+                    "SELECT object_key, sha256, byte_size FROM source_objects "
+                    "WHERE id=:s AND tenant_id=:t"
+                ),
+                {"s": record.source_object_id, "t": tenant_id},
+            ).first()
+        if image is None or source is None:
+            raise AttachmentError("附件没有可用的远程 Vision 对象")
+        from ekb_api.services.storage import build_storage_client
+
+        data = build_storage_client().get_object_bytes(
+            tenant_id=tenant_id, object_key=str(source[0])
+        )
+        digest = hashlib.sha256(data).hexdigest()
+        if len(data) != int(source[2]) or digest.lower() != str(source[1]).lower():
+            raise AttachmentError("Vision 对象完整性校验失败")
+        return data
 
     @staticmethod
     def _resolve_usage_mode(conn: Any, attachment_id: str) -> str:
