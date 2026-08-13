@@ -1,6 +1,6 @@
 # EKB 项目记忆
 
-> 更新时间：2026-08-12（EKB Core Rebuild Tier 3 Spec 00–14 已获用户确认并进入 Ready for Plan；历史验收账号已脱敏）
+> 更新时间：2026-08-13（EKB Core Rebuild Tier 3 Spec 00–14 已获用户确认并进入 Ready for Plan；历史验收账号已脱敏）
 > 用途：为后续会话保留项目定位、权威文档、实施进度、验证证据与未决事项。不得记录密码、令牌或其他秘密。
 
 ## 项目定位与技术基线
@@ -474,3 +474,9 @@ Nginx 配置：
 - 浏览器证据（2026-08-13）：使用现有本地开发账号重新建立登录后，删除 `ekb.upload-center.batch-refs.v1` 并 reload `/#/documents`，真实服务端 batch 被恢复并显示：真实文件 `HANDOFF-2026-08-12.md`，失败阶段 `CHUNKING / 50%`，attempt `1/1`，显示 job id 和 `EMBEDDING_UNAVAILABLE`。不记录 access/refresh token、密码、私有地址或 opaque secret。
 - 验证：backend full pytest `361 passed, 2 skipped`；web `52 passed`；web typecheck/build 通过。
 - 生产/服务器工作仍 `NOT RUN/BLOCKED`：当前运行时没有生产目标（统一写作 `[production host]`）或受管凭据（统一写作 `[REDACTED]`）。不标记生产部署，不标记全 PH3 或 PH8 完成。
+
+## 2026-08-13 CR-PH2-T05 / FR-058 Jobs Center 本地 UI 切片
+
+- DONE-LOCAL：现有 Analytics `GovernancePanel` 增加真实「作业中心」Tab，使用当前租户作用域的 `GET /api/v1/jobs`、`GET /api/v1/jobs/cleanup` 和 `POST /api/v1/jobs/{job_id}/cancel`。页面展示服务端 state counts、job type、safe timestamps、lease/heartbeat availability、脱敏 error metadata、job id 及 cleanup `total/by_state/recent`；payload、`tenant_id`、Provider 原始响应和私有地址排除。仅对 `QUEUED`/`RUNNING`/`RETRY_WAIT` 提供取消，操作后重新加载服务端状态。
+- 浏览器（2026-08-13）：现有本地开发账号认证后，`Analytics → 运营与治理 → 作业中心` 展示 5 条真实作业（4 `SUCCEEDED`、1 `DEAD`），含一条文档 ingest 作业的 `EMBEDDING_UNAVAILABLE`；cleanup projection 为 `retention_purge` 总数 4、全部 `SUCCEEDED`；缺少 lease/heartbeat 时显示 unavailable。过期认证阶段已有 3 条较早 auth-related console errors，不宣称 console=0；Jobs Center 数据加载成功。未记录凭据、token、私有地址或完整 opaque ID。
+- 验证：web `57 passed in 8 files`、typecheck/build、`git diff --check` 通过；后端未改动，沿用既有全量 `361 passed, 2 skipped`，本切片未重新运行后端测试。生产目标、服务器备份、部署、回滚仍 `NOT RUN/BLOCKED`，统一使用 `[production host]` / `[REDACTED]`。保持 LLM-only、无本地模型、无 mock，不标记 PH2 或 PH0–PH8 全部完成。

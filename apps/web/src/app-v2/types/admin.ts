@@ -215,6 +215,66 @@ export interface BackupResult {
   readonly error?: AdapterError
 }
 
+export interface JobErrorView {
+  readonly code: string | null
+  readonly category: string | null
+  readonly message: string | null
+  readonly retryable: boolean | null
+}
+
+/** Jobs Center view deliberately excludes tenant_id and payload. */
+export interface JobView {
+  readonly id: string
+  readonly jobType: string
+  readonly state: string
+  readonly priority: number
+  readonly maxAttempts: number
+  readonly availableAt: string
+  readonly leaseOwner: string | null
+  readonly leaseExpiresAt: string | null
+  readonly heartbeatAt: string | null
+  readonly errorCode: string | null
+  readonly sanitizedError: JobErrorView | null
+  readonly createdAt: string
+  readonly updatedAt: string
+}
+
+export interface JobListQueryInput {
+  readonly states?: readonly string[]
+  readonly jobType?: string
+  readonly limit?: number
+}
+
+export interface JobListView {
+  readonly items: readonly JobView[]
+  readonly count: number
+}
+
+export interface JobListResult {
+  readonly state: PageState
+  readonly data?: JobListView
+  readonly error?: AdapterError
+}
+
+export interface JobResult {
+  readonly state: PageState
+  readonly data?: JobView
+  readonly error?: AdapterError
+}
+
+export interface JobsCleanupView {
+  readonly jobType: string
+  readonly total: number
+  readonly byState: Readonly<Record<string, number>>
+  readonly recent: readonly JobView[]
+}
+
+export interface JobsCleanupResult {
+  readonly state: PageState
+  readonly data?: JobsCleanupView
+  readonly error?: AdapterError
+}
+
 export interface AdminServices {
   readonly inviteUser: (input: InviteUserInput) => Promise<InviteUserResult>
   readonly listTenants: () => Promise<TenantListResult>
@@ -231,4 +291,8 @@ export interface AdminServices {
   readonly createSyncSource: (input: SyncSourceCreateInput) => Promise<SyncSourceWriteResult>
   readonly runSyncSource: (sourceId: string) => Promise<SyncRunResult>
   readonly triggerBackup: () => Promise<BackupResult>
+  readonly listJobs: (input?: JobListQueryInput) => Promise<JobListResult>
+  readonly getJob: (jobId: string) => Promise<JobResult>
+  readonly cancelJob: (jobId: string) => Promise<JobResult>
+  readonly getJobsCleanup: (recentLimit?: number) => Promise<JobsCleanupResult>
 }

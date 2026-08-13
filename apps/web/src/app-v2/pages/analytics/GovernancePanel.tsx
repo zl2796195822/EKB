@@ -19,14 +19,16 @@ import type {
   SyncSourceView,
   V2Services,
 } from '../../types'
+import { JobsCenterTab } from './JobsCenterTab'
 
-type GovernanceTab = 'audit' | 'reviews' | 'sync' | 'backup'
+type GovernanceTab = 'audit' | 'reviews' | 'sync' | 'backup' | 'jobs'
 
 const GOVERNANCE_TABS: readonly { id: GovernanceTab; label: string }[] = [
   { id: 'audit', label: '审计日志' },
   { id: 'reviews', label: '低置信度审核' },
   { id: 'sync', label: '同步源' },
   { id: 'backup', label: '备份' },
+  { id: 'jobs', label: '作业中心' },
 ]
 
 const PAGE_SIZE = 20
@@ -64,7 +66,8 @@ export function GovernancePanel({ services, session }: GovernancePanelProps) {
           <h2 id="m6-governance-title">运营与治理</h2>
           <p>
             按当前主体授权调用既有 <code>/admin/audit</code>、<code>/admin/reviews</code>、
-            <code>/admin/sync/sources</code> 和 <code>/admin/backup</code>；无权限时显式拒绝，不伪造结果。
+            <code>/admin/sync/sources</code> 和 <code>/admin/backup</code>，以及租户作用域的真实端点
+            <code>/jobs</code> 和 <code>/jobs/cleanup</code>；无权限时显式拒绝，不伪造结果。
           </p>
         </div>
         <Database size={20} aria-hidden="true" />
@@ -91,6 +94,7 @@ export function GovernancePanel({ services, session }: GovernancePanelProps) {
       {activeTab === 'reviews' ? <ReviewsTab services={services} /> : null}
       {activeTab === 'sync' ? <SyncTab services={services} /> : null}
       {activeTab === 'backup' ? <BackupTab services={services} session={session} /> : null}
+      {activeTab === 'jobs' ? <JobsCenterTab services={services} /> : null}
     </section>
   )
 }

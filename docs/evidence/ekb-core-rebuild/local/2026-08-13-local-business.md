@@ -107,3 +107,9 @@ API 五步链已实际返回成功状态：登录、知识库列表、batch 创�
 
 - 真实 Provider 出网、生产 PostgreSQL/pgvector、生产对象存储、可靠队列/Worker/Scheduler、服务器备份/部署/回滚和生产浏览器验收均未执行，保持 `NOT RUN/BLOCKED`。
 - 本地 DONE-LOCAL 不代表生产完成；本记录不包含任何凭据，且本切片未修改 Skills、legacy backup、deploy scripts、migrations、theme 或 Web Search。
+
+## 2026-08-13 CR-PH2-T05 / FR-058 Jobs Center 本地证据
+
+- DONE-LOCAL：现有 Analytics `GovernancePanel` 已增加真实「作业中心」Tab，调用当前租户作用域的 `GET /api/v1/jobs`、`GET /api/v1/jobs/cleanup` 和 `POST /api/v1/jobs/{job_id}/cancel`。页面展示服务端 state counts、job type、safe timestamps、lease/heartbeat availability、脱敏 error metadata、job id，以及 cleanup `total/by_state/recent`；排除 payload、`tenant_id`、Provider 原始响应和私有地址。取消只对 `QUEUED`/`RUNNING`/`RETRY_WAIT` 提供，之后重新加载服务端状态。
+- 本地浏览器（2026-08-13）：认证后进入 `Analytics → 运营与治理 → 作业中心`，真实展示 5 条作业（4 `SUCCEEDED`、1 `DEAD`），含文档 ingest 的 `EMBEDDING_UNAVAILABLE`；cleanup projection 为 `retention_purge` 总数 4、全部 `SUCCEEDED`；缺少 lease/heartbeat 时显示 unavailable。过期认证阶段已有 3 条较早 auth-related console errors，不宣称 console=0；Jobs Center 数据加载成功。本文不记录凭据、token、私有地址或完整 opaque ID。
+- 验证：web `57 passed in 8 files`、typecheck/build 通过；后端未改动，沿用既有全量 `361 passed, 2 skipped`，本切片未重新运行后端测试；`git diff --check` 通过。生产目标、服务器备份、部署、回滚均 `NOT RUN/BLOCKED`，统一使用 `[production host]` / `[REDACTED]`。本条保持 LLM-only、无本地模型、无 mock，不代表 PH2 或 PH0–PH8 全部完成。

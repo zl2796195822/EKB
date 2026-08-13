@@ -3,6 +3,10 @@ import type {
   AuditLogQuery,
   AuditLogRecord,
   BackupResponse,
+  JobViewResponse,
+  JobsCleanupResponse,
+  JobsListQuery,
+  JobsListResponse,
   OpsDashboardResponse,
   ReviewItemListResponse,
   ReviewItemQuery,
@@ -34,6 +38,11 @@ import type {
   TenantCreateInput,
   TenantView,
 } from '../types'
+import type {
+  JobListQueryInput,
+  JobView,
+  JobsCleanupView,
+} from '../types/admin'
 import { stateForData, stateForError, toAdapterError } from './index'
 
 export interface AdminApiClient {
@@ -49,6 +58,10 @@ export interface AdminApiClient {
   createSyncSource(payload: SyncSourceCreate): Promise<SyncSourceRecord>
   runSyncSource(sourceId: string): Promise<SyncRunResponse>
   triggerBackup(): Promise<BackupResponse>
+  listJobs?: (query?: JobsListQuery) => Promise<JobsListResponse>
+  getJob?: (jobId: string) => Promise<JobViewResponse>
+  cancelJob?: (jobId: string) => Promise<JobViewResponse>
+  getJobsCleanup?: (recentLimit?: number) => Promise<JobsCleanupResponse>
 }
 
 export type AdminAdapter = AdminServices
@@ -173,6 +186,91 @@ function mapBackup(input: BackupResponse): BackupView {
     backupSizeBytes: input.backup_size_bytes,
     elapsedSeconds: input.elapsed_seconds,
     tableCount: Array.isArray(input.tables) ? input.tables.length : 0,
+  }
+}
+
+const JOBS_MIN_LIMIT = 1
+const JOBS_MAX_LIMIT = 500
+const JOBS_DEFAULT_LIMIT = 100
+const JOBS_MAX_STATES = 8
+const JOBS_STATE_MAX_LENGTH = 32
+const JOBS_TYPE_MAX_LENGTH = 64
+const JOBS_CLEANUP_MIN_LIMIT = 1
+const JOBS_CLEANUP_MAX_LIMIT = 100
+const JOBS_CLEANUP_DEFAULT_LIMIT = 10
+
+function boundedInteger(value: number | undefined, fallback: number, min: number, max: number): number {
+  if (value === undefined || !Number.isFinite(value)) return fallback
+  return Math.min(max, Math.max(min, Math.trunc(value)))
+}
+
+function boundedText(value: unknown, maxLength: number): string | null {
+  if (typeof value !== 'string') return null
+  const trimmed = value.trim()
+  return trimmed ? trimmed.slice(0, maxLength) : null
+}
+
+function mapJobError(input: JobViewResponse): JobView['sanitizedError'] {
+  const source = input.sanitized_error
+  const record = source && typeof source === 'object' ? source as Record<string, unknown> : null
+  const code = boundedText(record?.code, 128) ?? boundedText(input.error_code, 128)
+  const category = boundedText(record?.category, 128)
+  const message = boundedText(record?.message, 512)
+  const retryable = typeof record?.retryable === 'boolean' ? record.retryable : null
+  if (!code && !category && !message && retryable === null) return null
+  return { code, category, message, retryable }
+}
+
+function mapJob(input: JobViewResponse): JobView {
+  const sanitizedError = mapJobError(input)
+  return {
+    id: input.id,
+    jobType: input.job_type,
+    state: input.state,
+    priority: input.priority,
+    maxAttempts: input.max_attempts,
+    availableAt: input.available_at,
+    leaseOwner: boundedText(input.lease_owner, 128),
+    leaseExpiresAt: input.lease_expires_at,
+    heartbeatAt: input.heartbeat_at,
+    errorCode: sanitizedError?.code ?? null,
+    sanitizedError,
+    createdAt: input.created_at,
+    updatedAt: input.updated_at,
+  }
+}
+
+function mapJobs(input: JobsListResponse) {
+  const items = Array.isArray(input.items) ? input.items.map(mapJob) : []
+  return { items, count: Number.isFinite(input.count) ? input.count : items.length }
+}
+
+function mapCleanup(input: JobsCleanupResponse): JobsCleanupView {
+  const byState: Record<string, number> = {}
+  for (const [rawState, rawCount] of Object.entries(input.by_state ?? {})) {
+    const state = boundedText(rawState, JOBS_STATE_MAX_LENGTH)
+    if (state && typeof rawCount === 'number' && Number.isFinite(rawCount)) {
+      byState[state] = Math.max(0, Math.trunc(rawCount))
+    }
+  }
+  return {
+    jobType: boundedText(input.job_type, JOBS_TYPE_MAX_LENGTH) ?? '—',
+    total: Number.isFinite(input.total) ? Math.max(0, Math.trunc(input.total)) : 0,
+    byState,
+    recent: Array.isArray(input.recent) ? input.recent.map(mapJob) : [],
+  }
+}
+
+function normalizeJobQuery(input: JobListQueryInput = {}): JobsListQuery {
+  const states = input.states
+    ?.map((state) => boundedText(state, JOBS_STATE_MAX_LENGTH))
+    .filter((state): state is string => state !== null)
+    .slice(0, JOBS_MAX_STATES)
+  const jobType = boundedText(input.jobType, JOBS_TYPE_MAX_LENGTH)
+  return {
+    states,
+    job_type: jobType ?? undefined,
+    limit: boundedInteger(input.limit, JOBS_DEFAULT_LIMIT, JOBS_MIN_LIMIT, JOBS_MAX_LIMIT),
   }
 }
 
@@ -345,6 +443,46 @@ export function createAdminAdapter(client: AdminApiClient): AdminServices {
         return errorResult(error, '备份触发失败')
       }
     },
+    listJobs: async (input = {}) => {
+      if (!client.listJobs) return errorResult(new Error('Jobs Center API client unavailable'), '作业列表加载失败')
+      try {
+        const data = mapJobs(await client.listJobs(normalizeJobQuery(input)))
+        return { state: stateForData(data.items), data }
+      } catch (error) {
+        return errorResult(error, '作业列表加载失败')
+      }
+    },
+    getJob: async (jobId) => {
+      if (!client.getJob) return errorResult(new Error('Jobs Center API client unavailable'), '作业详情加载失败')
+      try {
+        return { state: 'ready', data: mapJob(await client.getJob(jobId)) }
+      } catch (error) {
+        return errorResult(error, '作业详情加载失败')
+      }
+    },
+    cancelJob: async (jobId) => {
+      if (!client.cancelJob) return errorResult(new Error('Jobs Center API client unavailable'), '作业取消失败')
+      try {
+        return { state: 'ready', data: mapJob(await client.cancelJob(jobId)) }
+      } catch (error) {
+        return errorResult(error, '作业取消失败')
+      }
+    },
+    getJobsCleanup: async (recentLimit = JOBS_CLEANUP_DEFAULT_LIMIT) => {
+      if (!client.getJobsCleanup) return errorResult(new Error('Jobs Center API client unavailable'), '清理投影加载失败')
+      const safeRecentLimit = boundedInteger(
+        recentLimit,
+        JOBS_CLEANUP_DEFAULT_LIMIT,
+        JOBS_CLEANUP_MIN_LIMIT,
+        JOBS_CLEANUP_MAX_LIMIT,
+      )
+      try {
+        const data = mapCleanup(await client.getJobsCleanup(safeRecentLimit))
+        return { state: data.total > 0 ? 'ready' : 'empty', data }
+      } catch (error) {
+        return errorResult(error, '清理投影加载失败')
+      }
+    },
   }
 }
 
@@ -375,6 +513,10 @@ export const ADMIN_CAPABILITIES = [
   },
   {
     id: 'admin.backup',
+    status: 'available',
+  },
+  {
+    id: 'admin.jobs-center',
     status: 'available',
   },
   {

@@ -67,6 +67,10 @@ import type {
   AnalyticsDistributionResponse,
   AnalyticsOverviewResponse,
   AnalyticsTrendResponse,
+  JobViewResponse,
+  JobsCleanupResponse,
+  JobsListQuery,
+  JobsListResponse,
   AppInstallResponse,
   AppsCatalogResponse,
   AppsInstalledResponse,
@@ -155,6 +159,12 @@ function createIdempotencyKey(): string {
 function buildQuery<T extends object>(params: T): string {
   const search = new URLSearchParams()
   for (const [key, value] of Object.entries(params)) {
+    if (Array.isArray(value)) {
+      value.forEach((item) => {
+        if (item !== undefined && item !== null && item !== '') search.append(key, String(item))
+      })
+      continue
+    }
     if (value === undefined || value === null || value === '') continue
     search.set(key, String(value))
   }
@@ -1005,6 +1015,41 @@ export class ApiClient {
 
   async triggerBackup(): Promise<BackupResponse> {
     return this.request<BackupResponse>('/admin/backup', { method: 'POST' })
+  }
+
+  // ---- Jobs Center：租户作用域队列、取消与清理投影 ----
+
+  async listJobs(query: JobsListQuery = {}): Promise<JobsListResponse> {
+    const states = query.states
+      ?.map((state) => state.trim().slice(0, 32))
+      .filter(Boolean)
+      .slice(0, 8)
+    const jobType = query.job_type?.trim().slice(0, 64)
+    const limit = Number.isFinite(query.limit)
+      ? Math.min(500, Math.max(1, Math.trunc(query.limit as number)))
+      : 50
+    return this.request<JobsListResponse>(
+      `/jobs${buildQuery({ states, job_type: jobType, limit })}`,
+    )
+  }
+
+  async getJob(jobId: string): Promise<JobViewResponse> {
+    return this.request<JobViewResponse>(`/jobs/${encodeURIComponent(jobId)}`)
+  }
+
+  async cancelJob(jobId: string): Promise<JobViewResponse> {
+    return this.request<JobViewResponse>(`/jobs/${encodeURIComponent(jobId)}/cancel`, {
+      method: 'POST',
+    })
+  }
+
+  async getJobsCleanup(recentLimit = 10): Promise<JobsCleanupResponse> {
+    const safeRecentLimit = Number.isFinite(recentLimit)
+      ? Math.min(100, Math.max(1, Math.trunc(recentLimit)))
+      : 10
+    return this.request<JobsCleanupResponse>(
+      `/jobs/cleanup${buildQuery({ recent_limit: safeRecentLimit })}`,
+    )
   }
 
   // ---- Profile (Phase 1) ----

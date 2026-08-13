@@ -548,6 +548,45 @@ export interface BackupResponse {
   tables: Record<string, unknown>[]
 }
 
+// ---- Jobs Center (tenant-scoped background_jobs projection) ----
+
+export interface JobViewResponse {
+  id: string
+  tenant_id: string
+  job_type: string
+  idempotency_key: string
+  state: string
+  priority: number
+  max_attempts: number
+  payload: Readonly<Record<string, unknown>>
+  available_at: string
+  lease_owner: string | null
+  lease_expires_at: string | null
+  heartbeat_at: string | null
+  error_code: string | null
+  sanitized_error: Readonly<Record<string, unknown>> | null
+  created_at: string
+  updated_at: string
+}
+
+export interface JobsListQuery {
+  states?: readonly string[]
+  job_type?: string
+  limit?: number
+}
+
+export interface JobsListResponse {
+  items: JobViewResponse[]
+  count: number
+}
+
+export interface JobsCleanupResponse {
+  job_type: string
+  total: number
+  by_state: Record<string, number>
+  recent: JobViewResponse[]
+}
+
 // ---- Phase 1: Profile / Preferences / Sessions / API Keys / Notifications ----
 
 export interface MeProfileResponse {

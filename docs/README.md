@@ -59,6 +59,14 @@ CR-PH1-T01 + CR-PH1-T03 的第一真实业务切片已在本地工作树实现�
 验证：后端 Upload Center/ingest/boundary 定向回归 `34 passed`；前端 `52 passed`，typecheck/build 通过；`git diff --check` 与本次文档 diff secret scan 通过。生产 PostgreSQL/pgvector、对象存储、可靠队列/Worker/Scheduler、服务器备份、部署/回滚和生产浏览器均未执行，原因是当前运行时没有生产目标/受管凭据；本地 SQLite 证据不代表生产完成。
 
 下一步本地缺口：仍需在具备受管远程 embedding/provider 与生产基础设施配置后验证成功索引、PG/pgvector、对象存储及可靠 worker/scheduler；Upload Center 目前恢复已知 batch refs，尚不是跨设备的服务端全局批次列表。全 PH3/PH4–PH8 仍按各自范围分别验收。
+
+## Jobs Center 本地 UI 与浏览器证据（2026-08-13）
+
+`CR-PH2-T05 / FR-058` 已有 Analytics `GovernancePanel` 追加真实「作业中心」Tab，标记为 `DONE-LOCAL`，不等同于 PH2 或 PH0–PH8 全部完成。Tab 使用当前租户作用域的 `GET /api/v1/jobs`、`GET /api/v1/jobs/cleanup` 和 `POST /api/v1/jobs/{job_id}/cancel`；显示服务端 state counts、job type、safe timestamps、lease/heartbeat availability、脱敏 error metadata、job id，以及 cleanup `total/by_state/recent`。payload、`tenant_id`、Provider 原始响应和私有地址不进入 UI/证据。仅对 `QUEUED`/`RUNNING`/`RETRY_WAIT` 提供取消，成功后重新读取服务端状态。
+
+本地真实浏览器证据（2026-08-13）：使用现有本地开发账号登录后，从 `Analytics → 运营与治理 → 作业中心` 看到 5 条真实作业（4 `SUCCEEDED`、1 `DEAD`），其中一条文档 ingest 作业显示 `EMBEDDING_UNAVAILABLE`；cleanup projection 显示 `retention_purge` 总数 4，全部 `SUCCEEDED`；缺少 lease/heartbeat 时页面显示 unavailable。该会话过期登录阶段有 3 条较早 auth-related console errors，因此不宣称 console=0；Jobs Center 本身数据加载成功。页面显示 job id，但本文不记录完整 opaque ID、凭据、token 或私有地址。
+
+验证：Web `57 passed in 8 files`，typecheck/build 通过，`git diff --check` 通过。后端未改动，沿用既有全量 `361 passed, 2 skipped` 结果；本次切片未重新运行后端测试。生产目标、服务器备份、部署、回滚均 `NOT RUN/BLOCKED`，统一以 `[production host]` 与 `[REDACTED]` 表示缺失项；LLM-only、无本地模型、无 mock 边界保持不变。
 ## 2026-08-13 Promotion and theme local slice
 
 - DONE-LOCAL：真实 POST /api/v1/attachments/{attachment_id}/promotions；校验 tenant/owner/live KB ACL、路径冲突/回收站保留/幂等/并发；复用 attachment source_object_id 创建 document/version/ingest job，返回 HTTP 202、状态 QUEUED，worker 投影真实状态，不把队列写成成功。
