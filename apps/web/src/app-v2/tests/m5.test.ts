@@ -13,6 +13,7 @@ function expectEqual<T>(actual: T, expected: T, message: string): void {
 export async function runM5ContractTests(): Promise<void> {
   const invitePayloads: UserInvite[] = []
   const tenantPayloads: TenantCreate[] = []
+  let inviteShouldFail = false
   let unsupportedUserListCalls = 0
   let unsupportedProfileUpdateCalls = 0
   let tenantListShouldFail = false
@@ -41,6 +42,9 @@ export async function runM5ContractTests(): Promise<void> {
   } = {
     inviteUser: async (payload) => {
       invitePayloads.push(payload)
+      if (inviteShouldFail) {
+        throw new ApiClientError(403, 'PERMISSION_DENIED', '当前账号无权执行该操作', 'request-invite-403')
+      }
       return inviteResponse
     },
     listTenants: async () => {
@@ -103,6 +107,18 @@ export async function runM5ContractTests(): Promise<void> {
   expectEqual(invitePayloads[0]?.email, 'new@example.com', 'invite trims email')
   expectEqual(invitePayloads[0]?.name, '新成员', 'invite trims name')
   expectEqual(invitePayloads[0]?.password, 'one-time-secret', 'invite forwards required password once')
+
+  inviteShouldFail = true
+  const failedInvite = await admin.inviteUser({
+    email: 'denied@example.com',
+    name: '被拒绝成员',
+    password: 'not-persisted-secret',
+    role: 'MEMBER',
+  })
+  expectEqual(failedInvite.state, 'permission-denied', 'invite failure maps to permission-denied')
+  expectEqual(failedInvite.error?.code, 'PERMISSION_DENIED', 'invite failure preserves safe code')
+  expectEqual(failedInvite.error?.requestId, 'request-invite-403', 'invite failure preserves request id')
+  inviteShouldFail = false
 
   const tenantList = await admin.listTenants()
   expectEqual(tenantList.state, 'ready', 'tenant list maps a non-empty response')

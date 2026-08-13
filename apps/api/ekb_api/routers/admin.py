@@ -1,12 +1,18 @@
 from __future__ import annotations
 
-from typing_extensions import Annotated
-from typing import List, Optional
+from typing import Annotated, List, Optional
 
 from fastapi import APIRouter, Depends, Query, Request
+from pydantic import ValidationError
 from starlette import status
 
-from ekb_api.core.audit import RESULT_FAILURE, RESULT_SUCCESS, extract_fingerprints, redact_metadata
+from ekb_api.core.audit import (
+    RESULT_DENIED,
+    RESULT_FAILURE,
+    RESULT_SUCCESS,
+    extract_fingerprints,
+    redact_metadata,
+)
 from ekb_api.core.auth import get_auth_context, get_store
 from ekb_api.core.authorization import (
     CAP_AUDIT_READ,
@@ -14,6 +20,7 @@ from ekb_api.core.authorization import (
     CAP_KB_WRITE,
     CAP_TENANT_PROVISION,
     assert_capability,
+    assert_team_user_manage,
 )
 from ekb_api.core.config import get_settings
 from ekb_api.core.errors import ApiError
@@ -195,16 +202,55 @@ def list_tenants(
 
 @router.post("/users", response_model=UserInviteResponse, status_code=status.HTTP_201_CREATED)
 def invite_user(
-    payload: UserInvite,
     request: Request,
+    payload: dict[str, object],
     auth: Annotated[AuthContext, Depends(get_auth_context)],
     store: Annotated[SqlStore, Depends(get_store)],
 ) -> UserInviteResponse:
-    assert_capability(auth, CAP_KB_WRITE)
-    user = store.create_user(
-        auth.tenant_id, payload.email, payload.name, payload.password, payload.role
-    )
     ip_hash, ua_hash = extract_fingerprints(request)
+    try:
+        assert_team_user_manage(auth)
+    except ApiError:
+        store.write_audit_log(
+            action="user.invite",
+            target_type="user",
+            result=RESULT_DENIED,
+            trace_id=auth.trace_id,
+            tenant_id=auth.tenant_id,
+            actor_id=auth.actor_id,
+            metadata_redacted=redact_metadata({"reason": "PERMISSION_DENIED"}),
+            ip_hash=ip_hash,
+            user_agent_hash=ua_hash,
+        )
+        raise
+
+    try:
+        invite = UserInvite.model_validate(payload)
+    except ValidationError as exc:
+        fields = sorted(
+            {
+                ".".join(str(part) for part in error.get("loc", ()))
+                for error in exc.errors()
+            }
+        )
+        store.write_audit_log(
+            action="user.invite",
+            target_type="user",
+            result=RESULT_FAILURE,
+            trace_id=auth.trace_id,
+            tenant_id=auth.tenant_id,
+            actor_id=auth.actor_id,
+            metadata_redacted=redact_metadata(
+                {"reason": "VALIDATION_ERROR", "fields": fields}
+            ),
+            ip_hash=ip_hash,
+            user_agent_hash=ua_hash,
+        )
+        raise ApiError(400, "VALIDATION_ERROR", "邀请参数不合法", {"fields": fields}) from None
+
+    user = store.create_user(
+        auth.tenant_id, invite.email, invite.name, invite.password, invite.role
+    )
     store.write_audit_log(
         action="user.invite",
         target_type="user",
@@ -213,7 +259,7 @@ def invite_user(
         trace_id=auth.trace_id,
         tenant_id=auth.tenant_id,
         actor_id=auth.actor_id,
-        metadata_redacted=redact_metadata({"email": payload.email, "role": payload.role}),
+        metadata_redacted=redact_metadata({"email": invite.email, "role": invite.role}),
         ip_hash=ip_hash,
         user_agent_hash=ua_hash,
     )

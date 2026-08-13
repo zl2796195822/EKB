@@ -30,6 +30,12 @@
 5. v3 文档仍按 `01_requirements.md` → `02_spec.md` → `03_plan.md` → `04_verification-matrix.md` 阅读；`V3-T*` 与 `AC-V3-*` 只描述 v3 历史范围，不能证明 Core Rebuild 已实现。
 6. 2026-08-11 开源对标和路线图是研究背景；第三方复用必须经过固定 commit、license/NOTICE/SBOM、安全和回归门禁。
 
+## Team directory actions local closure (2026-08-14)
+
+`TeamPage` 的本地成员邀请与当前真实目录导出已标记 `DONE-LOCAL`：邀请使用既有 admin adapter，后端 `/admin/users` 收紧到 `team:user:manage`（兼容旧 OWNER/ADMIN，MEMBER 拒绝）；无 v3 表或租户角色缺失时保留 legacy user 创建成功，v3 表和角色完整时才在同一事务同步 `tenant_memberships` / `user_profiles` 并进入 v3 目录；导出仅使用当前服务端已加载成员，包含 RFC4180 quoting 与公式注入防护，不写密码、租户或 token。详细证据见 [`evidence/ekb-core-rebuild/local/2026-08-14-team-directory-actions.md`](./evidence/ekb-core-rebuild/local/2026-08-14-team-directory-actions.md)。
+
+本条仅代表本地成员账户创建与 CSV 下载；不代表邮件投递、生产身份平台、角色/权限 CRUD、SCIM 或 PH0–PH8 完成。生产目标、备份、部署和回滚仍按 `[production host]` / `[REDACTED]` 记录。
+
 ## PH0 evidence status (2026-08-12)
 
 Core Rebuild PH0 的可审查写入证据位于 [`evidence/ekb-core-rebuild/ph0/2026-08-12-baseline/`](./evidence/ekb-core-rebuild/ph0/2026-08-12-baseline/)，入口为 [`manifest.md`](./evidence/ekb-core-rebuild/ph0/2026-08-12-baseline/manifest.md)，验证记录为 [`verification.md`](./evidence/ekb-core-rebuild/ph0/2026-08-12-baseline/verification.md)。该目录只记录路径、状态、摘要、命令/来源和限制；生产只读检查当前为 `BLOCKED/NOT RUN`。本阶段仅建立未提交、未推送的 baseline 分支、部署脚本 fail-closed 安全边界和静态文档证据，不代表 PH1–PH8、运行时代码、迁移、部署、备份恢复或生产验收完成。

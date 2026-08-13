@@ -6,10 +6,19 @@ import {
   ShieldCheck,
   UserPlus,
   UsersThree,
+  X,
 } from '@phosphor-icons/react'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { StatePanel } from '../components/StatePanel'
 import { UserAvatar } from '../components/ui/UserAvatar'
+import {
+  INVITE_ROLE_OPTIONS,
+  buildTeamDirectoryCsv,
+  canExportDirectory,
+  canInviteMembers,
+  validateInviteForm,
+  type InviteFormValue,
+} from './teamDirectory'
 import type {
   AdapterError,
   IdentityListUsersInput,
@@ -22,6 +31,13 @@ type TeamTab = 'members' | 'roles' | 'permissions'
 
 const ALL_FILTER = 'ALL'
 const PAGE_SIZE = 20
+
+const EMPTY_INVITE_FORM: InviteFormValue = {
+  email: '',
+  name: '',
+  password: '',
+  role: 'MEMBER',
+}
 
 const ROLE_OPTIONS = [
   { value: 'owner', label: '所有者' },
@@ -88,8 +104,16 @@ export function TeamPage({ services, session }: V2PageProps) {
   const [status, setStatus] = useState(ALL_FILTER)
   const [nextCursor, setNextCursor] = useState<string | null>(null)
   const [error, setError] = useState<AdapterError | undefined>()
+  const [notice, setNotice] = useState<string | undefined>()
+  const [inviteOpen, setInviteOpen] = useState(false)
+  const [inviteSubmitting, setInviteSubmitting] = useState(false)
+  const [inviteForm, setInviteForm] = useState<InviteFormValue>(EMPTY_INVITE_FORM)
+  const [inviteError, setInviteError] = useState<AdapterError | undefined>()
   const requestVersion = useRef(0)
   const activeController = useRef<AbortController | null>(null)
+
+  const canInvite = canInviteMembers(session)
+  const canExport = canExportDirectory(usersState, users)
 
   const loadUsers = useCallback(async (cursor: string | null, append: boolean) => {
     activeController.current?.abort()
@@ -136,6 +160,57 @@ export function TeamPage({ services, session }: V2PageProps) {
     void loadUsers(nextCursor, true)
   }, [loadUsers, nextCursor, usersState])
 
+  const openInvite = useCallback(() => {
+    setNotice(undefined)
+    setInviteError(undefined)
+    setInviteForm(EMPTY_INVITE_FORM)
+    setInviteOpen(true)
+  }, [])
+
+  const submitInvite = useCallback(async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (inviteSubmitting || !canInvite) return
+    const validationMessage = validateInviteForm(inviteForm)
+    if (validationMessage) {
+      setInviteError({ code: 'VALIDATION_ERROR', message: validationMessage })
+      return
+    }
+
+    setInviteSubmitting(true)
+    setInviteError(undefined)
+    const result = await services.admin.inviteUser({
+      email: inviteForm.email.trim(),
+      name: inviteForm.name.trim(),
+      password: inviteForm.password,
+      role: inviteForm.role,
+    })
+    if (result.state === 'ready' && result.data) {
+      setInviteForm(EMPTY_INVITE_FORM)
+      setInviteOpen(false)
+      setNotice('成员账户已创建，已请求服务端刷新当前目录。')
+      await loadUsers(null, false)
+    } else {
+      setInviteError(result.error ?? {
+        code: 'INVITE_FAILED',
+        message: '成员创建失败，请稍后重试。',
+      })
+    }
+    setInviteSubmitting(false)
+  }, [canInvite, inviteForm, inviteSubmitting, loadUsers, services.admin])
+
+  const exportDirectory = useCallback(() => {
+    if (!canExport) return
+    const blob = new Blob([`\uFEFF${buildTeamDirectoryCsv(users)}`], {
+      type: 'text/csv;charset=utf-8',
+    })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = 'team-members.csv'
+    link.click()
+    URL.revokeObjectURL(url)
+  }, [canExport, users])
+
   return (
     <div className="v2-m5-page">
       <header className="v2-m5-page-heading">
@@ -145,11 +220,11 @@ export function TeamPage({ services, session }: V2PageProps) {
           <p>管理团队成员、角色与知识空间的访问权限。</p>
         </div>
         <div className="v2-m5-heading-actions">
-          <button type="button" className="v2-m5-secondary-button" disabled title="后续里程碑开放：团队目录导出">
+          <button type="button" className="v2-m5-secondary-button" disabled={!canExport} onClick={exportDirectory} title={canExport ? '导出当前已加载的真实成员目录' : '目录加载完成且至少有一名成员后可导出'}>
             <DownloadSimple size={15} aria-hidden="true" />
             导出
           </button>
-          <button type="button" className="v2-m5-primary-button" disabled title="后续里程碑开放：用户邀请">
+          <button type="button" className="v2-m5-primary-button" disabled={!canInvite || inviteSubmitting} onClick={openInvite} title={canInvite ? '创建本地成员账户' : '需要团队成员管理能力'}>
             <UserPlus size={15} aria-hidden="true" />
             邀请成员
           </button>
@@ -157,6 +232,7 @@ export function TeamPage({ services, session }: V2PageProps) {
       </header>
 
       <section className="v2-m5-team-card" aria-label="团队与权限管理">
+        {notice ? <div className="v2-m5-notice v2-m5-notice--success" role="status">{notice}</div> : null}
         <div className="v2-m5-card-topline">
           <div className="v2-m5-tabs" role="tablist" aria-label="团队权限视图">
             <button type="button" id="team-tab-members" role="tab" aria-selected={activeTab === 'members'} aria-controls="team-panel-members" className={activeTab === 'members' ? 'is-active' : ''} onClick={() => setActiveTab('members')}>成员管理</button>
@@ -183,6 +259,14 @@ export function TeamPage({ services, session }: V2PageProps) {
         {activeTab === 'roles' ? <RolesPanel session={session} /> : null}
         {activeTab === 'permissions' ? <PermissionsPanel session={session} /> : null}
       </section>
+      {inviteOpen ? <InviteModal
+        form={inviteForm}
+        error={inviteError}
+        submitting={inviteSubmitting}
+        onChange={setInviteForm}
+        onClose={() => { if (!inviteSubmitting) setInviteOpen(false) }}
+        onSubmit={submitInvite}
+      /> : null}
     </div>
   )
 }
@@ -270,6 +354,42 @@ function UserTable({ users }: { readonly users: readonly IdentityUserView[] }) {
           ))}
         </tbody>
       </table>
+    </div>
+  )
+}
+
+interface InviteModalProps {
+  readonly form: InviteFormValue
+  readonly error?: AdapterError
+  readonly submitting: boolean
+  readonly onChange: (value: InviteFormValue) => void
+  readonly onClose: () => void
+  readonly onSubmit: (event: FormEvent<HTMLFormElement>) => void
+}
+
+function InviteModal({ form, error, submitting, onChange, onClose, onSubmit }: InviteModalProps) {
+  return (
+    <div className="v2-m3-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target && !submitting) onClose() }}>
+      <section className="v2-m3-modal" role="dialog" aria-modal="true" aria-labelledby="team-invite-title">
+        <header>
+          <h2 id="team-invite-title">邀请成员</h2>
+          <button type="button" className="v2-m3-icon-button" onClick={onClose} disabled={submitting} aria-label="关闭邀请成员弹窗">
+            <X size={17} aria-hidden="true" />
+          </button>
+        </header>
+        <form className="v2-m3-form" onSubmit={onSubmit}>
+          <label>姓名<input value={form.name} onChange={(event) => onChange({ ...form, name: event.target.value })} maxLength={255} autoFocus disabled={submitting} /></label>
+          <label>邮箱<input type="email" value={form.email} onChange={(event) => onChange({ ...form, email: event.target.value })} maxLength={254} autoComplete="off" disabled={submitting} /></label>
+          <label>初始密码<input type="password" value={form.password} onChange={(event) => onChange({ ...form, password: event.target.value })} minLength={8} maxLength={256} autoComplete="new-password" disabled={submitting} /></label>
+          <label>角色<select value={form.role} onChange={(event) => onChange({ ...form, role: event.target.value })} disabled={submitting}>{INVITE_ROLE_OPTIONS.map((option) => <option value={option.value} key={option.value}>{option.value} · {option.label}</option>)}</select></label>
+          <p className="v2-m3-form-hint">本地创建成员账户；不会发送邮件，密码不会写入浏览器存储或目录导出。</p>
+          {error ? <div className="v2-m3-inline-error" role="alert">{error.message}<small>{errorMeta(error)}</small></div> : null}
+          <div className="v2-m3-modal-actions">
+            <button type="button" className="v2-m3-secondary-button" onClick={onClose} disabled={submitting}>取消</button>
+            <button type="submit" className="v2-m3-primary-button" disabled={submitting}>{submitting ? '创建中…' : '创建成员'}</button>
+          </div>
+        </form>
+      </section>
     </div>
   )
 }

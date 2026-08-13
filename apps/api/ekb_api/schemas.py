@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from ekb_api.domain import DocumentStatus, KbRole, KbVisibility, SourceType
 
@@ -128,10 +128,24 @@ class TenantResponse(BaseModel):
 
 
 class UserInvite(BaseModel):
-    email: str = Field(min_length=3, max_length=254)
+    email: str = Field(
+        min_length=3,
+        max_length=254,
+        pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$",
+    )
     name: str = Field(min_length=1, max_length=255)
     password: str = Field(min_length=1, max_length=256)
-    role: str = "MEMBER"
+    role: Literal["MEMBER", "ADMIN"] = "MEMBER"
+
+    @field_validator("email", "name", mode="before")
+    @classmethod
+    def trim_text(cls, value: object) -> object:
+        return value.strip() if isinstance(value, str) else value
+
+    @field_validator("role", mode="before")
+    @classmethod
+    def normalize_role(cls, value: object) -> object:
+        return value.strip().upper() if isinstance(value, str) else value
 
 
 class UserInviteResponse(BaseModel):

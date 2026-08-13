@@ -17,8 +17,22 @@ PLATFORM_CAPABILITIES = [CAP_TENANT_PROVISION]
 
 # 角色 → 能力映射。OWNER/ADMIN 等同全量；MEMBER 只读+问答+审计；CUSTOMER 仅问答。
 ROLE_CAPABILITIES: dict[str, list[str]] = {
-    "OWNER": [CAP_KB_READ, CAP_KB_WRITE, CAP_QA_ASK, CAP_AUDIT_READ],
-    "ADMIN": [CAP_KB_READ, CAP_KB_WRITE, CAP_QA_ASK, CAP_AUDIT_READ],
+    "OWNER": [
+        CAP_KB_READ,
+        CAP_KB_WRITE,
+        CAP_QA_ASK,
+        CAP_AUDIT_READ,
+        CAP_TEAM_USER_READ,
+        CAP_TEAM_USER_MANAGE,
+    ],
+    "ADMIN": [
+        CAP_KB_READ,
+        CAP_KB_WRITE,
+        CAP_QA_ASK,
+        CAP_AUDIT_READ,
+        CAP_TEAM_USER_READ,
+        CAP_TEAM_USER_MANAGE,
+    ],
     "MEMBER": [CAP_KB_READ, CAP_QA_ASK, CAP_AUDIT_READ],
     "CUSTOMER": [CAP_KB_READ, CAP_QA_ASK],
 }
@@ -79,6 +93,24 @@ def assert_capability(auth: AuthContext, required: str) -> None:
             code="PERMISSION_DENIED",
             message="当前账号无权执行该操作",
         )
+
+
+def assert_team_user_manage(auth: AuthContext) -> None:
+    """Allow only team managers to create tenant member accounts.
+
+    Legacy admin routes receive signed v1 claims, so an OWNER/ADMIN token
+    issued before the v3 capability registry was added remains valid.  The
+    compatibility branch is role-bound and never grants MEMBER access.
+    """
+    if CAP_TEAM_USER_MANAGE in auth.capabilities:
+        return
+    if auth.tenant_role.value in {"OWNER", "ADMIN"}:
+        return
+    raise ApiError(
+        status_code=403,
+        code="PERMISSION_DENIED",
+        message="当前账号无权执行该操作",
+    )
 
 
 def assert_kb_manager(auth: AuthContext, kb_role: KbRole | None) -> None:

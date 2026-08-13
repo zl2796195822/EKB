@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 from dataclasses import dataclass
 from typing import Optional
+
+from sqlalchemy import inspect, text
 
 from ekb_api import models
 from ekb_api.core.db import get_session_local
@@ -209,14 +212,16 @@ class SqlStore:
             )
 
     def create_user(self, tenant_id: str, email: str, name: str, password: str, role: str) -> User:
-        """M2-2 在指定租户内创建用户（口令 PBKDF2 哈希，明文不落库）。用于成员邀请。"""
+        """M2-2 创建用户并同步 v3 成员目录投影。"""
         from ekb_api.core.security import hash_password
 
         now = utc_now()
+        user_id = new_id()
+        role_slug = role.lower()
         SessionLocal = get_session_local()
         with SessionLocal() as session:
             user = models.User(
-                id=new_id(),
+                id=user_id,
                 name=name,
                 email=email,
                 tenant_id=tenant_id,
@@ -226,6 +231,60 @@ class SqlStore:
                 updated_at=now,
             )
             session.add(user)
+            session.flush()
+
+            v3_tables = {"tenant_roles", "tenant_memberships", "user_profiles"}
+            available_tables = set(inspect(session.get_bind()).get_table_names())
+            if v3_tables.issubset(available_tables):
+                role_id = session.execute(
+                    text(
+                        "SELECT id FROM tenant_roles "
+                        "WHERE tenant_id = :tenant_id AND slug = :role_slug"
+                    ),
+                    {"tenant_id": tenant_id, "role_slug": role_slug},
+                ).scalar_one_or_none()
+                if role_id is not None:
+                    session.execute(
+                        text(
+                            """
+                            INSERT INTO tenant_memberships
+                                (id, tenant_id, user_id, role_id, status, joined_at,
+                                 suspended_at, created_at, updated_at)
+                            VALUES
+                                (:id, :tenant_id, :user_id, :role_id, 'ACTIVE', :joined_at,
+                                 NULL, :created_at, :updated_at)
+                            """
+                        ),
+                        {
+                            "id": new_id(),
+                            "tenant_id": tenant_id,
+                            "user_id": user_id,
+                            "role_id": role_id,
+                            "joined_at": now,
+                            "created_at": now,
+                            "updated_at": now,
+                        },
+                    )
+                    session.execute(
+                        text(
+                            """
+                            INSERT INTO user_profiles
+                                (user_id, tenant_id, display_name, department, locale, timezone,
+                                 avatar_url, created_at, updated_at)
+                            VALUES
+                                (:user_id, :tenant_id, :display_name, NULL, 'zh-CN',
+                                 'Asia/Shanghai',
+                                 NULL, :created_at, :updated_at)
+                            """
+                        ),
+                        {
+                            "user_id": user_id,
+                            "tenant_id": tenant_id,
+                            "display_name": name,
+                            "created_at": now,
+                            "updated_at": now,
+                        },
+                    )
             session.commit()
             session.refresh(user)
             return User(

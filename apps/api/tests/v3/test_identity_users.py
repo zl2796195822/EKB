@@ -4,7 +4,7 @@ import time
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 
 from ekb_api import models
 from ekb_api.core.auth import create_access_token, create_refresh_token
@@ -290,18 +290,161 @@ def test_existing_admin_user_create_path_remains_registered(
         tenant_role="OWNER",
     )
 
-    response = client.post(
+    owner_invite = client.post(
         f"{API}/admin/users",
         headers=_headers(token),
         json={
-            "email": f"compat-{identity_fixture['tenant_a']}@example.com",
+            "email": f"compat-owner-{identity_fixture['tenant_a']}@example.com",
             "name": "V3 compatibility",
-            "password": "test-password",
+            "password": "owner-invite-secret",
             "role": "MEMBER",
         },
     )
+    assert owner_invite.status_code == 201, owner_invite.text
+    invited_email = owner_invite.json()["email"]
 
-    assert response.status_code == 201, response.text
+    with get_session_local()() as session:
+        tables = set(inspect(session.get_bind()).get_table_names())
+        role_id = None
+        if {"tenant_roles", "tenant_memberships", "user_profiles"}.issubset(tables):
+            role_id = session.execute(
+                text(
+                    "SELECT id FROM tenant_roles "
+                    "WHERE tenant_id = :tenant_id AND slug = 'member'"
+                ),
+                {"tenant_id": identity_fixture["tenant_a"]},
+            ).scalar_one_or_none()
+
+    if role_id is not None:
+        listed = client.get(
+            f"{API}/tenants/{identity_fixture['tenant_a']}/users",
+            headers=_headers(token),
+            params={"query": invited_email},
+        )
+        assert listed.status_code == 200, listed.text
+        assert [item["email"] for item in listed.json()["items"]] == [invited_email]
+    else:
+        with get_session_local()() as session:
+            legacy_count = session.execute(
+                text(
+                    "SELECT COUNT(*) FROM users "
+                    "WHERE tenant_id = :tenant_id AND email = :email"
+                ),
+                {
+                    "tenant_id": identity_fixture["tenant_a"],
+                    "email": invited_email,
+                },
+            ).scalar_one()
+        assert legacy_count == 1
+
+    with get_session_local()() as session:
+        audit = session.execute(
+            text(
+                "SELECT metadata_redacted FROM audit_logs "
+                "WHERE action = 'user.invite' AND target_id = :target_id"
+            ),
+            {"target_id": owner_invite.json()["id"]},
+        ).scalar_one()
+    assert "owner-invite-secret" not in str(audit)
+
+    admin_invite = client.post(
+        f"{API}/admin/users",
+        headers=_headers(token),
+        json={
+            "email": f"compat-admin-{identity_fixture['tenant_a']}@example.com",
+            "name": "Local Admin",
+            "password": "admin-invite-secret",
+            "role": "ADMIN",
+        },
+    )
+    assert admin_invite.status_code == 201, admin_invite.text
+    admin_login = client.post(
+        f"{API}/auth/login",
+        json={
+            "email": admin_invite.json()["email"],
+            "password": "admin-invite-secret",
+        },
+    )
+    assert admin_login.status_code == 200, admin_login.text
+    admin_token = admin_login.json()["access_token"]
+    admin_created = client.post(
+        f"{API}/admin/users",
+        headers=_headers(admin_token),
+        json={
+            "email": f"compat-admin-created-{identity_fixture['tenant_a']}@example.com",
+            "name": "Admin Created",
+            "password": "member-invite-secret",
+            "role": "MEMBER",
+        },
+    )
+    assert admin_created.status_code == 201, admin_created.text
+
+    member_login = client.post(
+        f"{API}/auth/login",
+        json={
+            "email": invited_email,
+            "password": "owner-invite-secret",
+        },
+    )
+    assert member_login.status_code == 200, member_login.text
+    member_denied = client.post(
+        f"{API}/admin/users",
+        headers=_headers(member_login.json()["access_token"]),
+        json={
+            "email": f"denied-{identity_fixture['tenant_a']}@example.com",
+            "name": "Denied",
+            "password": "must-not-leak-secret",
+            "role": "MEMBER",
+        },
+    )
+    assert member_denied.status_code == 403, member_denied.text
+    assert member_denied.json()["error"]["code"] == "PERMISSION_DENIED"
+    assert "must-not-leak-secret" not in member_denied.text
+
+    with get_session_local()() as session:
+        tenant_b_count = session.execute(
+            text(
+                "SELECT COUNT(*) FROM users "
+                "WHERE tenant_id = :tenant_id AND email = :email"
+            ),
+            {"tenant_id": identity_fixture["tenant_b"], "email": invited_email},
+        ).scalar_one()
+    assert tenant_b_count == 0
+
+
+def test_admin_user_invite_rejects_invalid_input_without_password_echo(
+    client: TestClient, identity_fixture: dict[str, str]
+) -> None:
+    settings = get_settings()
+    owner_token = create_access_token(
+        identity_fixture["owner_a"],
+        identity_fixture["tenant_a"],
+        settings,
+        tenant_role="OWNER",
+    )
+    response = client.post(
+        f"{API}/admin/users",
+        headers=_headers(owner_token),
+        json={
+            "email": "not-an-email",
+            "name": "",
+            "password": "short-secret",
+            "role": "OWNER",
+        },
+    )
+
+    assert response.status_code == 400, response.text
+    assert response.json()["error"]["code"] == "VALIDATION_ERROR"
+    assert "short-secret" not in response.text
+    with get_session_local()() as session:
+        audit = session.execute(
+            text(
+                "SELECT metadata_redacted FROM audit_logs "
+                "WHERE trace_id = :trace_id"
+            ),
+            {"trace_id": response.headers["X-Request-Id"]},
+        ).scalar_one()
+    assert "short-secret" not in str(audit)
 
 
 def test_authenticated_user_list_denials_are_audited_redacted(
