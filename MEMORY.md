@@ -489,3 +489,20 @@ Nginx 配置：
 - 当前会话累计有 13 条较早 auth-related console errors；不宣称 `console=0`、full route matrix 或 visual contrast score，未观察到新的 Dashboard data failure。记忆不记录 token、password 或 private address。
 - 验证：Web `58 passed in 9 files`、typecheck/build、`git diff --check` 通过；backend 未改动，不宣称新的 backend suite。
 - 生产 target、server backup/deploy/rollback `NOT RUN/BLOCKED`，原因是没有 production target/managed credentials，统一使用 `[production host]` / `[REDACTED]`。本条只记录 Dashboard route migration，不宣称 `FR-001–006`、PH2 或 PH0–PH8 全部完成；LLM-only、无本地模型、无 mock 边界保持不变。
+
+## 2026-08-13 PH3 XLSX/PPTX parser registry local closure
+
+- DONE-LOCAL：已在 `apps/api/ekb_api/services/parsers/registry.py` 注册真实 `XlsxParser` 与 `PptxParser`，支持 OOXML XLSX/PPTX MIME；XLSX 输出 workbook/sheet/row/cell 可检索内容与安全 provenance metadata，PPTX 输出 slide/shape/table/notes（可读时）结构。`openpyxl` 使用只读、`data_only=True`、`keep_vba=False`，不执行宏；不引入本地模型、mock 或伪成功。
+- 稳定错误边界：空字节返回 `FILE_EMPTY`；损坏 OOXML 返回 `PARSER_CORRUPT` 且不泄露库异常原文；旧 `application/msword`、`application/vnd.ms-excel`、`application/vnd.ms-powerpoint` 继续 `MIME_UNSUPPORTED`，不静默转换。
+- 代码与测试已在已推送 commit `5a008f17251fa8e37ee8f44980afd923055a8957`；本次仅补充文档证据，不新增提交或推送。
+- 当前工作树回归：后端全量 `370 passed, 2 skipped`；office registry/PH3/旧 parser 定向 `38 passed`；前端 `58 passed`、typecheck/build 通过。全量数字是当前工作树回归结果，不声称全部由本 parser 切片单独造成。
+- 浏览器边界：本地真实浏览器已验收 Documents、Assistant、Jobs Center 的真实服务端数据；本次未生成临时 XLSX/PPTX 文件，因此不声称 XLSX/PPTX 已在浏览器成功摄取。
+- NOT RUN/BLOCKED：生产 PostgreSQL/pgvector、真实 Provider/Embedding 出网、生产对象存储、可靠队列/Worker/Scheduler、服务器备份、部署/回滚仍未执行。文档不记录凭据、token 或私密地址，统一使用 `[production host]` / `[REDACTED]`；本地结果不代表 PH3 或 PH0–PH8 全部完成。
+
+## 2026-08-13 browser OOXML validation
+
+- 后续本地真实浏览器验证：在 `Documents → 批量/目录上传 → 批量多文件` 中选择 `/tmp/ekb-parser-qa.xlsx` 和 `/tmp/ekb-parser-qa.pptx`；两份仅为临时文件，不进 Git。
+- UI 扫描将文件识别为 Excel/PPT，各 1 个；真实上传完成 `2/2`；服务端分别创建了真实 batch/job/document 状态。
+- worker 处理后两个条目均到达 `CHUNKING · 50%`；解析器未报 `MIME_UNSUPPORTED` 或 `PARSER_CORRUPT`。由于本地没有远程 Embedding provider/profile，两个条目的真实终态均为 `EMBEDDING_UNAVAILABLE/FAILED`；不得写成 `READY`、成功索引或远程 Provider 成功。
+- 浏览器仍有历史 auth-related console errors；不宣称 `console=0`。
+- 生产 PostgreSQL/pgvector、Provider 出网、对象存储、可靠队列/Worker/Scheduler、服务器备份/部署/回滚仍为 `NOT RUN/BLOCKED`。生产目标统一使用 `[production host]`，受管敏感值统一使用 `[REDACTED]`；不记录 token、password 或私密地址。
