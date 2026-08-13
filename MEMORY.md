@@ -514,3 +514,10 @@ Nginx 配置：
 - 验证：local scheduler + PH3 office/ingestion/scheduler 定向回归 `34 passed`；Ruff 与代码 diff check 通过。详细证据见 [`docs/evidence/ekb-core-rebuild/local/2026-08-13-local-scheduler.md`](docs/evidence/ekb-core-rebuild/local/2026-08-13-local-scheduler.md)。
 - 本次文档更新的 `git diff --check` 与新增文档 secret scan：通过。
 - NOT RUN/BLOCKED：生产 PostgreSQL/pgvector、Provider/Embedding 出网、生产对象存储、可靠队列、生产 Worker/Scheduler、服务器备份/部署/回滚仍未执行。生产目标统一使用 `[production host]`，受管敏感值统一使用 `[REDACTED]`；不记录凭据、token 或私密地址。本条不代表生产 scheduler 或 PH3/PH8 完成。
+## 2026-08-13 Recycle restore/purge local closure
+
+- DONE-LOCAL：`apps/api/ekb_api/services/v3_trash.py` 完成回收站 restore/purge 本地闭环；restore 校验 retention、purge state、tenant scope，并使用 CAS；purge 校验 expiry/state/generation；重复删除创建新的 generation 和 retention window。配套测试为 `apps/api/tests/v4/test_ph2_trash.py`。
+- 验证：专项 `6 passed`；后端全量 `385 passed, 2 skipped`；指定文件 Ruff `All checks passed!`；`git diff --check` 通过。
+- 本地真实浏览器：在 `127.0.0.1:5173/#/knowledge` 创建“回收站本地验收-20260813”，删除后在 `#/recycle` 看到真实条目和 30 天保留，点击“还原”显示“已还原…”且知识库重新出现在授权列表。浏览器 console 有既存错误，不宣称 `console=0`。
+- 限制：Document 删除历史状态缺失时 restore 安全 fallback 为 `READY`，不代表历史状态完全恢复；对象/向量分阶段清理由其他 worker/service 负责。
+- NOT RUN：生产 PostgreSQL、对象存储、可靠队列、Worker/Scheduler、Provider 凭据/外部出网、服务器备份、部署、回滚和生产浏览器均未运行。统一使用 `[production host]` / `[REDACTED]`，不保存凭据；本地结果不代表 PH0–PH8 全部完成。详细证据见 `docs/evidence/ekb-core-rebuild/local/2026-08-13-recycle-restore.md`。
