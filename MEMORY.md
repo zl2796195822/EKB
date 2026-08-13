@@ -432,3 +432,4 @@ Nginx 配置：
 - 统一为 LLM-only：聊天和 Embedding 只走远程受管 Provider/Model；缺少远程 Embedding 时 fail closed 为 `EMBEDDING_UNAVAILABLE`，不回退本地模型或伪向量。
 - 验证：后端 `153 passed, 2 skipped`；前端 typecheck、49 tests、build 通过；官方 npm registry 生产依赖审计为 0 vulnerabilities；本次修改范围精确 ruff 与 `git diff --check` 通过。
 - 证据：`docs/evidence/ekb-core-rebuild/local/2026-08-13-local-business.md`。生产 PostgreSQL/pgvector、对象存储、可靠队列/Worker/Scheduler、Provider 凭据、服务器备份部署回滚仍未执行；不得用 mock 代替，也未在此记录凭据或私密地址。
+- 本次续作补齐真实附件聊天链路：浏览器可完成 session → 受保护对象 PUT → process → 带 attachment_doc_ids 的 SSE ask；附件按 tenant/owner/conversation/status 校验，独立于 KB ID，并持久化附件引用。前端 thinking level 在 API 边界归一化为 canonical `light/medium/high`，避免旧 UI 值触发 400。全量后端 `331 passed, 2 skipped`；前端 typecheck、49 tests、build、npm production audit 通过；Playwright 真实附件问答显示阶段完成、seq=10 和附件引用。生产 PostgreSQL/pgvector、对象存储、可靠队列/Worker/Scheduler、Provider 凭据、服务器备份部署回滚仍未执行。

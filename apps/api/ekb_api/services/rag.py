@@ -10,7 +10,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Iterable, Literal
+from collections.abc import Iterable
+from typing import Any, Literal
 
 from ekb_api.core.errors import ApiError
 from ekb_api.domain import Chunk
@@ -43,6 +44,8 @@ def needs_strict_refusal(
     answer_mode: AnswerMode,
     kb_ids: list[str],
     chunks: Iterable[Chunk],
+    *,
+    has_attachment_evidence: bool = False,
 ) -> bool:
     """STRICT 模式下，选中了 KB 但检索不到任何证据 → 必须拒答（FR-051）。
 
@@ -53,7 +56,50 @@ def needs_strict_refusal(
         return False
     if not kb_ids:
         return False
-    return not has_evidence(chunks)
+    return not has_evidence(chunks) and not has_attachment_evidence
+
+
+def build_attachment_citations(
+    attachments: list[dict[str, Any]], max_citations: int, *, offset: int = 0
+) -> list[dict]:
+    """Build citations for processed attachment chunks without KB ID confusion."""
+    items: list[dict] = []
+    budget = int(max_citations)
+    if budget <= 0:
+        return items
+    for attachment in attachments:
+        if len(items) >= budget:
+            break
+        chunks = attachment.get("chunks") or []
+        body = str(attachment.get("text") or "").strip()
+        if not body and not chunks:
+            continue
+        index = offset + len(items) + 1
+        items.append(
+            {
+                "citation_id": f"attachment-{index}",
+                "index": index,
+                "type": "attachment",
+                "title": str(attachment.get("title") or "附件"),
+                "section_path": [],
+                "version": 1,
+                "page": None,
+                "sheet": None,
+                "paragraph": None,
+                "source_path": None,
+                "updated_at": "",
+                "score": 1.0,
+                "doc_id": str(attachment.get("attachment_id") or ""),
+                "chunk_id": str(
+                    (chunks[0] if chunks else {}).get("id")
+                    or attachment.get("attachment_id")
+                    or ""
+                ),
+                "url": None,
+                "published_date": None,
+            }
+        )
+    return items
 
 
 def filter_retrievable(
@@ -96,7 +142,9 @@ def build_citations(
     顺序约定：先知识库后联网搜索，超 ``max_citations`` 时优先保留知识库。
     """
     items: list[dict] = []
-    budget = max(int(max_citations), 1)
+    budget = int(max_citations)
+    if budget <= 0:
+        return items
     idx = 0
 
     for chunk in kb_chunks:

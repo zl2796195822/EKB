@@ -19,6 +19,7 @@ import {
   createAnalyticsAdapter,
   createAppsAdapter,
   createLLMAdapter,
+  createAttachmentsAdapter,
 } from './adapters'
 import { LoginPage } from './pages/LoginPage'
 import { AppV2Layout } from './layouts'
@@ -68,6 +69,7 @@ export function AppV2({ initialHash }: AppV2Props = {}) {
       apps: createAppsAdapter(apiClient),
       favorites: createFavoritesAdapter(apiClient),
       llm: createLLMAdapter(apiClient),
+      attachments: createAttachmentsAdapter(apiClient),
     }),
     [apiClient],
   )

@@ -271,4 +271,4 @@ CR-PH1-T01 + CR-PH1-T03 第一真实业务切片已在本地工作树执行：�
 
 ## Local business closure record (2026-08-13)
 
-本地真实上传批次、开发对象存储、checksum complete、后台 ingest worker、远程 Embedding 缺失时的 `EMBEDDING_UNAVAILABLE` fail-closed、文档中心真实浏览器验收和回归结果见 [`docs/evidence/ekb-core-rebuild/local/2026-08-13-local-business.md`](../../evidence/ekb-core-rebuild/local/2026-08-13-local-business.md)。该记录仅标记已执行的本地切片，不改变 PH1–PH8 的生产阻塞状态；生产 PostgreSQL/pgvector、对象存储、可靠队列、Provider 凭据、部署、备份和回滚仍未执行。
+本地真实上传批次、开发对象存储、checksum complete、后台 ingest worker、远程 Embedding 缺失时的 `EMBEDDING_UNAVAILABLE` fail-closed、附件问答与引用、文档中心真实浏览器验收和回归结果见 [`docs/evidence/ekb-core-rebuild/local/2026-08-13-local-business.md`](../../evidence/ekb-core-rebuild/local/2026-08-13-local-business.md)。该记录仅标记已执行的本地切片，不改变 PH1–PH8 的生产阻塞状态；生产 PostgreSQL/pgvector、对象存储、可靠队列、Provider 凭据、部署、备份和回滚仍未执行。

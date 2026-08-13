@@ -208,6 +208,18 @@ export interface AskStreamComposerOptions {
   streamVersion?: 1 | 2
 }
 
+export interface AttachmentSessionResponse {
+  attachment: {
+    id: string
+    status: string
+    detected_mime: string
+    byte_size: number
+    conversation_id?: string | null
+  }
+  upload_url: string
+  object_key: string
+}
+
 /** 后端 GET /qa/capabilities 响应（snake_case，和 schemas.py 对齐） */
 export interface QaModelInfo {
   id: string
@@ -551,6 +563,45 @@ export class ApiClient {
     return this.parseResponse(response)
   }
 
+  async createAttachmentSession(payload: {
+    client_request_id: string
+    detected_mime: string
+    byte_size: number
+    sha256: string
+    conversation_id?: string
+  }): Promise<AttachmentSessionResponse> {
+    return this.request<AttachmentSessionResponse>('/attachments/sessions', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    })
+  }
+
+  async putAttachmentObject(uploadUrl: string, file: File): Promise<{
+    attachment_id: string
+    object_key: string
+    byte_size: number
+    sha256: string
+  }> {
+    const target = uploadUrl.startsWith('http')
+      ? uploadUrl
+      : `${window.location.origin}${uploadUrl}`
+    const headers = uploadUrl.startsWith('/api/') && this.token
+      ? { Authorization: `Bearer ${this.token}` }
+      : undefined
+    const response = await fetch(target, {
+      method: 'PUT',
+      body: file,
+      ...(headers ? { headers } : {}),
+    })
+    return this.parseResponse(response)
+  }
+
+  async processAttachment(attachmentId: string): Promise<{ attachment_id: string; status: string }> {
+    return this.request(`/attachments/${encodeURIComponent(attachmentId)}/process`, {
+      method: 'POST',
+    })
+  }
+
   async completeUploadItem(
     itemId: string,
     payload: { sha256: string; detected_mime?: string },
@@ -753,15 +804,14 @@ export class ApiClient {
     const actualSignal = signal ?? controller!.signal
 
     // 把前端 camelCase options 映射成后端 snake_case AskOptions
-    const mergedKbIds = new Set<string>([kbId])
-    for (const d of composerOptions?.attachmentDocIds ?? []) mergedKbIds.add(d)
     const thinkingLevelRaw = (composerOptions?.thinkingLevel ?? 'standard').toLowerCase()
-    const thinkingLevel =
-      thinkingLevelRaw === 'off' || thinkingLevelRaw === 'standard' || thinkingLevelRaw === 'intensive'
-        ? thinkingLevelRaw
-        : 'standard'
+    // The UI keeps the legacy three-label contract, while the API validates
+    // the canonical five-level enum.  Normalize at this boundary so browser
+    // requests cannot be rejected by the server schema.
+    const thinkingLevelMap = { off: 'light', standard: 'medium', intensive: 'high' } as const
+    const thinkingLevel = thinkingLevelMap[thinkingLevelRaw as keyof typeof thinkingLevelMap] ?? 'medium'
     const deepThinking =
-      thinkingLevel !== 'off' || Boolean(composerOptions?.deepThinking)
+      thinkingLevel !== 'light' || Boolean(composerOptions?.deepThinking)
     const options: Record<string, unknown> = {
       stream: true,
       max_citations: composerOptions?.maxCitations ?? 5,
@@ -774,7 +824,7 @@ export class ApiClient {
     }
     const body: Record<string, unknown> = {
       question,
-      kb_ids: Array.from(mergedKbIds),
+      kb_ids: [kbId],
       options,
     }
     if (conversationId) body.conversation_id = conversationId

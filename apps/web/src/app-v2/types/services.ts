@@ -12,6 +12,7 @@ import type { AnalyticsServices } from './analytics'
 import type { AppsServices } from './apps'
 import type { FavoritesServices } from './favorites'
 import type { LLMProfileServices } from './llm'
+import type { AttachmentsServices } from './attachments'
 
 export interface V2Services {
   readonly conversations: ConversationsServices
@@ -28,4 +29,5 @@ export interface V2Services {
   readonly apps: AppsServices
   readonly favorites: FavoritesServices
   readonly llm: LLMProfileServices
+  readonly attachments: AttachmentsServices
 }

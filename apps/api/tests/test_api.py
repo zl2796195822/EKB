@@ -375,7 +375,8 @@ def test_qa_ask_is_audited_with_finish_reason() -> None:
     entries = audit.json()["results"]
     assert len(entries) >= 1
     metadata = entries[0]["metadata"]
-    assert metadata["finish_reason"] == "stop"
+    # 没有配置远程 Provider 时必须 fail-closed，不得用本地/demo 回答冒充成功。
+    assert metadata["finish_reason"] in {"stop", "error"}
     # 问题预览应被截断存储，不含完整原始问题（超出 80 字符的部分不保留）。
     assert "question_preview" in metadata
 

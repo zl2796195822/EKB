@@ -161,6 +161,31 @@ def test_build_citations_carries_full_metadata():
     assert it["chunk_id"] == "d1:c-d1"
 
 
+def test_attachment_citations_are_separate_and_budgeted():
+    attachments = [
+        {
+            "attachment_id": "att-1",
+            "title": "附件一",
+            "mime": "text/plain",
+            "text": "第一份附件证据",
+            "chunks": [{"id": "chunk-1"}],
+        },
+        {
+            "attachment_id": "att-2",
+            "title": "附件二",
+            "mime": "text/plain",
+            "text": "第二份附件证据",
+            "chunks": [{"id": "chunk-2"}],
+        },
+    ]
+    items = rag.build_attachment_citations(attachments, 1)
+    assert len(items) == 1
+    assert items[0]["type"] == "attachment"
+    assert items[0]["doc_id"] == "att-1"
+    assert items[0]["chunk_id"] == "chunk-1"
+    assert rag.build_citations([_chunk("d1")], [], 0) == []
+
+
 def test_ask_request_default_answer_mode_strict():
     req = AskRequest(question="你好")
     assert req.options.answer_mode == "STRICT"

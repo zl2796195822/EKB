@@ -153,6 +153,28 @@ export function AssistantPage({ services }: V2PageProps) {
   )
   const isStreaming = streamState === 'starting' || streamState === 'retrieval' || streamState === 'generation'
 
+  const handlePickAttachments = useCallback(async () => {
+    if (isStreaming) return []
+    const files = await new Promise<File[]>((resolve) => {
+      const input = document.createElement('input')
+      input.type = 'file'
+      input.multiple = true
+      input.accept = '.pdf,.doc,.docx,.txt,.md,.csv,.xlsx,.xls,image/*'
+      input.onchange = () => resolve(Array.from(input.files ?? []))
+      input.click()
+    })
+    const picked: Array<{ docId: string; title: string }> = []
+    for (const file of files.slice(0, 10)) {
+      const result = await services.attachments.upload(file, selectedConversationId || undefined)
+      if (result.state === 'ready' && result.data) {
+        picked.push({ docId: result.data.id, title: result.data.title })
+      } else {
+        setOperationNotice(result.error?.message ?? `附件「${file.name}」处理失败。`)
+      }
+    }
+    return picked
+  }, [isStreaming, selectedConversationId, services.attachments])
+
   const loadKnowledgeBases = useCallback(async () => {
     setKnowledgeState('loading')
     const result = await services.knowledge.list()
@@ -708,6 +730,7 @@ export function AssistantPage({ services }: V2PageProps) {
           onSelectionChange={setComposerSelection}
           onSubmit={handleSend}
           onCancel={() => void handleCancel()}
+          onPickAttachments={handlePickAttachments}
         />
       </main>
       <AssistantContextPanel

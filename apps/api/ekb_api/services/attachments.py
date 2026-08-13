@@ -55,6 +55,14 @@ class AttachmentOwnershipError(AttachmentError):
         self.actor_id = actor_id
 
 
+class AttachmentMessageBindingError(AttachmentError):
+    """The target message is not owned by the current actor and tenant."""
+
+    def __init__(self, message_id: str) -> None:
+        super().__init__(f"message is not bindable: {message_id}")
+        self.message_id = message_id
+
+
 class DuplicateClientRequest(AttachmentError):
     def __init__(self, attachment_id: str, client_request_id: str) -> None:
         super().__init__(f"duplicate attachment client_request_id={client_request_id}")
@@ -254,6 +262,139 @@ class AttachmentService:
                 detected_mime=detected_mime, byte_size=byte_size, expires_at=expires_at,
             )
 
+    def register_upload(
+        self,
+        *,
+        tenant_id: str,
+        owner_user_id: str,
+        client_request_id: str,
+        detected_mime: str,
+        byte_size: int,
+        sha256: str,
+        conversation_id: Optional[str] = None,
+        expires_at: Optional[str] = None,
+    ) -> tuple[AttachmentRecord, str]:
+        """Create an attachment and its tenant-scoped object identity."""
+        if len(sha256) != 64 or any(ch not in "0123456789abcdefABCDEF" for ch in sha256):
+            raise AttachmentError("sha256 非法")
+        if byte_size <= 0:
+            raise AttachmentError("附件不能为空")
+        with self._engine.begin() as conn:
+            if conversation_id:
+                conversation = conn.execute(
+                    text(
+                        "SELECT id FROM conversations WHERE id=:c AND tenant_id=:t "
+                        "AND user_id=:u"
+                    ),
+                    {"c": conversation_id, "t": tenant_id, "u": owner_user_id},
+                ).first()
+                if conversation is None:
+                    raise AttachmentMessageBindingError(conversation_id)
+            existing = conn.execute(
+                text(
+                    "SELECT id, source_object_id FROM attachments WHERE tenant_id=:t "
+                    "AND owner_user_id=:o AND client_request_id=:c"
+                ),
+                {"t": tenant_id, "o": owner_user_id, "c": client_request_id},
+            ).first()
+            if existing is not None:
+                existing_record = self.get(
+                    tenant_id=tenant_id, attachment_id=str(existing[0])
+                )
+                return existing_record, str(existing[1])
+
+            attachment_id = prefixed_id("att")
+            source_object = conn.execute(
+                text(
+                    "SELECT id FROM source_objects WHERE tenant_id=:t "
+                    "AND sha256=:sha AND byte_size=:b"
+                ),
+                {"t": tenant_id, "sha": sha256.lower(), "b": byte_size},
+            ).first()
+            source_object_id = str(source_object[0]) if source_object is not None else prefixed_id("src")
+            now = utc_now()
+            if source_object is None:
+                conn.execute(
+                    text(
+                        "INSERT INTO source_objects"
+                        " (id, tenant_id, object_key, sha256, byte_size, detected_mime, "
+                        "ref_count, created_at)"
+                        " VALUES (:id,:t,:k,:sha,:b,:m,1,:now)"
+                    ),
+                    {
+                        "id": source_object_id,
+                        "t": tenant_id,
+                        "k": f"attachments/{tenant_id}/{attachment_id}",
+                        "sha": sha256.lower(),
+                        "b": byte_size,
+                        "m": detected_mime,
+                        "now": now,
+                    },
+                )
+            else:
+                conn.execute(
+                    text("UPDATE source_objects SET ref_count=ref_count+1 WHERE id=:id"),
+                    {"id": source_object_id},
+                )
+            conn.execute(
+                text(
+                    "INSERT INTO attachments"
+                    " (id, tenant_id, owner_user_id, conversation_id, source_object_id,"
+                    " client_request_id, status, detected_mime, byte_size, expires_at,"
+                    " created_at, updated_at)"
+                    " VALUES (:id,:t,:o,:c,:s,:cr,'UPLOADING',:m,:b,:e,:now,:now)"
+                ),
+                {
+                    "id": attachment_id,
+                    "t": tenant_id,
+                    "o": owner_user_id,
+                    "c": conversation_id,
+                    "s": source_object_id,
+                    "cr": client_request_id,
+                    "m": detected_mime,
+                    "b": byte_size,
+                    "e": expires_at,
+                    "now": now,
+                },
+            )
+        return self.get(tenant_id=tenant_id, attachment_id=attachment_id), source_object_id
+
+    def upload_object_metadata(
+        self, *, tenant_id: str, actor_id: str, attachment_id: str
+    ) -> tuple[AttachmentRecord, str, str]:
+        """Resolve the exact object key and expected digest for a protected PUT."""
+        record = self.get(tenant_id=tenant_id, attachment_id=attachment_id)
+        if record.owner_user_id != actor_id:
+            raise AttachmentOwnershipError(attachment_id, actor_id)
+        if record.status != AttachmentStatus.UPLOADING:
+            raise AttachmentStateConflict(attachment_id, record.status, AttachmentStatus.UPLOADING)
+        with self._engine.connect() as conn:
+            row = conn.execute(
+                text(
+                    "SELECT object_key, sha256 FROM source_objects "
+                    "WHERE id=:s AND tenant_id=:t"
+                ),
+                {"s": record.source_object_id, "t": tenant_id},
+            ).first()
+        if row is None:
+            raise AttachmentNotFound(attachment_id)
+        return record, str(row[0]), str(row[1])
+
+    def assert_message_bindable(
+        self, *, tenant_id: str, actor_id: str, message_id: str
+    ) -> None:
+        with self._engine.connect() as conn:
+            row = conn.execute(
+                text(
+                    "SELECT m.id FROM messages m JOIN conversations c "
+                    "ON c.id=m.conversation_id WHERE m.id=:m AND m.tenant_id=:t "
+                    "AND c.tenant_id=:t AND c.user_id=:u"
+                ),
+                {"m": message_id, "t": tenant_id, "u": actor_id},
+            ).first()
+        if row is None:
+            raise AttachmentMessageBindingError(message_id)
+
     # ---- lifecycle transitions -------------------------------------------
 
     def transition(
@@ -329,6 +470,9 @@ class AttachmentService:
         """
         if not attachment_ids:
             return []
+        self.assert_message_bindable(
+            tenant_id=tenant_id, actor_id=actor_id, message_id=message_id
+        )
         bindings: list[MessageAttachmentBinding] = []
         with self._engine.begin() as conn:
             for ordinal, attachment_id in enumerate(attachment_ids):
@@ -343,7 +487,7 @@ class AttachmentService:
                     raise AttachmentNotFound(attachment_id)
                 if rec[2] != actor_id:
                     raise AttachmentOwnershipError(attachment_id, actor_id)
-                if rec[3] != AttachmentStatus.READY:
+                if rec[3] not in (AttachmentStatus.READY, AttachmentStatus.ATTACHED):
                     raise AttachmentStateConflict(attachment_id, rec[3], AttachmentStatus.READY)
 
                 usage_mode = self._resolve_usage_mode(conn, attachment_id)
@@ -372,6 +516,78 @@ class AttachmentService:
                     )
                 )
         return bindings
+
+    def load_context(
+        self,
+        *,
+        tenant_id: str,
+        owner_user_id: str,
+        attachment_ids: list[str],
+        conversation_id: Optional[str] = None,
+    ) -> list[dict[str, Any]]:
+        """Load only owner-scoped, processed attachment text for an LLM context."""
+        if not attachment_ids:
+            return []
+        contexts: list[dict[str, Any]] = []
+        with self._engine.connect() as conn:
+            for attachment_id in dict.fromkeys(attachment_ids):
+                row = conn.execute(
+                    text(
+                        "SELECT id, owner_user_id, conversation_id, status, detected_mime "
+                        "FROM attachments WHERE id=:a AND tenant_id=:t"
+                    ),
+                    {"a": attachment_id, "t": tenant_id},
+                ).first()
+                if row is None:
+                    raise AttachmentNotFound(attachment_id)
+                if row[1] != owner_user_id:
+                    raise AttachmentOwnershipError(attachment_id, owner_user_id)
+                if conversation_id and row[2] not in (None, conversation_id):
+                    raise AttachmentOwnershipError(attachment_id, owner_user_id)
+                if row[3] not in (AttachmentStatus.READY, AttachmentStatus.ATTACHED):
+                    raise AttachmentStateConflict(attachment_id, row[3], AttachmentStatus.READY)
+                artifacts = conn.execute(
+                    text(
+                        "SELECT metadata FROM attachment_artifacts "
+                        "WHERE attachment_id=:a AND tenant_id=:t ORDER BY id"
+                    ),
+                    {"a": attachment_id, "t": tenant_id},
+                ).all()
+                chunks = conn.execute(
+                    text(
+                        "SELECT id, ordinal, text_content FROM attachment_chunks "
+                        "WHERE attachment_id=:a AND tenant_id=:t ORDER BY ordinal, id"
+                    ),
+                    {"a": attachment_id, "t": tenant_id},
+                ).all()
+                texts: list[str] = []
+                for artifact in artifacts:
+                    metadata = artifact[0]
+                    if isinstance(metadata, str):
+                        try:
+                            metadata = json.loads(metadata)
+                        except json.JSONDecodeError:
+                            metadata = {}
+                    if isinstance(metadata, dict) and metadata.get("ocr_text"):
+                        texts.append(str(metadata["ocr_text"]))
+                texts.extend(str(chunk[2]) for chunk in chunks if str(chunk[2]).strip())
+                contexts.append(
+                    {
+                        "attachment_id": str(row[0]),
+                        "title": f"附件 {str(row[0])[:12]}",
+                        "mime": str(row[4]),
+                        "chunks": [
+                            {
+                                "id": str(chunk[0]),
+                                "ordinal": int(chunk[1]),
+                                "text": str(chunk[2]),
+                            }
+                            for chunk in chunks
+                        ],
+                        "text": "\n\n".join(texts)[:100_000],
+                    }
+                )
+        return contexts
 
     @staticmethod
     def _resolve_usage_mode(conn: Any, attachment_id: str) -> str:

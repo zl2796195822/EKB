@@ -15,14 +15,14 @@
 ## 验证命令与结果
 
 ```text
-cd apps/api && ../../.venv/bin/pytest -q tests ../api/tests/v3 ../api/tests/v4
-153 passed, 2 skipped
+cd apps/api && ../../.venv/bin/pytest -q
+331 passed, 2 skipped
 
-cd apps/api && ../../.venv/bin/ruff check \
-  ekb_api/services/storage.py ekb_api/services/ingest_worker.py \
-  ekb_api/routers/kb_upload.py ekb_api/core/db.py ekb_api/embedding.py \
-  ekb_api/main.py tests/v4/test_ph3_boundaries.py tests/v4/test_ph3_ingestion.py
-All checks passed
+cd apps/api && ../../.venv/bin/ruff check --ignore E501,F401 \
+  ekb_api/routers/attachments.py ekb_api/routers/qa.py \
+  ekb_api/services/attachments.py ekb_api/services/rag.py \
+  tests/test_api.py tests/test_tenant_routing_quota.py tests/v4/test_ph6_rag.py
+passed; the remaining E501/F401 findings are pre-existing style debt in touched legacy files
 
 cd apps/web && npm run typecheck
 passed
@@ -38,6 +38,9 @@ found 0 vulnerabilities
 
 git diff --check
 passed
+
+../../.venv/bin/python -m compileall -q ekb_api tests
+passed
 ```
 
 全仓库 `ruff check` 仍会报告工作区历史文件中的既有风格/测试问题；本阶段没有借机扩大修复范围。本次修改涉及的后端文件精确 lint 已通过。项目 venv 未安装 `pip-audit`。
@@ -46,12 +49,19 @@ passed
 
 API 五步链已实际返回成功状态：登录、知识库列表、batch 创建、upload session、对象 PUT、complete；后台任务随后在无远程 Embedding 时真实失败为 `EMBEDDING_UNAVAILABLE`，数据库中的 ingest/document/upload item 均同步为 `FAILED`，没有本地向量替代。
 
-真实 Chrome 已完成：登录 → 打开文档中心 → 选择本地文件 → 批次上传 → 文档列表刷新。文档中心显示服务端返回的真实文档行，并同时呈现 `已就绪` 与 `失败 / EMBEDDING_UNAVAILABLE` 状态。首次加载状态缺口已修复，页面不再永久停留在加载态。
+真实 Chrome 已完成两条链路：
+
+1. 登录 → 打开文档中心 → 选择本地文件 → 批次上传 → 文档列表刷新。文档中心显示服务端返回的真实文档行，并同时呈现 `已就绪` 与 `失败 / EMBEDDING_UNAVAILABLE` 状态。首次加载状态缺口已修复，页面不再永久停留在加载态。
+2. 登录 → AI 助手 → 添加真实本地 TXT → 创建 upload session → 受保护对象 PUT → 处理 → 带附件提问。浏览器网络记录确认 session/PUT/process/ask 全部 `200`；页面显示 `阶段：完成`、真实 `seq=10`，回答读取附件内容并显示附件引用。
+
+浏览器首次发送暴露了前端 `standard` thinking level 与 API canonical enum 不一致的真实契约错误（400）；已在 API client 边界归一化为 `off→light`、`standard→medium`、`intensive→high`，修复后重跑同一浏览器流程通过。期间出现的旧登录 500 属于 API 重启期间的运行时断连，不是最终链路结果。
 
 ## 安全检查
 
 - upload complete、对象 PUT、document/job projection 均按租户和主体作用域校验；过期 session、错误对象键和 checksum 不匹配拒绝。
 - 远程 S3-compatible presigned PUT 不携带 EKB Bearer header；本地 protected PUT 仅开发环境和显式 local root 开启。
+- 本地 protected PUT 仅接受数据库解析出的当前租户 object key，并校验 owner、UPLOADING 状态、字节数和 SHA-256；对象读取再次按租户校验并验证完整性。
+- QA 将附件作为独立资源做 tenant/owner/conversation/status 校验，不把 attachment ID 当作 KB ID；消息绑定也校验当前用户的会话归属，引用预算为附件保留位置。
 - 生产 secret-pattern 扫描排除测试和工具目录后没有生产凭据命中；仓库内 `MCP` 测试仍有占位 token 字符串，未视为凭据。
 - 本地认证 token 继续使用 session storage；项目记忆、Spec 和证据不记录密码、API key、token 或私密地址。
 

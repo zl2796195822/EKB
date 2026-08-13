@@ -18,10 +18,12 @@ Design notes:
 
 from __future__ import annotations
 
+import hashlib
 from typing import Annotated, Any, Optional
 
-from fastapi import APIRouter, Body, Depends, Path, Query
-from sqlalchemy import Engine
+from fastapi import APIRouter, Body, Depends, Path, Query, Request
+from pydantic import BaseModel, Field
+from sqlalchemy import Engine, text
 
 from ekb_api.chunking import split_sections as _split_sections
 from ekb_api.core.auth import get_live_auth_context
@@ -30,13 +32,10 @@ from ekb_api.core.errors import ApiError
 from ekb_api.domain import AuthContext
 from ekb_api.embedding import embed_batch
 from ekb_api.parsing import parse as _parse
-from ekb_api.services.attachment_processor import (
-    LocalBytesStore,
-    ProcessingConfig,
-    process_attachment,
-)
+from ekb_api.services.attachment_processor import ProcessingConfig, process_attachment
 from ekb_api.services.attachments import (
     AttachmentError,
+    AttachmentMessageBindingError,
     AttachmentNotFound,
     AttachmentOwnershipError,
     AttachmentService,
@@ -67,25 +66,35 @@ def _service() -> AttachmentService:
     return AttachmentService(_engine())
 
 
-def _storage_reader() -> Any:
+def _storage_reader(tenant_id: str) -> Any:
     """Return a StorageReader. Production uses object storage; tests inject one.
 
-    Falls back to a no-op local store when object storage is unconfigured so the
-    code path is always importable. Tests override via _service injection at the
-    processor layer.
+    Missing object storage is a real unavailable condition. Tests override via
+    ``set_storage_reader`` and never use this production boundary.
     """
-    try:
-        from ekb_api.core.object_storage import build_storage_client
+    from ekb_api.services.storage import build_storage_client
 
-        client = build_storage_client()
+    client = build_storage_client()
 
-        class _ClientReader:
-            def get_bytes(self, *, object_id: str) -> bytes:
-                return client.get_object_bytes(tenant_id="*", object_key=object_id)
+    class _ClientReader:
+        def get_bytes(self, *, object_id: str) -> bytes:
+            with _engine().connect() as conn:
+                row = conn.execute(
+                    text(
+                        "SELECT object_key, sha256, byte_size FROM source_objects "
+                        "WHERE id=:id AND tenant_id=:tenant"
+                    ),
+                    {"id": object_id, "tenant": tenant_id},
+                ).first()
+            if row is None:
+                raise AttachmentNotFound(object_id)
+            data = client.get_object_bytes(tenant_id=tenant_id, object_key=str(row[0]))
+            actual_sha = hashlib.sha256(data).hexdigest()
+            if len(data) != int(row[2]) or actual_sha.lower() != str(row[1]).lower():
+                raise AttachmentError("对象完整性校验失败")
+            return data
 
-        return _ClientReader()
-    except Exception:  # noqa: BLE001
-        return LocalBytesStore()
+    return _ClientReader()
 
 
 def _request_id(auth: AuthContext) -> str:
@@ -102,6 +111,8 @@ def _translate(exc: Exception) -> ApiError:
             409, "ATTACHMENT_STATE_CONFLICT", str(exc),
             {"attachment_id": exc.attachment_id, "current": exc.current, "required": exc.required},
         )
+    if isinstance(exc, AttachmentMessageBindingError):
+        return ApiError(404, "MESSAGE_NOT_FOUND", "消息不存在或不在当前授权范围")
     if isinstance(exc, DuplicateClientRequest):
         return ApiError(
             409, "ATTACHMENT_DUPLICATE", str(exc), {"client_request_id": exc.client_request_id}
@@ -120,6 +131,14 @@ class RegisterRequest:
     detected_mime: str
     byte_size: int
     source_object_id: str
+
+
+class AttachmentSessionRequest(BaseModel):
+    client_request_id: str = Field(min_length=1, max_length=128)
+    detected_mime: str = Field(min_length=1, max_length=255)
+    byte_size: int = Field(gt=0, le=100 * 1024 * 1024)
+    sha256: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-fA-F]{64}$")
+    conversation_id: Optional[str] = Field(default=None, max_length=128)
 
 
 def _register_payload(body: dict[str, Any]) -> dict[str, Any]:
@@ -151,6 +170,76 @@ def register_attachment(
     except Exception as exc:
         raise _translate(exc) from exc
     return rec.as_dict()
+
+
+@router.post("/sessions")
+def create_attachment_session(
+    payload: AttachmentSessionRequest,
+    auth: Annotated[AuthContext, Depends(get_live_auth_context)],
+) -> dict[str, Any]:
+    """Create a real tenant-scoped attachment upload session."""
+    assert_capability(auth, CAP_QA_ASK)
+    try:
+        rec, _source_object_id = _service().register_upload(
+            tenant_id=auth.tenant_id,
+            owner_user_id=auth.actor_id,
+            client_request_id=payload.client_request_id,
+            detected_mime=payload.detected_mime,
+            byte_size=payload.byte_size,
+            sha256=payload.sha256,
+            conversation_id=payload.conversation_id,
+        )
+        _record, object_key, _expected_sha = _service().upload_object_metadata(
+            tenant_id=auth.tenant_id, actor_id=auth.actor_id, attachment_id=rec.id
+        )
+    except Exception as exc:
+        raise _translate(exc) from exc
+    return {
+        "attachment": rec.as_dict(),
+        "upload_url": f"/api/v1/attachments/objects?attachment_id={rec.id}",
+        "object_key": object_key,
+    }
+
+
+@router.put("/objects")
+async def put_attachment_object(
+    request: Request,
+    attachment_id: Annotated[str, Query(min_length=1, max_length=128)],
+    auth: Annotated[AuthContext, Depends(get_live_auth_context)],
+) -> dict[str, Any]:
+    """Protected local object upload; bytes never go to an arbitrary path."""
+    assert_capability(auth, CAP_QA_ASK)
+    try:
+        record, object_key, expected_sha = _service().upload_object_metadata(
+            tenant_id=auth.tenant_id, actor_id=auth.actor_id, attachment_id=attachment_id
+        )
+        from ekb_api.services.storage import LocalFilesystemStorageClient, build_storage_client
+
+        client = build_storage_client()
+        if not isinstance(client, LocalFilesystemStorageClient):
+            raise ApiError(503, "OBJECT_STORAGE_UNAVAILABLE", "当前开发附件上传端点不可用")
+        data = await request.body()
+        actual_sha = hashlib.sha256(data).hexdigest()
+        if len(data) != record.byte_size:
+            raise ApiError(
+                422,
+                "OBJECT_SIZE_MISMATCH",
+                "上传对象大小与预检不一致",
+                {"expected": record.byte_size, "actual": len(data)},
+            )
+        if actual_sha.lower() != expected_sha.lower():
+            raise ApiError(422, "OBJECT_CHECKSUM_MISMATCH", "上传对象校验和不一致")
+        head = client.write_object(tenant_id=auth.tenant_id, object_key=object_key, data=data)
+    except ApiError:
+        raise
+    except Exception as exc:
+        raise _translate(exc) from exc
+    return {
+        "attachment_id": attachment_id,
+        "object_key": object_key,
+        "byte_size": head.byte_size,
+        "sha256": actual_sha,
+    }
 
 
 @router.get("/{attachment_id}")
@@ -188,13 +277,14 @@ def process_attachment_endpoint(
     assert_capability(auth, CAP_QA_ASK)
     try:
         config = ProcessingConfig(
-            parser=_parse, chunker=_split_sections, embed=embed_batch,
+            parser=_parse, chunker=_split_sections,
+            embed=lambda texts: embed_batch(texts, tenant_id=auth.tenant_id, user_id=auth.actor_id),
             vision=RuntimeVisionCapability(), ocr=None,
         )
         result = process_attachment(
             _service(), tenant_id=auth.tenant_id, actor_id=auth.actor_id,
             attachment_id=attachment_id,
-            storage=_STORAGE_OVERRIDE or _storage_reader(), config=config,
+            storage=_STORAGE_OVERRIDE or _storage_reader(auth.tenant_id), config=config,
         )
     except AttachmentError as exc:
         raise _translate(exc) from exc
@@ -223,6 +313,21 @@ def bind_attachments(
     except Exception as exc:
         raise _translate(exc) from exc
     return {"bindings": [b.as_dict() for b in bindings], "total": len(bindings)}
+
+
+@router.post("/{attachment_id}/restore")
+def restore_attachment(
+    attachment_id: Annotated[str, Path()],
+    auth: Annotated[AuthContext, Depends(get_live_auth_context)],
+) -> dict[str, Any]:
+    assert_capability(auth, CAP_KB_WRITE)
+    try:
+        rec = _service().restore(
+            tenant_id=auth.tenant_id, actor_id=auth.actor_id, attachment_id=attachment_id
+        )
+    except Exception as exc:
+        raise _translate(exc) from exc
+    return rec.as_dict()
 
 
 @router.post("/{attachment_id}/trash")

@@ -123,5 +123,5 @@ def test_qa_route_does_not_raise(client, dev_token):
         json={"question": "数据库连接池耗尽先检查哪些指标", "kb_ids": [kb_id]},
     )
     assert resp.status_code == 200, resp.text
-    # 流式路径不得出现 error 事件（无 LLM 时应降级到 demo 拼接而非抛异常）。
-    assert "event: error" not in resp.text
+    # 无远程 Provider 时必须返回结构化错误，不得降级为本地/demo 生成。
+    assert "LLM_PROVIDER_NOT_CONFIGURED" in resp.text or "LLM_PROVIDER_ERROR" in resp.text

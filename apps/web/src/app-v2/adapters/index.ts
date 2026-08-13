@@ -79,3 +79,4 @@ export { APPS_CAPABILITIES, APPS_DEFAULT_LIMIT, createAppsAdapter } from './apps
 export type { AppsAdapter, AppsApiClient } from './apps'
 export { LLM_CAPABILITIES, createLLMAdapter } from './llm'
 export type { LLMAdapter, LLMApiClient } from './llm'
+export { ATTACHMENT_CAPABILITIES, createAttachmentsAdapter } from './attachments'

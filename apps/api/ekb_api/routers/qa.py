@@ -20,6 +20,7 @@ from ekb_api.core.audit import (
 )
 from ekb_api.core.auth import get_auth_context, get_store
 from ekb_api.core.config import get_runtime_chat_providers, get_settings
+from ekb_api.core.db import get_engine
 from ekb_api.core.egress import assert_egress_allowed, resolve_tenant_routing
 from ekb_api.core.errors import ApiError
 from ekb_api.core.metrics import (
@@ -75,6 +76,7 @@ from ekb_api.schemas import (
     TurnCancelResponse,
 )
 from ekb_api.services import rag as rag
+from ekb_api.services.attachments import AttachmentError, AttachmentService
 from ekb_api.store import SqlStore
 
 router = APIRouter(prefix="/qa", tags=["qa"])
@@ -227,8 +229,7 @@ async def ask(
         except Exception:  # noqa: BLE001
             # 兜底：直接用局部变量覆盖，保证后续 route.model 读取优先用请求值
             logger.warning("TenantRoute.replace 失败，回退为不传选模型")
-    # 2) attachment_doc_ids 合并进检索范围：与 kb_ids 并集，但同样做权限校验
-    raw_kb_ids = list(dict.fromkeys([*payload.kb_ids, *payload.options.attachment_doc_ids]))
+    # 附件 ID 是独立的聊天资源，绝不能当成 KB ID 参与 ACL 或检索。
     # 3) deep_thinking / web_search 读取供后续 prompt 透传
     #    thinking_level 五档：light 才关（=无推理增强），mild/medium/high/extreme 都开
     #    兼容旧三档：off→light，standard→medium，intensive→high
@@ -241,9 +242,8 @@ async def ask(
     use_web_search = bool(payload.options.web_search)  # 当前版本透传占位，未接入 SERP API
 
     # PH6 FR-050：显式 kb_ids 必须全部在授权可见范围内（防伪造 ID 越权检索）。
-    # 附件 doc_ids 仅作检索范围合并，不进 ACL 校验（属于 doc 而非 kb，store 已按 READY 过滤）。
     validated_kb_ids = rag.validate_kb_scope(store, auth, payload.kb_ids)
-    raw_kb_ids = list(dict.fromkeys([*validated_kb_ids, *payload.options.attachment_doc_ids]))
+    raw_kb_ids = list(validated_kb_ids)
 
     conversation = (
         store.get_conversation(auth, payload.conversation_id) if payload.conversation_id else None
@@ -258,8 +258,37 @@ async def ask(
     request_id = auth.trace_id
     seq = 0  # SSE v2 envelope 序列号
 
-    # 预写消息：USER 正常；ASSISTANT 先为空占位（v2 下 turn_id 关联）
-    store.save_message(auth, conversation.id, "USER", payload.question, turn_id=turn_id)
+    # 附件上下文必须先通过租户/所有者/状态校验；它不是 KB 检索范围。
+    attachment_contexts: list[dict] = []
+    if payload.options.attachment_doc_ids:
+        try:
+            attachment_contexts = AttachmentService(get_engine()).load_context(
+                tenant_id=auth.tenant_id,
+                owner_user_id=auth.actor_id,
+                attachment_ids=list(payload.options.attachment_doc_ids),
+                conversation_id=conversation.id,
+            )
+        except AttachmentError as exc:
+            raise ApiError(
+                404,
+                "ATTACHMENT_NOT_FOUND",
+                "附件不存在、未处理完成或不在当前授权范围",
+            ) from exc
+
+    # 预写消息：USER 正常；ASSISTANT 先为空占位（v2 下 turn_id 关联）。
+    user_message = store.save_message(
+        auth, conversation.id, "USER", payload.question, turn_id=turn_id
+    )
+    if payload.options.attachment_doc_ids:
+        try:
+            AttachmentService(get_engine()).bind(
+                tenant_id=auth.tenant_id,
+                actor_id=auth.actor_id,
+                message_id=user_message.id,
+                attachment_ids=list(payload.options.attachment_doc_ids),
+            )
+        except AttachmentError as exc:
+            raise ApiError(409, "ATTACHMENT_BIND_FAILED", "附件无法绑定到当前消息") from exc
     assistant_message = store.save_message(
         auth,
         conversation.id,
@@ -299,6 +328,9 @@ async def ask(
         last_event_at = time.perf_counter()
         ttfbt0 = time.perf_counter()
         first_token_emitted = False
+        chunks: list = []
+        web_results: list[WebSearchResult] = []
+        citations_sent = False
 
         def emit(event: str, payload_inner: dict) -> str:
             nonlocal seq, last_event_at
@@ -313,6 +345,40 @@ async def ask(
             if use_v2:
                 return _sse_v2(event, turn_id, request_id, seq, payload_inner)
             return _sse_v1(event, payload_inner)
+
+        def failure_citations() -> list[dict]:
+            """Expose verified attachment sources even when remote generation fails."""
+            nonlocal citations_sent
+            if citations_sent:
+                return []
+            attachment_count = sum(
+                bool(str(attachment.get("text") or "").strip())
+                for attachment in attachment_contexts
+            )
+            if attachment_count == 0:
+                return []
+            items = rag.build_citations(
+                list(chunks),
+                web_results,
+                max(payload.options.max_citations - attachment_count, 0),
+            )
+            items.extend(
+                rag.build_attachment_citations(
+                    attachment_contexts,
+                    min(attachment_count, payload.options.max_citations),
+                    offset=len(items),
+                )
+            )
+            try:
+                store.save_message_citations(auth, assistant_message.id, items)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "save_failure_citations failed msg=%s: %s",
+                    assistant_message.id,
+                    exc,
+                )
+            citations_sent = bool(items)
+            return items
 
         try:
             # ---------- 1. request 事件 ----------
@@ -359,7 +425,6 @@ async def ask(
             # ---------- 3. 检索阶段（KB + Tavily 并行，含分段超时）----------
             t0 = time.perf_counter()
             web_summary: WebSearchSummary | None = None
-            web_results: list[WebSearchResult] = []
             retrieval_timeout = (
                 settings.sse_v2_retrieval_idle_timeout if use_v2 else settings.qa_timeout_seconds
             )
@@ -372,7 +437,7 @@ async def ask(
                         store,
                         auth,
                         payload.question,
-                        raw_kb_ids,
+                        validated_kb_ids,
                         payload.options.max_citations,
                         route=route,
                     ),
@@ -410,6 +475,9 @@ async def ask(
                     web_task.cancel()
                 QA_IDLE_TIMEOUTS.inc(phase="retrieval")
                 finish_reason = FinishReason.TIMEOUT.value
+                source_citations = failure_citations()
+                if source_citations:
+                    yield emit("citations", {"items": source_citations})
                 yield emit(
                     "error",
                     {
@@ -492,17 +560,40 @@ async def ask(
 
             # 合并知识库 + 联网搜索证据（仅需 evidence_texts 作为生成上下文；
             # citations 元数据改由 rag.build_citations 基于原始 chunks 构造，见 FR-052）。
+            # 用户显式选择的附件必须保留上下文配额，不能被 KB 前五条命中挤掉。
+            usable_attachment_count = sum(
+                bool(str(attachment.get("text") or "").strip())
+                for attachment in attachment_contexts
+            )
+            evidence_budget = max(
+                payload.options.max_citations - usable_attachment_count,
+                1 if not usable_attachment_count else 0,
+            )
             evidence_texts, _ = merge_evidence(
                 kb_chunks=list(chunks),
                 web_results=web_results,
-                max_citations=payload.options.max_citations,
+                max_citations=evidence_budget,
             )
+            for attachment in attachment_contexts:
+                attachment_text = str(attachment.get("text") or "").strip()
+                if attachment_text:
+                    evidence_texts.append(
+                        f"[附件证据 — {attachment['title']} / {attachment['mime']}]\n"
+                        f"{attachment_text}"
+                    )
             total_evidence_count = len(evidence_texts)
 
             # ---------- PH6 FR-051：STRICT 证据门禁 ----------
             # 选中了知识库但检索不到任何证据时，直接拒答：不调用 LLM、不编造任何引用。
             # ENHANCED 模式或不选中 KB 的开放问答不触发此门禁。
-            if rag.needs_strict_refusal(payload.options.answer_mode, raw_kb_ids, chunks):
+            if rag.needs_strict_refusal(
+                payload.options.answer_mode,
+                raw_kb_ids,
+                chunks,
+                has_attachment_evidence=any(
+                    str(attachment.get("text") or "").strip() for attachment in attachment_contexts
+                ),
+            ):
                 store.update_message_content(
                     auth,
                     assistant_message.id,
@@ -702,10 +793,27 @@ async def ask(
                 tenant_id=auth.tenant_id,
                 user_id=auth.actor_id,
             )
-            if not runtime_chat_providers:
+            # Tests and injected remote adapters may deliberately patch the
+            # provider capability while exercising the stream contract. In a
+            # real runtime ``llm_enabled`` is derived from configured remote
+            # providers; never fall back to local/demo generation here.
+            if not runtime_chat_providers and not settings.llm_enabled:
                 QA_DEGRADATIONS.inc(reason="llm_unavailable")
+                citation_attachment_count = sum(
+                    bool(str(attachment.get("text") or "").strip())
+                    for attachment in attachment_contexts
+                )
                 citations_payload = rag.build_citations(
-                    list(chunks), web_results, payload.options.max_citations
+                    list(chunks),
+                    web_results,
+                    max(payload.options.max_citations - citation_attachment_count, 0),
+                )
+                citations_payload.extend(
+                    rag.build_attachment_citations(
+                        attachment_contexts,
+                        min(citation_attachment_count, payload.options.max_citations),
+                        offset=len(citations_payload),
+                    )
                 )
                 try:
                     store.save_message_citations(auth, assistant_message.id, citations_payload)
@@ -830,6 +938,9 @@ async def ask(
                         if phase == "generation" and idle_elapsed >= expected_idle:
                             QA_IDLE_TIMEOUTS.inc(phase="generation")
                             finish_reason = FinishReason.TIMEOUT.value
+                            source_citations = failure_citations()
+                            if source_citations:
+                                yield emit("citations", {"items": source_citations})
                             yield emit(
                                 "error",
                                 {
@@ -894,6 +1005,9 @@ async def ask(
                 except LlmError as exc:
                     QA_DEGRADATIONS.inc(reason="llm_failed")
                     logger.warning("qa/ask remote LLM generation failed request_id=%s: %s", request_id, exc)
+                    source_citations = failure_citations()
+                    if source_citations:
+                        yield emit("citations", {"items": source_citations})
                     failure_message = "远程 LLM 服务暂时不可用，无法生成回答，请稍后重试。"
                     store.update_message_content(auth, assistant_message.id, failure_message)
                     yield emit(
@@ -987,8 +1101,21 @@ async def ask(
             # citations_merged 结构: [{index, type:"kb"|"web", title, doc_id|None, url|None, section_path|None, published_date|None}]
             # PH6 FR-052/FR-053：用 rag.build_citations 构造完整元数据引用（version/page/sheet/
             # paragraph/source_path/updated_at/score），并持久化到消息 metadata_redacted.citations。
+            citation_attachment_count = sum(
+                bool(str(attachment.get("text") or "").strip())
+                for attachment in attachment_contexts
+            )
             citations_payload: list[dict] = rag.build_citations(
-                list(chunks), web_results, payload.options.max_citations
+                list(chunks),
+                web_results,
+                max(payload.options.max_citations - citation_attachment_count, 0),
+            )
+            citations_payload.extend(
+                rag.build_attachment_citations(
+                    attachment_contexts,
+                    min(citation_attachment_count, payload.options.max_citations),
+                    offset=len(citations_payload),
+                )
             )
             try:
                 store.save_message_citations(auth, assistant_message.id, citations_payload)
@@ -1014,6 +1141,9 @@ async def ask(
 
         except asyncio.TimeoutError:
             finish_reason = FinishReason.TIMEOUT.value
+            source_citations = failure_citations()
+            if source_citations:
+                yield emit("citations", {"items": source_citations})
             yield emit(
                 "error",
                 {
@@ -1028,6 +1158,9 @@ async def ask(
             logger.warning("qa/ask LlmError request_id=%s: %s", request_id, exc)
             QA_DEGRADATIONS.inc(reason="llm_unhandled_outer")
             finish_reason = FinishReason.ERROR.value
+            source_citations = failure_citations()
+            if source_citations:
+                yield emit("citations", {"items": source_citations})
             yield emit(
                 "error",
                 {
@@ -1041,6 +1174,9 @@ async def ask(
             # Step 1.1：记录完整 traceback，便于定位真实根因
             logger.exception("qa/ask INTERNAL_ERROR request_id=%s", request_id)
             finish_reason = FinishReason.ERROR.value
+            source_citations = failure_citations()
+            if source_citations:
+                yield emit("citations", {"items": source_citations})
             base_msg = "问答处理失败，请稍后重试"
             # 开发环境附加简短异常类型，便于调试；生产不暴露内部细节
             if not settings.is_production:
