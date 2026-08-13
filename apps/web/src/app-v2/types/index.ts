@@ -56,6 +56,8 @@ export type {
   UploadResult,
 } from './documents'
 export type {
+  ConversationBranchView,
+  ConversationBranchesResult,
   ConversationListResult,
   ConversationMessageRole,
   ConversationMessageView,

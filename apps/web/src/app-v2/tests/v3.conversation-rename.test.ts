@@ -10,6 +10,16 @@ function createFakeClient(renameConversation: ConversationsApiClient['renameConv
     async getConversationMessages() {
       return []
     },
+    async listConversationBranches(conversationId: string) {
+      return {
+        conversation_id: conversationId,
+        active_branch_id: 'branch-1',
+        branches: [{ id: 'branch-1', conversation_id: conversationId, parent_branch_id: null, fork_message_id: null, label: 'root', created_by: 'user-1', created_at: '2026-08-09T00:00:00Z' }],
+      }
+    },
+    async setActiveConversationBranch(conversationId: string, branchId: string) {
+      return { conversation_id: conversationId, active_branch_id: branchId }
+    },
     async deleteConversation() {
       return undefined
     },

@@ -28,6 +28,7 @@ import type {
   SearchHitView,
   V2PageProps,
 } from '../types'
+import type { ConversationBranchView } from '../types/conversations'
 import type { FavoriteItemView } from '../types/favorites'
 
 type AssistantTab = 'recent' | 'favorites' | 'projects'
@@ -85,6 +86,16 @@ function mapMessage(message: { id: string; role: 'user' | 'assistant' | 'system'
   return { ...message }
 }
 
+function formatOperationError(error: AdapterError | undefined, fallbackCode: string, fallbackMessage: string): string {
+  return `${error?.code ?? fallbackCode}：${error?.message ?? fallbackMessage}${error?.requestId ? `（request_id：${error.requestId}）` : ''}`
+}
+
+function branchOptionLabel(branch: ConversationBranchView, index: number): string {
+  const label = branch.label?.trim()
+  if (label) return label
+  return branch.parentBranchId ? `分支 ${index + 1}` : 'root'
+}
+
 export function AssistantPage({ services }: V2PageProps) {
   const [knowledgeState, setKnowledgeState] = useState<PageState>('loading')
   const [knowledgeBases, setKnowledgeBases] = useState<readonly KnowledgeBaseView[]>([])
@@ -92,6 +103,9 @@ export function AssistantPage({ services }: V2PageProps) {
   const [conversationsState, setConversationsState] = useState<PageState>('loading')
   const [conversations, setConversations] = useState<readonly ConversationView[]>([])
   const [selectedConversationId, setSelectedConversationId] = useState('')
+  const [branchesState, setBranchesState] = useState<PageState>('empty')
+  const [branches, setBranches] = useState<readonly ConversationBranchView[]>([])
+  const [activeBranchId, setActiveBranchId] = useState<string | null>(null)
   const [conversationSearch, setConversationSearch] = useState('')
   const [conversationTab, setConversationTab] = useState<AssistantTab>('recent')
   const [messagesState, setMessagesState] = useState<PageState>('empty')
@@ -141,6 +155,7 @@ export function AssistantPage({ services }: V2PageProps) {
   const streamConversationIdRef = useRef('')
   const cancelRequestedRef = useRef(false)
   const messageLoadGenerationRef = useRef(0)
+  const branchLoadGenerationRef = useRef(0)
 
   const selectedKnowledgeBase = useMemo(
     () => knowledgeBases.find((knowledgeBase) => knowledgeBase.id === selectedKbId) ?? null,
@@ -211,6 +226,33 @@ export function AssistantPage({ services }: V2PageProps) {
     })
   }, [services.conversations])
 
+  const loadBranches = useCallback(async (conversationId: string) => {
+    const generation = branchLoadGenerationRef.current + 1
+    branchLoadGenerationRef.current = generation
+    if (!conversationId) {
+      setBranchesState('empty')
+      setBranches([])
+      setActiveBranchId(null)
+      branchLoadGenerationRef.current = 0
+      return
+    }
+    setBranchesState('loading')
+    setBranches([])
+    setActiveBranchId(null)
+    const result = await services.conversations.listBranches(conversationId)
+    if (generation !== branchLoadGenerationRef.current) return
+    branchLoadGenerationRef.current = 0
+    setBranchesState(result.state)
+    if (result.data) {
+      setBranches(result.data.branches)
+      setActiveBranchId(result.data.activeBranchId)
+      return
+    }
+    setBranches([])
+    setActiveBranchId(null)
+    setOperationNotice(formatOperationError(result.error, 'CONVERSATION_BRANCHES_LOAD_FAILED', '会话分支加载失败。'))
+  }, [services.conversations])
+
   const loadFavorites = useCallback(async () => {
     setFavoritesState('loading')
     const result = await services.favorites.list({ resourceType: 'CONVERSATION' })
@@ -277,7 +319,7 @@ export function AssistantPage({ services }: V2PageProps) {
     }
   }, [currentConvFavorited, currentConvFavoriting, isStreaming, loadFavorites, selectedConversation, selectedConversationId, services.favorites])
 
-  const loadMessages = useCallback(async (conversationId: string) => {
+  const loadMessages = useCallback(async (conversationId: string, branchId?: string) => {
     const generation = messageLoadGenerationRef.current + 1
     messageLoadGenerationRef.current = generation
     if (!conversationId) {
@@ -288,7 +330,7 @@ export function AssistantPage({ services }: V2PageProps) {
     }
     setMessagesState('loading')
     setMessagesError(null)
-    const result = await services.conversations.messages(conversationId)
+    const result = await services.conversations.messages(conversationId, branchId)
     if (generation !== messageLoadGenerationRef.current) return
     setMessagesState(result.state)
     setMessagesError(result.error ?? null)
@@ -313,6 +355,10 @@ export function AssistantPage({ services }: V2PageProps) {
   }, [loadCapabilities, loadConversations, loadFavorites, loadKnowledgeBases])
 
   useEffect(() => {
+    void loadBranches(selectedConversationId)
+  }, [loadBranches, selectedConversationId])
+
+  useEffect(() => {
     if (isStreaming) return
     void checkCurrentFavorite(selectedConversationId)
   }, [checkCurrentFavorite, isStreaming, selectedConversationId])
@@ -326,8 +372,9 @@ export function AssistantPage({ services }: V2PageProps) {
 
   useEffect(() => {
     if (isStreaming) return
-    void loadMessages(selectedConversationId)
-  }, [isStreaming, loadMessages, selectedConversationId])
+    if (selectedConversationId && branchesState === 'loading') return
+    void loadMessages(selectedConversationId, activeBranchId ?? undefined)
+  }, [activeBranchId, branchesState, isStreaming, loadMessages, selectedConversationId])
 
   const updateTransientAssistant = useCallback((generation: number, update: (message: AssistantDisplayMessage) => AssistantDisplayMessage | null) => {
     if (generation !== streamGenerationRef.current) return
@@ -398,7 +445,7 @@ export function AssistantPage({ services }: V2PageProps) {
         if (conversationId) {
           setSelectedConversationId(conversationId)
           void loadConversations(conversationId)
-          void loadMessages(conversationId)
+          void loadMessages(conversationId, activeBranchId ?? undefined)
         }
         break
       }
@@ -416,7 +463,7 @@ export function AssistantPage({ services }: V2PageProps) {
         setProtocolErrors((current) => [...current, event.code].slice(-5))
         break
     }
-  }, [lastQuestion, loadConversations, loadMessages, updateTransientAssistant])
+  }, [activeBranchId, lastQuestion, loadConversations, loadMessages, updateTransientAssistant])
 
   const handleCancel = useCallback(async () => {
     if (!isStreaming && !cancelRequestedRef.current) return
@@ -562,6 +609,9 @@ export function AssistantPage({ services }: V2PageProps) {
       return
     }
     setSelectedConversationId('')
+    setBranchesState('empty')
+    setBranches([])
+    setActiveBranchId(null)
     setMessages([])
     setMessagesState('empty')
     setMessagesError(null)
@@ -579,6 +629,9 @@ export function AssistantPage({ services }: V2PageProps) {
       return
     }
     setSelectedConversationId(conversationId)
+    setBranchesState('empty')
+    setBranches([])
+    setActiveBranchId(null)
     setMessages([])
     setMessagesState('loading')
     setStreamState('idle')
@@ -587,6 +640,25 @@ export function AssistantPage({ services }: V2PageProps) {
     setPreviewDocument(null)
     setOperationNotice(null)
   }, [isStreaming])
+
+  const handleSelectBranch = useCallback(async (branchId: string) => {
+    if (isStreaming) {
+      setOperationNotice('当前回答仍在流式生成，停止后才能切换分支。')
+      return
+    }
+    if (!selectedConversationId || !branchId || branchId === activeBranchId) return
+    const result = await services.conversations.setActiveBranch(selectedConversationId, branchId)
+    if (result.state !== 'ready') {
+      setOperationNotice(formatOperationError(result.error, 'CONVERSATION_BRANCH_SWITCH_FAILED', '会话分支切换失败。'))
+      return
+    }
+    setActiveBranchId(branchId)
+    setMessages([])
+    setMessagesState('loading')
+    setMessagesError(null)
+    setOperationNotice('会话分支已切换，正在加载当前分支消息。')
+    await loadMessages(selectedConversationId, branchId)
+  }, [activeBranchId, isStreaming, loadMessages, selectedConversationId, services.conversations])
 
   const handleDeleteConversation = useCallback(async () => {
     if (!selectedConversation || isStreaming || !window.confirm(`确认删除会话「${selectedConversation.title || '未命名会话'}」？`)) return
@@ -597,6 +669,9 @@ export function AssistantPage({ services }: V2PageProps) {
     }
     setMessages([])
     setSelectedConversationId('')
+    setBranchesState('empty')
+    setBranches([])
+    setActiveBranchId(null)
     setOperationNotice('会话已由服务端删除，正在刷新真实会话列表。')
     await loadConversations()
   }, [isStreaming, loadConversations, selectedConversation, services.conversations])
@@ -727,6 +802,18 @@ export function AssistantPage({ services }: V2PageProps) {
                   {knowledgeBases.map((knowledgeBase) => <option value={knowledgeBase.id} key={knowledgeBase.id}>{knowledgeBase.name}</option>)}
                 </select>
               </label>
+              {branches.length > 0 ? (
+                <label>分支
+                  <select
+                    aria-label="选择会话分支"
+                    value={activeBranchId ?? ''}
+                    onChange={(event) => void handleSelectBranch(event.target.value)}
+                    disabled={branchesState === 'loading' || isStreaming}
+                  >
+                    {branches.map((branch, index) => <option value={branch.id} key={branch.id}>{branchOptionLabel(branch, index)}</option>)}
+                  </select>
+                </label>
+              ) : null}
               {streamTurnId ? <span className="v2-m4-turn-badge">turn_id 已绑定</span> : null}
             </div>
           </div>
@@ -787,7 +874,7 @@ export function AssistantPage({ services }: V2PageProps) {
         {knowledgeState === 'permission-denied' || knowledgeState === 'error' ? <StatePanel state={knowledgeState} message="授权知识库加载失败，无法开始问答。" /> : null}
         {knowledgeState === 'empty' ? <StatePanel state="empty" message="当前主体没有可用知识库，问答发送已禁用。" reason="发送前必须选择一个当前授权 KB，不使用设计稿样本补位。" /> : null}
         {messagesState === 'loading' && messages.length === 0 ? <StatePanel state="loading" message="正在加载当前会话消息。" /> : null}
-        {messagesState === 'error' || messagesState === 'permission-denied' ? <div className="v2-m4-message-state"><StatePanel state={messagesState} message={messagesError?.message ?? '会话消息加载失败。'} /><button type="button" onClick={() => void loadMessages(selectedConversationId)}>重试</button></div> : null}
+        {messagesState === 'error' || messagesState === 'permission-denied' ? <div className="v2-m4-message-state"><StatePanel state={messagesState} message={messagesError?.message ?? '会话消息加载失败。'} /><button type="button" onClick={() => void loadMessages(selectedConversationId, activeBranchId ?? undefined)}>重试</button></div> : null}
         {operationNotice ? <div className="v2-m4-operation-notice" role="status">{operationNotice}</div> : null}
         {streamError ? <div className="v2-m4-operation-notice v2-m4-operation-notice--error" role="alert"><strong>{streamError.code}</strong> {streamError.message}{streamError.requestId ? `（request_id：${streamError.requestId}）` : ''}{streamState === 'error' && lastQuestion ? <button type="button" className="v2-m4-retry-question" onClick={() => { setComposerValue(lastQuestion); setOperationNotice('已恢复最后一次真实问题，请确认后手动重试。') }}>恢复问题到输入框</button> : null}</div> : null}
         {protocolErrors.length > 0 ? <div className="v2-m4-protocol-notice" role="status"><Funnel size={14} />已忽略 {protocolErrors.length} 个异常流事件（{protocolErrors.join('、')}），未更新回答内容；详情已隐藏。</div> : null}

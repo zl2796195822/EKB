@@ -957,10 +957,30 @@ export class ApiClient {
 
   async getConversationMessages(
     conversationId: string,
+    branchId?: string,
   ): Promise<ConversationMessage[]> {
-    return this.request<ConversationMessage[]>(
-      `/conversations/${encodeURIComponent(conversationId)}/messages`,
-    )
+    const path = branchId
+      ? `/chat/conversations/${encodeURIComponent(conversationId)}/messages?branch_id=${encodeURIComponent(branchId)}`
+      : `/conversations/${encodeURIComponent(conversationId)}/messages`
+    type ConversationMessagesResponse =
+      | ConversationMessage[]
+      | {
+          conversation_id: string
+          branch_id: string
+          messages: ConversationMessage[]
+        }
+
+    const response = await this.request<ConversationMessagesResponse>(path)
+    if (Array.isArray(response)) return response
+    if (
+      response !== null &&
+      typeof response === 'object' &&
+      'messages' in response &&
+      Array.isArray(response.messages)
+    ) {
+      return response.messages
+    }
+    return []
   }
 
   async deleteConversation(conversationId: string): Promise<void> {
@@ -978,6 +998,47 @@ export class ApiClient {
       {
         method: 'PATCH',
         body: JSON.stringify({ title }),
+      },
+    )
+  }
+
+  async listConversationBranches(conversationId: string): Promise<{
+    conversation_id: string
+    active_branch_id: string | null
+    branches: Array<{
+      id: string
+      conversation_id: string
+      parent_branch_id: string | null
+      fork_message_id: string | null
+      label: string | null
+      created_by: string
+      created_at: string
+    }>
+  }> {
+    return this.request<{
+      conversation_id: string
+      active_branch_id: string | null
+      branches: Array<{
+        id: string
+        conversation_id: string
+        parent_branch_id: string | null
+        fork_message_id: string | null
+        label: string | null
+        created_by: string
+        created_at: string
+      }>
+    }>(`/chat/conversations/${encodeURIComponent(conversationId)}/branches`)
+  }
+
+  async setActiveConversationBranch(
+    conversationId: string,
+    branchId: string,
+  ): Promise<{ conversation_id: string; active_branch_id: string }> {
+    return this.request<{ conversation_id: string; active_branch_id: string }>(
+      `/chat/conversations/${encodeURIComponent(conversationId)}/active-branch`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ branch_id: branchId }),
       },
     )
   }

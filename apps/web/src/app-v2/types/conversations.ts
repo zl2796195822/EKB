@@ -9,6 +9,16 @@ export interface ConversationView {
   readonly archivedAt: string | null
 }
 
+export interface ConversationBranchView {
+  readonly id: string
+  readonly conversationId: string
+  readonly parentBranchId: string | null
+  readonly forkMessageId: string | null
+  readonly label: string | null
+  readonly createdBy: string
+  readonly createdAt: string
+}
+
 export type ConversationMessageRole = 'user' | 'assistant' | 'system'
 
 export interface ConversationMessageView {
@@ -30,6 +40,15 @@ export interface ConversationMessagesResult {
   readonly error?: AdapterError
 }
 
+export interface ConversationBranchesResult {
+  readonly state: PageState
+  readonly data?: {
+    readonly activeBranchId: string | null
+    readonly branches: readonly ConversationBranchView[]
+  }
+  readonly error?: AdapterError
+}
+
 export interface ConversationMutationResult {
   readonly state: PageState
   readonly error?: AdapterError
@@ -37,7 +56,9 @@ export interface ConversationMutationResult {
 
 export interface ConversationsServices {
   readonly list: () => Promise<ConversationListResult>
-  readonly messages: (conversationId: string) => Promise<ConversationMessagesResult>
+  readonly messages: (conversationId: string, branchId?: string) => Promise<ConversationMessagesResult>
+  readonly listBranches: (conversationId: string) => Promise<ConversationBranchesResult>
+  readonly setActiveBranch: (conversationId: string, branchId: string) => Promise<ConversationMutationResult>
   readonly remove: (conversationId: string) => Promise<ConversationMutationResult>
   readonly rename: (conversationId: string, title: string) => Promise<ConversationMutationResult>;
 }

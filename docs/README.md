@@ -130,3 +130,10 @@ CR-PH1-T01 + CR-PH1-T03 的第一真实业务切片已在本地工作树实现�
 - DONE-LOCAL：已有 `PATCH /api/v1/chat/conversations/{id}` 已被前端真实接入，覆盖 `ApiClient`、conversation adapter、受控 UI 和服务端刷新；未知客户端异常不泄漏原始 `message`。
 - Share 和 Projects 仍保持 disabled。验证为定向 `2 passed`、全量 Web `12 files / 68 tests passed`、typecheck/build passed；build 保留既有 `>500KB` chunk warning。
 - 证据见 [`evidence/ekb-core-rebuild/local/2026-08-14-conversation-rename.md`](./evidence/ekb-core-rebuild/local/2026-08-14-conversation-rename.md)。本地切片不代表 PH0–PH8 或生产完成；服务器、备份、部署和回滚仍 `NOT RUN/BLOCKED`，生产统一使用 `[production host]` / `[REDACTED]`。
+
+## Conversation branches local closure (2026-08-14)
+
+- DONE-LOCAL：真实端点为 `GET /chat/conversations/{id}/branches`、`POST /chat/conversations/{id}/active-branch`、`GET /chat/conversations/{id}/messages?branch_id=`；`ApiClient` 兼容旧数组与新 `{messages}`，adapter 完成分支映射和安全错误，`AssistantPage` 使用真实选择器并刷新消息。
+- 验证：定向 `v3.conversation-branches.test.ts` 为 `4 passed`；`npm run test` 为 `13 files / 72 tests passed`；`npm run typecheck`、`npm run build`、`git diff --check` 通过。当前浏览器未认证。
+- Share/Projects 保持 disabled；本地切片不能宣称 PH0-PH8 或生产完成，生产/服务器、备份、部署和回滚仍 `NOT RUN/BLOCKED`。
+- 证据见 [`evidence/ekb-core-rebuild/local/2026-08-14-conversation-branches.md`](./evidence/ekb-core-rebuild/local/2026-08-14-conversation-branches.md)。不记录秘密。

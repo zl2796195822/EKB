@@ -559,3 +559,10 @@ Nginx 配置：
 - 已完成真实会话重命名：后端已有 `PATCH /api/v1/chat/conversations/{id}` 接入前端 `ApiClient`、adapter、受控 UI 和服务端刷新；未知客户端异常不泄漏原始 `message`。Share/Projects 仍 disabled。
 - 验证：定向 Vitest `2 passed`；Web `12 files / 68 tests passed`；typecheck/build passed（build 有既有 `>500KB` warning）。
 - 仅为本地 `DONE-LOCAL`；PH0–PH8、服务器、备份、部署和回滚未执行，仍 `NOT RUN/BLOCKED`；不记录秘密。
+
+## 2026-08-14 会话分支本地切片
+
+- DONE-LOCAL：真实接入会话分支端点 `GET /chat/conversations/{id}/branches`、`POST /chat/conversations/{id}/active-branch` 和 `GET /chat/conversations/{id}/messages?branch_id=`；`ApiClient` 兼容旧数组与新 `{messages}` 响应，adapter 完成分支映射和安全错误，`AssistantPage` 使用真实选择器并刷新消息。
+- 验证：`npx vitest run src/app-v2/tests/v3.conversation-branches.test.ts` 为 `4 passed`；`npm run test` 为 `13 files / 72 tests passed`；`npm run typecheck`、`npm run build`、`git diff --check` 通过。
+- 当前浏览器未认证；Share/Projects 保持 disabled。本地结果不代表 PH0-PH8 或生产完成。
+- 生产/服务器、备份、部署和回滚未执行，仍为 `NOT RUN/BLOCKED`；不记录密码、token、凭据或私有地址。证据见 `docs/evidence/ekb-core-rebuild/local/2026-08-14-conversation-branches.md`。
