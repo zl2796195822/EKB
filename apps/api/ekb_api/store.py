@@ -907,7 +907,9 @@ class SqlStore:
                 embed_inputs = [
                     " / ".join(cr.section_path) + " " + cr.content for cr in chunk_results
                 ]
-                embeddings = embed_batch(embed_inputs)
+                embeddings = embed_batch(
+                    embed_inputs, tenant_id=auth.tenant_id, user_id=auth.actor_id
+                )
 
             with SessionLocal() as session:
                 session.query(models.Chunk).filter_by(
@@ -1084,7 +1086,13 @@ class SqlStore:
         )
 
     def search_with_context(
-        self, ctx: SearchContext, query: str, top_k: int
+        self,
+        ctx: SearchContext,
+        query: str,
+        top_k: int,
+        *,
+        tenant_id: str | None = None,
+        user_id: str | None = None,
     ) -> list[Chunk]:
         """在预取的检索上下文上执行单查询检索（BM25 + 语义门禁 + Rerank）。
 
@@ -1107,7 +1115,7 @@ class SqlStore:
         semantic_scores = [0.0] * len(rows)
         candidates: set[int] = set()
         if ctx.has_embeddings:
-            query_vec = embed_one(query)
+            query_vec = embed_one(query, tenant_id=tenant_id, user_id=user_id)
             qdim = len(query_vec)
             threshold = settings.retrieval_cosine_threshold
             for i, row in enumerate(rows):
@@ -1185,7 +1193,7 @@ class SqlStore:
         semantic_scores = [0.0] * len(rows)
         candidates: set[int] = set()
         if has_embeddings:
-            query_vec = embed_one(query)
+            query_vec = embed_one(query, tenant_id=auth.tenant_id, user_id=auth.actor_id)
             qdim = len(query_vec)
             threshold = settings.retrieval_cosine_threshold
             for i, row in enumerate(rows):
@@ -1245,6 +1253,45 @@ class SqlStore:
             session.add(conversation)
             session.commit()
             session.refresh(conversation)
+            # v4 chat graph：新会话立即建立 root branch 并回填 active_branch_id，
+            # 保证 entrypoint 的 v4_007 verify（要求每会话 active_branch_id 非空）
+            # 在任意时刻重启都能通过，而非依赖会话的下一次写入触发自愈。
+            if getattr(conversation, "active_branch_id", None) is None:
+                try:
+                    from ekb_api.core.db import get_engine  # noqa: PLC0415
+                    from ekb_api.services.conversations import (  # noqa: PLC0415
+                        ConversationGraphService,
+                    )
+
+                    root = ConversationGraphService(get_engine()).ensure_root_branch(
+                        tenant_id=auth.tenant_id,
+                        conversation_id=conversation.id,
+                        user_id=auth.actor_id,
+                        connection=session.connection(),
+                    )
+                    session.execute(
+                        text(
+                            "UPDATE conversations SET active_branch_id=:branch_id "
+                            "WHERE id=:conversation_id AND tenant_id=:tenant_id "
+                            "AND active_branch_id IS NULL"
+                        ),
+                        {
+                            "branch_id": root.id,
+                            "conversation_id": conversation.id,
+                            "tenant_id": auth.tenant_id,
+                        },
+                    )
+                    session.commit()
+                    session.refresh(conversation)
+                except Exception:  # noqa: BLE001
+                    # 会话主体已落库；branch 自愈路径（_record_qa_turn）仍会兜底。
+                    from ekb_api.core.logging import get_logger  # noqa: PLC0415
+
+                    get_logger("ekb.store").warning(
+                        "create_conversation root-branch backfill failed for %s",
+                        conversation.id,
+                        exc_info=True,
+                    )
             return Conversation(
                 id=conversation.id,
                 tenant_id=conversation.tenant_id,

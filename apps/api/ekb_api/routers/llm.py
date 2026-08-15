@@ -7,6 +7,7 @@ from pydantic import BaseModel
 from starlette import status
 
 from ekb_api.core.auth import get_live_auth_context
+from ekb_api.core.authorization import assert_team_user_manage
 from ekb_api.domain import AuthContext
 from ekb_api.services.llm_provider_catalog import list_preset_providers
 from ekb_api.services.v3_llm import (
@@ -106,8 +107,8 @@ class PatchLLMModelRequest(BaseModel):
 # ---- Response helpers ----
 
 
-def _provider_dict(p: LLMProvider) -> dict[str, Any]:
-    return {
+def _provider_dict(p: LLMProvider, *, is_admin: bool = True) -> dict[str, Any]:
+    d = {
         "id": p.id,
         "tenant_id": p.tenant_id,
         "user_id": p.user_id,
@@ -131,6 +132,15 @@ def _provider_dict(p: LLMProvider) -> dict[str, Any]:
         "auth_optional": p.auth_optional,
         "has_api_key": p.has_api_key,
     }
+    # 成员（非管理员）只能看到 provider 名称与可选模型，不能看到模型服务配置
+    # （endpoint / api_key 标签 / 鉴权方式 / 自定义设置）。
+    if not is_admin:
+        d.pop("endpoint_configs", None)
+        d.pop("api_key_label", None)
+        d.pop("auth_type", None)
+        d.pop("default_chat_endpoint", None)
+        d.pop("settings", None)
+    return d
 
 
 def _model_dict(m: LLMModel) -> dict[str, Any]:
@@ -163,8 +173,9 @@ def _model_dict(m: LLMModel) -> dict[str, Any]:
 def get_me_llm_providers(
     auth: Annotated[AuthContext, Depends(get_live_auth_context)],
 ) -> dict[str, Any]:
+    is_admin = str(auth.tenant_role) in ("OWNER", "ADMIN")
     providers = list_llm_providers(auth)
-    return {"items": [_provider_dict(p) for p in providers]}
+    return {"items": [_provider_dict(p, is_admin=is_admin) for p in providers]}
 
 
 @router.get("/llm/providers/catalog")
@@ -180,11 +191,12 @@ def get_me_llm_provider(
     provider_id: str,
     auth: Annotated[AuthContext, Depends(get_live_auth_context)],
 ) -> dict[str, Any]:
+    is_admin = str(auth.tenant_role) in ("OWNER", "ADMIN")
     provider = get_llm_provider(auth, provider_id)
     if provider is None:
         from ekb_api.core.errors import ApiError
         raise ApiError(status.HTTP_404_NOT_FOUND, "NOT_FOUND", "LLM Provider 不存在")
-    return _provider_dict(provider)
+    return _provider_dict(provider, is_admin=is_admin)
 
 
 @router.post("/llm/providers")
@@ -192,6 +204,7 @@ def post_me_llm_provider(
     payload: CreateLLMProviderRequest,
     auth: Annotated[AuthContext, Depends(get_live_auth_context)],
 ) -> dict[str, Any]:
+    assert_team_user_manage(auth)
     provider = create_llm_provider(auth, payload.model_dump(exclude_unset=True))
     return _provider_dict(provider)
 
@@ -202,6 +215,7 @@ def patch_me_llm_provider(
     payload: PatchLLMProviderRequest,
     auth: Annotated[AuthContext, Depends(get_live_auth_context)],
 ) -> dict[str, Any]:
+    assert_team_user_manage(auth)
     provider = update_llm_provider(auth, provider_id, payload.model_dump(exclude_unset=True))
     return _provider_dict(provider)
 
@@ -211,6 +225,7 @@ def delete_me_llm_provider(
     provider_id: str,
     auth: Annotated[AuthContext, Depends(get_live_auth_context)],
 ) -> dict[str, str]:
+    assert_team_user_manage(auth)
     ok = delete_llm_provider(auth, provider_id)
     if not ok:
         from ekb_api.core.errors import ApiError
@@ -224,6 +239,7 @@ def patch_me_llm_provider_enable(
     payload: EnableLLMProviderRequest,
     auth: Annotated[AuthContext, Depends(get_live_auth_context)],
 ) -> dict[str, Any]:
+    assert_team_user_manage(auth)
     provider = enable_llm_provider(auth, provider_id, payload.enabled)
     return _provider_dict(provider)
 
@@ -258,6 +274,7 @@ def post_me_llm_provider_model(
     payload: CreateLLMModelRequest,
     auth: Annotated[AuthContext, Depends(get_live_auth_context)],
 ) -> dict[str, Any]:
+    assert_team_user_manage(auth)
     model = create_llm_model(auth, provider_id, payload.model_dump(exclude_unset=True))
     return _model_dict(model)
 
@@ -268,6 +285,7 @@ def patch_me_llm_model(
     payload: PatchLLMModelRequest,
     auth: Annotated[AuthContext, Depends(get_live_auth_context)],
 ) -> dict[str, Any]:
+    assert_team_user_manage(auth)
     model = update_llm_model(auth, model_id, payload.model_dump(exclude_unset=True))
     return _model_dict(model)
 
@@ -277,6 +295,7 @@ def delete_me_llm_model(
     model_id: str,
     auth: Annotated[AuthContext, Depends(get_live_auth_context)],
 ) -> dict[str, str]:
+    assert_team_user_manage(auth)
     ok = delete_llm_model(auth, model_id)
     if not ok:
         from ekb_api.core.errors import ApiError
@@ -289,5 +308,6 @@ def post_me_llm_provider_models_sync(
     provider_id: str,
     auth: Annotated[AuthContext, Depends(get_live_auth_context)],
 ) -> dict[str, Any]:
+    assert_team_user_manage(auth)
     result = sync_models_from_provider(auth, provider_id)
     return result

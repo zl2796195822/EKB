@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from typing_extensions import Annotated
-from typing import Optional
+from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends
 from starlette import status
@@ -44,7 +43,10 @@ def list_messages(
     return [
         {
             "id": message.id,
-            "role": message.role,
+            # This is the legacy conversation endpoint.  Its established
+            # contract uses upper-case roles even though the branch graph
+            # persists canonical lower-case values.
+            "role": message.role.upper(),
             "content": message.content,
             "created_at": message.created_at,
             # Keep the existing response fields and expose the PH6 citation

@@ -6,7 +6,9 @@ import logging
 import threading
 import time
 from collections.abc import AsyncIterator
+from types import SimpleNamespace
 from typing import Annotated
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Path, Request
 from fastapi.responses import StreamingResponse
@@ -293,6 +295,123 @@ def _sse_v2(event: str, turn_id: str, request_id: str, seq: int, payload: dict) 
 
 
 # ---------------------------------------------------------------------------
+# Conversation Engine (PH1) helpers: event-name mapping + best-effort terminal CAS
+# ---------------------------------------------------------------------------
+
+
+def _ce_map_event(event: str, payload_inner: dict) -> tuple[str, dict]:
+    """Map legacy SSE event names to canonical turn_events event types.
+
+    SSE output to the client keeps the legacy event name (front-end
+    compatibility); only the persisted ``turn_events`` row uses the new
+    canonical name from spec 02 §5.  Stage events are enriched with the
+    ``state`` field so ``turn.stage`` rows are self-describing.
+    """
+    if event == "retrieval_started":
+        return "turn.stage", {**payload_inner, "state": "RETRIEVING"}
+    if event == "generation_started":
+        return "turn.stage", {**payload_inner, "state": "STREAMING"}
+    if event == "done":
+        if payload_inner.get("finish_reason") == FinishReason.CANCELLED.value:
+            return "turn.stopped", payload_inner
+        return "turn.completed", payload_inner
+    mapping = {
+        "request": "turn.accepted",
+        "retrieval_completed": "retrieval.completed",
+        "compaction_performed": "context.compacted",
+        "content_delta": "message.delta",
+        "citations": "citation.upsert",
+        "error": "turn.failed",
+    }
+    return mapping.get(event, event), payload_inner
+
+
+def _ce_finish_turn(
+    turns,
+    *,
+    tenant_id: str,
+    turn_id: str,
+    finish_reason: str,
+    last_seq: int,
+    assistant_content: str | None = None,
+    actual_provider_id: str | None = None,
+    actual_model_id: str | None = None,
+) -> None:
+    """Best-effort terminal CAS via TurnService (spec 02 §5).
+
+    COMPLETED is only reachable from STREAMING; STOPPED only from
+    CANCEL_REQUESTED; FAILED from any active state.  When the desired
+    terminal is not reachable from the current state we degrade to FAILED
+    so the turn never stays stuck in an active state.
+    """
+    from ekb_api.services.turns import (  # noqa: PLC0415
+        BUILDING_CONTEXT,
+        CANCEL_REQUESTED,
+        COMPLETED,
+        FAILED,
+        QUEUED,
+        RETRIEVING,
+        STOPPED,
+        STREAMING,
+        TERMINAL_STATES,
+        TurnTerminalConflict,
+        TurnTransitionError,
+    )
+
+    terminal_map = {
+        FinishReason.STOP.value: COMPLETED,
+        FinishReason.REFUSAL.value: COMPLETED,
+        FinishReason.CANCELLED.value: STOPPED,
+        FinishReason.TIMEOUT.value: FAILED,
+        FinishReason.ERROR.value: FAILED,
+    }
+    terminal_state = terminal_map.get(finish_reason, FAILED)
+    try:
+        current = turns.get(tenant_id=tenant_id, turn_id=turn_id).state
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("ce_finish_turn get state failed turn_id=%s: %s", turn_id, exc)
+        return
+    if current in TERMINAL_STATES:
+        return
+
+    if terminal_state == COMPLETED:
+        attempts = [(STREAMING, COMPLETED)]
+    elif terminal_state == STOPPED:
+        attempts = [(CANCEL_REQUESTED, STOPPED)]
+    else:
+        attempts = [
+            (s, FAILED)
+            for s in (STREAMING, BUILDING_CONTEXT, RETRIEVING, QUEUED, CANCEL_REQUESTED)
+        ]
+    # Fallback: degrade to FAILED (reachable from every active state) so the
+    # turn never lingers active when the desired terminal is unreachable.
+    if terminal_state != FAILED:
+        attempts.extend(
+            (s, FAILED)
+            for s in (STREAMING, BUILDING_CONTEXT, RETRIEVING, QUEUED, CANCEL_REQUESTED)
+        )
+
+    for expected, terminal in attempts:
+        if expected != current:
+            continue
+        try:
+            turns.finish(
+                tenant_id=tenant_id,
+                turn_id=turn_id,
+                expected_state=expected,
+                terminal_state=terminal,
+                finish_reason=finish_reason,
+                last_seq=last_seq,
+                actual_provider_id=actual_provider_id,
+                actual_model_id=actual_model_id,
+                assistant_content=assistant_content,
+            )
+            return
+        except (TurnTerminalConflict, TurnTransitionError):
+            continue
+
+
+# ---------------------------------------------------------------------------
 # Delta 合并器：按 tokens/bytes/time 三条件 flush，平衡 TTFB 与网络包大小
 # ---------------------------------------------------------------------------
 
@@ -398,6 +517,9 @@ async def ask(
     stream_version = payload.options.stream_version if settings.sse_v2_enabled else 1
     # v1 请求仍然保留老协议，避免老前端回归
     use_v2 = stream_version >= 2
+    # PH1 Conversation Engine: when enabled, turn creation flows through
+    # ConversationApplicationService and events persist to turn_events.
+    ce_turn_engine_enabled = settings.ce_turn_engine_enabled
 
     # M2-7 数据出域策略
     tenant = store.get_tenant_by_id(auth.tenant_id)
@@ -535,49 +657,108 @@ async def ask(
             {"reason": "VISION_MODEL_REQUIRED", "model": requested_model},
         )
 
-    # 预写消息：USER 正常；ASSISTANT 先为空占位（v2 下 turn_id 关联）。
-    user_message = store.save_message(
-        auth, conversation.id, "USER", payload.question, turn_id=turn_id
-    )
-    if payload.options.attachment_doc_ids:
-        try:
-            AttachmentService(get_engine()).bind(
-                tenant_id=auth.tenant_id,
-                actor_id=auth.actor_id,
-                message_id=user_message.id,
-                attachment_ids=list(payload.options.attachment_doc_ids),
-            )
-        except AttachmentError as exc:
-            raise ApiError(409, "ATTACHMENT_BIND_FAILED", "附件无法绑定到当前消息") from exc
-    assistant_message = store.save_message(
-        auth,
-        conversation.id,
-        "ASSISTANT",
-        "",
-        turn_id=turn_id,
-    )
+    # 预写消息 + Turn 创建。
+    # ce_turn_engine_enabled=True: ConversationApplicationService 单事务创建
+    #   user/assistant 消息 + qa_turn + turn_attempts + resource snapshots。
+    # ce_turn_engine_enabled=False: legacy 内联 store.save_message + store.create_turn。
+    if ce_turn_engine_enabled:
+        from ekb_api.services.conversation_app import ConversationApplicationService
 
-    # Keep a real turn row for both SSE versions so route audits retain their FK.
-    turn_registered = False
-    try:
-        turn_registered = (
-            store.create_turn(
-                auth,
-                turn_id=turn_id,
-                request_id=request_id,
-                conversation_id=conversation.id,
-                assistant_message_id=assistant_message.id,
-                stream_version=2 if use_v2 else 1,
-            )
-            is not None
+        client_turn_id = str(uuid4())
+        app_service = ConversationApplicationService(get_engine())
+        answer_mode = "knowledge_enhanced" if raw_kb_ids else "general"
+        turn_resources = (
+            [{"resource_type": "KB", "resource_id": kb_id} for kb_id in raw_kb_ids]
+            or None
         )
-    except Exception as exc:  # noqa: BLE001
-        logger.warning(
-            "create_turn failed request_id=%s conv_id=%s error_type=%s",
-            request_id,
+        result = app_service.create_turn(
+            tenant_id=auth.tenant_id,
+            actor_id=auth.actor_id,
+            conversation_id=conversation.id,
+            client_turn_id=client_turn_id,
+            request_id=request_id,
+            prompt=payload.question,
+            requested_model_id=selected_model.id if selected_model else None,
+            answer_mode=answer_mode,
+            resources=turn_resources,
+        )
+        turn_id = result.turn_id
+        turn_registered = True
+        user_message = SimpleNamespace(id=result.user_message_id)
+        assistant_message = SimpleNamespace(id=result.assistant_message_id)
+        if payload.options.attachment_doc_ids:
+            try:
+                AttachmentService(get_engine()).bind(
+                    tenant_id=auth.tenant_id,
+                    actor_id=auth.actor_id,
+                    message_id=user_message.id,
+                    attachment_ids=list(payload.options.attachment_doc_ids),
+                )
+            except AttachmentError as exc:
+                raise ApiError(409, "ATTACHMENT_BIND_FAILED", "附件无法绑定到当前消息") from exc
+    else:
+        # legacy 路径：USER 正常；ASSISTANT 先为空占位（v2 下 turn_id 关联）。
+        user_message = store.save_message(
+            auth, conversation.id, "USER", payload.question, turn_id=turn_id
+        )
+        if payload.options.attachment_doc_ids:
+            try:
+                AttachmentService(get_engine()).bind(
+                    tenant_id=auth.tenant_id,
+                    actor_id=auth.actor_id,
+                    message_id=user_message.id,
+                    attachment_ids=list(payload.options.attachment_doc_ids),
+                )
+            except AttachmentError as exc:
+                raise ApiError(409, "ATTACHMENT_BIND_FAILED", "附件无法绑定到当前消息") from exc
+        assistant_message = store.save_message(
+            auth,
             conversation.id,
-            type(exc).__name__,
+            "ASSISTANT",
+            "",
+            turn_id=turn_id,
         )
+
+        # Keep a real turn row for both SSE versions so route audits retain their FK.
+        turn_registered = False
+        try:
+            turn_registered = (
+                store.create_turn(
+                    auth,
+                    turn_id=turn_id,
+                    request_id=request_id,
+                    conversation_id=conversation.id,
+                    assistant_message_id=assistant_message.id,
+                    stream_version=2 if use_v2 else 1,
+                )
+                is not None
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "create_turn failed request_id=%s conv_id=%s error_type=%s",
+                request_id,
+                conversation.id,
+                type(exc).__name__,
+            )
+
+    # PH1: turn_events store + TurnService (CAS state machine) for the new path.
+    if ce_turn_engine_enabled:
+        from ekb_api.services.generation_worker import TurnEventStore
+        from ekb_api.services.turns import (
+            BUILDING_CONTEXT,
+            CANCEL_REQUESTED,
+            QUEUED,
+            RETRIEVING,
+            STREAMING,
+            TERMINAL_STATES,
+            TurnService,
+        )
+
+        _event_store = TurnEventStore(get_engine())
+        _turns = TurnService(get_engine())
+    else:
+        _event_store = None
+        _turns = None
 
     ip_hash, ua_hash = extract_fingerprints(request)
     question_preview = payload.question[:80]
@@ -602,8 +783,41 @@ async def ask(
             nonlocal seq, last_event_at
             seq += 1
             last_event_at = time.perf_counter()
-            # v2: 写回 last_seq（节流：仅每 8 个 seq 或 关键事件写一次，减小 DB 压力）
-            if use_v2 and (seq % 8 == 0 or event in {"done", "error", "retrieval_started", "retrieval_completed", "generation_started"}):
+            if ce_turn_engine_enabled:
+                # PH1: 推进 CAS 状态机（stage 事件），使终态写入时 turn 处于 STREAMING
+                try:
+                    if event == "retrieval_started":
+                        _turns.advance(
+                            tenant_id=auth.tenant_id, turn_id=turn_id,
+                            expected_state=QUEUED, next_state=RETRIEVING,
+                            actor_id=auth.actor_id,
+                        )
+                    elif event == "generation_started":
+                        _turns.advance(
+                            tenant_id=auth.tenant_id, turn_id=turn_id,
+                            expected_state=RETRIEVING, next_state=BUILDING_CONTEXT,
+                            actor_id=auth.actor_id,
+                        )
+                        _turns.advance(
+                            tenant_id=auth.tenant_id, turn_id=turn_id,
+                            expected_state=BUILDING_CONTEXT, next_state=STREAMING,
+                            actor_id=auth.actor_id,
+                        )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("turn advance failed turn_id=%s event=%s: %s", turn_id, event, exc)
+                # 持久化事件到 turn_events（SSE 输出仍用旧事件名保持前端兼容）
+                try:
+                    _mapped_type, _mapped_payload = _ce_map_event(event, payload_inner)
+                    _event_store.append(
+                        tenant_id=auth.tenant_id,
+                        turn_id=turn_id,
+                        event_type=_mapped_type,
+                        payload=_mapped_payload,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("turn_event append failed turn_id=%s event=%s: %s", turn_id, event, exc)
+            elif use_v2 and (seq % 8 == 0 or event in {"done", "error", "retrieval_started", "retrieval_completed", "generation_started"}):
+                # legacy v2: 写回 last_seq（节流：仅每 8 个 seq 或 关键事件写一次，减小 DB 压力）
                 try:
                     store.increment_turn_seq(turn_id, to_seq=seq)
                 except Exception as exc:  # noqa: BLE001
@@ -688,13 +902,31 @@ async def ask(
 
             # 显式取消检查点 1（defensive：DB 读失败默认未取消，不阻断主流程）
             _cancelled = False
-            if use_v2:
+            if ce_turn_engine_enabled:
+                try:
+                    _turn_view = _turns.get(tenant_id=auth.tenant_id, turn_id=turn_id)
+                    _cancelled = _turn_view.state in (CANCEL_REQUESTED, *TERMINAL_STATES)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("ce cancel check (cp1) failed turn_id=%s: %s", turn_id, exc)
+            elif use_v2:
                 try:
                     _cancelled = store.is_turn_cancelled(turn_id)
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("is_turn_cancelled failed turn_id=%s: %s", turn_id, exc)
                     _cancelled = False
-            if use_v2 and _cancelled:
+            if (ce_turn_engine_enabled or use_v2) and _cancelled:
+                if ce_turn_engine_enabled:
+                    try:
+                        _ce_finish_turn(
+                            _turns,
+                            tenant_id=auth.tenant_id,
+                            turn_id=turn_id,
+                            finish_reason=FinishReason.CANCELLED.value,
+                            last_seq=seq,
+                            assistant_content="",
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning("ce finish (cancel cp1) failed: %s", exc)
                 finish_reason = FinishReason.CANCELLED.value
                 yield emit("done", {"finish_reason": finish_reason, "last_seq": seq})
                 return
@@ -947,13 +1179,31 @@ async def ask(
 
             # 显式取消检查点 2（defensive）
             _cancelled2 = False
-            if use_v2:
+            if ce_turn_engine_enabled:
+                try:
+                    _turn_view2 = _turns.get(tenant_id=auth.tenant_id, turn_id=turn_id)
+                    _cancelled2 = _turn_view2.state in (CANCEL_REQUESTED, *TERMINAL_STATES)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("ce cancel check (cp2) failed turn_id=%s: %s", turn_id, exc)
+            elif use_v2:
                 try:
                     _cancelled2 = store.is_turn_cancelled(turn_id)
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("is_turn_cancelled (cp2) failed turn_id=%s: %s", turn_id, exc)
                     _cancelled2 = False
-            if use_v2 and _cancelled2:
+            if (ce_turn_engine_enabled or use_v2) and _cancelled2:
+                if ce_turn_engine_enabled:
+                    try:
+                        _ce_finish_turn(
+                            _turns,
+                            tenant_id=auth.tenant_id,
+                            turn_id=turn_id,
+                            finish_reason=FinishReason.CANCELLED.value,
+                            last_seq=seq,
+                            assistant_content="",
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning("ce finish (cancel cp2) failed: %s", exc)
                 finish_reason = FinishReason.CANCELLED.value
                 yield emit("done", {"finish_reason": finish_reason, "last_seq": seq})
                 return
@@ -1073,20 +1323,39 @@ async def ask(
                     while True:
                         # 显式取消检查点 3（每 token, defensive）
                         _cancelled3 = False
-                        if use_v2:
+                        if ce_turn_engine_enabled:
+                            try:
+                                _turn_view3 = _turns.get(tenant_id=auth.tenant_id, turn_id=turn_id)
+                                _cancelled3 = _turn_view3.state in (CANCEL_REQUESTED, *TERMINAL_STATES)
+                            except Exception as exc:  # noqa: BLE001
+                                logger.warning("ce cancel check (cp3) failed turn_id=%s: %s", turn_id, exc)
+                        elif use_v2:
                             try:
                                 _cancelled3 = store.is_turn_cancelled(turn_id)
                             except Exception as exc:  # noqa: BLE001
                                 logger.warning("is_turn_cancelled (cp3) failed turn_id=%s: %s", turn_id, exc)
                                 _cancelled3 = False
-                        if use_v2 and _cancelled3:
+                        if (ce_turn_engine_enabled or use_v2) and _cancelled3:
                             finish_reason = FinishReason.CANCELLED.value
-                            try:
-                                store.update_message_content(
-                                    auth, assistant_message.id, full_answer
-                                )
-                            except Exception:  # noqa: BLE001
-                                pass
+                            if ce_turn_engine_enabled:
+                                try:
+                                    _ce_finish_turn(
+                                        _turns,
+                                        tenant_id=auth.tenant_id,
+                                        turn_id=turn_id,
+                                        finish_reason=finish_reason,
+                                        last_seq=seq,
+                                        assistant_content=full_answer,
+                                    )
+                                except Exception as exc:  # noqa: BLE001
+                                    logger.warning("ce finish (cancel cp3) failed: %s", exc)
+                            else:
+                                try:
+                                    store.update_message_content(
+                                        auth, assistant_message.id, full_answer
+                                    )
+                                except Exception:  # noqa: BLE001
+                                    pass
                             yield emit("done", {"finish_reason": finish_reason, "last_seq": seq})
                             return
 
@@ -1367,22 +1636,36 @@ async def ask(
         finally:
             # 写回 turn 最终状态（Step 1.2/1.5：全部 defensive，避免审计/记录失败影响主流程）
             if turn_registered:
-                status_map = {
-                    FinishReason.STOP.value: TurnStatus.COMPLETED.value,
-                    FinishReason.REFUSAL.value: TurnStatus.COMPLETED.value,
-                    FinishReason.CANCELLED.value: TurnStatus.CANCELLED.value,
-                    FinishReason.TIMEOUT.value: TurnStatus.TIMEOUT.value,
-                    FinishReason.ERROR.value: TurnStatus.ERROR.value,
-                }
-                try:
-                    store.complete_turn(
-                        turn_id,
-                        status=status_map.get(finish_reason, TurnStatus.ERROR.value),
-                        finish_reason=finish_reason,
-                        last_seq=seq,
-                    )
-                except Exception as exc2:  # noqa: BLE001
-                    logger.warning("complete_turn failed turn_id=%s: %s", turn_id, exc2)
+                if ce_turn_engine_enabled:
+                    # PH1: TurnService CAS 终态写入（first-terminal-wins）
+                    try:
+                        _ce_finish_turn(
+                            _turns,
+                            tenant_id=auth.tenant_id,
+                            turn_id=turn_id,
+                            finish_reason=finish_reason,
+                            last_seq=seq,
+                            assistant_content=generated_output_text or None,
+                        )
+                    except Exception as exc2:  # noqa: BLE001
+                        logger.warning("ce_finish_turn failed turn_id=%s: %s", turn_id, exc2)
+                else:
+                    status_map = {
+                        FinishReason.STOP.value: TurnStatus.COMPLETED.value,
+                        FinishReason.REFUSAL.value: TurnStatus.COMPLETED.value,
+                        FinishReason.CANCELLED.value: TurnStatus.CANCELLED.value,
+                        FinishReason.TIMEOUT.value: TurnStatus.TIMEOUT.value,
+                        FinishReason.ERROR.value: TurnStatus.ERROR.value,
+                    }
+                    try:
+                        store.complete_turn(
+                            turn_id,
+                            status=status_map.get(finish_reason, TurnStatus.ERROR.value),
+                            finish_reason=finish_reason,
+                            last_seq=seq,
+                        )
+                    except Exception as exc2:  # noqa: BLE001
+                        logger.warning("complete_turn failed turn_id=%s: %s", turn_id, exc2)
             if use_v2:
                 # 取消/超时/错误的占位消息：若内容为空则隐藏，避免历史遗留空 assistant bubble
                 if finish_reason in {FinishReason.CANCELLED.value, FinishReason.TIMEOUT.value, FinishReason.ERROR.value}:
@@ -1492,7 +1775,42 @@ async def cancel_turn(
 
     幂等：重复调用同 turn_id 不会报错，仅第一次对 running turn 生效。
     权限：仅同租户 actor 可取消；跨租户 turn 返回 not_found（不泄露存在性）。
+
+    PH3-4: When ce_turn_engine_enabled, uses TurnService.request_cancel (CAS
+    state machine → CANCEL_REQUESTED) instead of legacy store.request_cancel_turn.
     """
+    settings = get_settings()
+    if settings.ce_turn_engine_enabled:
+        # New path: CAS state machine via TurnService
+        from ekb_api.services.turns import TurnService, TurnNotFound
+
+        turns = TurnService(get_engine())
+        try:
+            accepted, turn = turns.request_cancel(
+                tenant_id=auth.tenant_id, turn_id=turn_id, actor_id=auth.actor_id
+            )
+        except TurnNotFound:
+            QA_CANCEL_REQUESTS.inc(result="not_found")
+            return TurnCancelResponse(
+                turn_id=turn_id,
+                status="not_found",
+                accepted=False,
+                message="Turn 不存在或无权限取消",
+            )
+        status = "cancelled" if accepted else "already_completed"
+        QA_CANCEL_REQUESTS.inc(result=status)
+        messages = {
+            "cancelled": "已标记取消，流式循环将在下一个检查点停止",
+            "already_completed": "Turn 已结束，取消不生效",
+        }
+        return TurnCancelResponse(
+            turn_id=turn_id,
+            status=status,
+            accepted=accepted,
+            message=messages.get(status),
+        )
+
+    # Legacy path
     existing = store.get_turn(auth, turn_id)
     if existing is None:
         QA_CANCEL_REQUESTS.inc(result="not_found")

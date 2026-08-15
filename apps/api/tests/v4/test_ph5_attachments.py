@@ -50,7 +50,12 @@ from ekb_api.services.attachments import (
 )
 from ekb_api.services.ingestion import STAGES, IngestService
 from ekb_api.services.ocr import OcrResult, OcrUnavailable, run_ocr
-from ekb_api.services.vision import decide_image_mode
+from ekb_api.services.vision import (
+    VISION_UNAVAILABLE,
+    VisionUnavailable,
+    decide_image_mode,
+    resolve_vision_strategy,
+)
 
 # 1x1 PNG used to exercise image processing paths.
 _PNG = bytes.fromhex(
@@ -307,6 +312,7 @@ def test_process_image_ocr_fallback_when_no_vision(env) -> None:
 
 
 def test_process_image_fails_closed_without_remote_ocr(env) -> None:
+    """Stage 3 of Vision cascade: explicit VISION_UNAVAILABLE (spec 02 §9)."""
     store = LocalBytesStore()
     store.put("obj-img3", _PNG)
     rec_id = _register(env, "obj-img3", "image/png", len(_PNG), "cr-img3")
@@ -316,7 +322,8 @@ def test_process_image_fails_closed_without_remote_ocr(env) -> None:
     result = process_attachment(svc, tenant_id=env["tenant"], actor_id=env["user"],
                                 attachment_id=rec_id, storage=store, config=config)
     assert result["status"] == AttachmentStatus.FAILED
-    assert "远程 OCR/caption" in result["detail"]["error"]
+    # PH5-2: explicit VISION_UNAVAILABLE error code surfaced in detail
+    assert result["detail"]["error_code"] == "VISION_UNAVAILABLE"
 
 
 # ---- bind -----------------------------------------------------------------
@@ -361,6 +368,295 @@ def test_run_ocr_requires_remote_provider() -> None:
     assert ok.text.startswith("[OCR]")
     with pytest.raises(OcrUnavailable):
         run_ocr(None, b"1234", mime="image/png")
+
+
+# ---- PH5-2: Vision three-stage cascade (spec 02 §9) ----------------------
+
+
+def test_resolve_vision_strategy_native_vision() -> None:
+    """Stage 1: native Vision when model supports it."""
+    strategy = resolve_vision_strategy(_FakeVision(True), ocr_provider=None)
+    assert strategy.stage == "native_vision"
+    assert strategy.usage_mode == "VISION"
+    assert strategy.method == "NATIVE_VISION"
+
+
+def test_resolve_vision_strategy_remote_adapter() -> None:
+    """Stage 2: remote adapter fallback when model lacks vision but OCR is configured."""
+    strategy = resolve_vision_strategy(_FakeVision(False), ocr_provider=_FakeOcr())
+    assert strategy.stage == "remote_adapter"
+    assert strategy.usage_mode == "OCR_FALLBACK"
+    assert strategy.method == "OCR"
+
+
+def test_resolve_vision_strategy_explicit_failure() -> None:
+    """Stage 3: explicit VISION_UNAVAILABLE when neither path is available."""
+    with pytest.raises(VisionUnavailable) as exc_info:
+        resolve_vision_strategy(_FakeVision(False), ocr_provider=None)
+    assert exc_info.value.error_code == VISION_UNAVAILABLE
+
+
+def test_resolve_vision_strategy_prefers_native_over_adapter() -> None:
+    """When both native vision and adapter are available, native wins."""
+    strategy = resolve_vision_strategy(_FakeVision(True), ocr_provider=_FakeOcr())
+    assert strategy.stage == "native_vision"
+
+
+# ---- PH5-1: Historical attachment reuse + ACL revalidation (spec 02 §9) ---
+
+
+def _seed_conversation_with_branch(env) -> tuple[str, str, str, str]:
+    """Seed conversation + branch + two messages; return (conv_id, branch_id, msg1_id, msg2_id)."""
+    engine = env["engine"]
+    tenant, user = env["tenant"], env["user"]
+    conv_id = f"conv-hist-{hashlib.sha256(b'hc').hexdigest()[:12]}"
+    branch_id = f"br-hist-{hashlib.sha256(b'hb').hexdigest()[:12]}"
+    msg1_id = f"msg-h1-{hashlib.sha256(b'h1').hexdigest()[:12]}"
+    msg2_id = f"msg-h2-{hashlib.sha256(b'h2').hexdigest()[:12]}"
+    with engine.begin() as conn:
+        conn.execute(text(
+            "INSERT OR IGNORE INTO conversations"
+            " (id, tenant_id, user_id, title, created_at, updated_at)"
+            " VALUES (:id,:t,:u,'hist','2026-08-12T00:00:00Z','2026-08-12T00:00:00Z')"
+        ), {"id": conv_id, "t": tenant, "u": user})
+        conn.execute(text(
+            "INSERT OR IGNORE INTO conversation_branches"
+            " (id, tenant_id, conversation_id, parent_branch_id, fork_message_id,"
+            "  label, created_by, created_at)"
+            " VALUES (:id,:t,:c,NULL,NULL,'main',:u,'2026-08-12T00:00:00Z')"
+        ), {"id": branch_id, "t": tenant, "c": conv_id, "u": user})
+        conn.execute(text(
+            "INSERT OR IGNORE INTO messages"
+            " (id, tenant_id, conversation_id, branch_id, role, content,"
+            "  visibility_state, created_at)"
+            " VALUES (:id,:t,:c,:b,'user','first question','visible',"
+            " '2026-08-12T00:00:00Z')"
+        ), {"id": msg1_id, "t": tenant, "c": conv_id, "b": branch_id})
+        conn.execute(text(
+            "INSERT OR IGNORE INTO messages"
+            " (id, tenant_id, conversation_id, branch_id, role, content,"
+            "  visibility_state, created_at)"
+            " VALUES (:id,:t,:c,:b,'user','continue with that file','visible',"
+            " '2026-08-12T00:01:00Z')"
+        ), {"id": msg2_id, "t": tenant, "c": conv_id, "b": branch_id})
+    return conv_id, branch_id, msg1_id, msg2_id
+
+
+def _seed_ready_attachment_with_chunk(env, conv_id: str, label: str, *, msg_id: str = "") -> str:
+    """Seed a READY attachment with a chunk; optionally bind to msg_id; return attachment_id."""
+    engine = env["engine"]
+    tenant, user = env["tenant"], env["user"]
+    obj_id = f"src-hist-{label}"
+    att_id = f"att-hist-{label}"
+    _seed_source_object(engine, tenant, obj_id, "text/plain", 100)
+    with engine.begin() as conn:
+        conn.execute(text(
+            "INSERT OR IGNORE INTO attachments"
+            " (id, tenant_id, owner_user_id, conversation_id, source_object_id,"
+            "  client_request_id, status, detected_mime, byte_size, created_at, updated_at)"
+            " VALUES (:id,:t,:u,:c,:s,:cr,'READY','text/plain',100,"
+            " '2026-08-12T00:00:00Z','2026-08-12T00:00:00Z')"
+        ), {"id": att_id, "t": tenant, "u": user, "c": conv_id,
+            "s": obj_id, "cr": f"cr-{label}"})
+        art_id = f"art-{label}"
+        conn.execute(text(
+            "INSERT OR IGNORE INTO attachment_artifacts"
+            " (id, tenant_id, attachment_id, parser_version, text_object_id,"
+            "  metadata, token_estimate, status)"
+            " VALUES (:id,:t,:a,'parsley-1',NULL,:meta,10,'READY')"
+        ), {"id": art_id, "t": tenant, "a": att_id,
+            "meta": json.dumps({"kind": "document", "usage_mode": "RETRIEVAL"})})
+        conn.execute(text(
+            "INSERT OR IGNORE INTO attachment_chunks"
+            " (id, tenant_id, attachment_id, artifact_id, ordinal, text_content, metadata)"
+            " VALUES (:id,:t,:a,:art,0,:txt,:meta)"
+        ), {"id": f"chk-{label}", "t": tenant, "a": att_id, "art": art_id,
+            "txt": f"content of {label}", "meta": "{}"})
+        if msg_id:
+            conn.execute(text(
+                "INSERT OR IGNORE INTO message_attachments"
+                " (tenant_id, message_id, attachment_id, ordinal, usage_mode)"
+                " VALUES (:t,:m,:a,0,'RETRIEVAL')"
+            ), {"t": tenant, "m": msg_id, "a": att_id})
+    return att_id
+
+
+def _seed_other_user(env) -> str:
+    """Create a second user in the same tenant for ACL tests; return user_id."""
+    other_id = f"user-other-{hashlib.sha256(b'ou').hexdigest()[:12]}"
+    with env["engine"].begin() as conn:
+        conn.execute(text(
+            "INSERT OR IGNORE INTO users"
+            " (id, tenant_id, email, name, role, password_hash,"
+            "  created_at, updated_at)"
+            " VALUES (:id,:t,:email,'Other','MEMBER','x',"
+            " '2026-08-12T00:00:00Z','2026-08-12T00:00:00Z')"
+        ), {"id": other_id, "t": env["tenant"], "email": f"{other_id}@test.local"})
+    return other_id
+
+
+def test_historical_attachment_reuse(env) -> None:
+    """Spec 02 §9: later turns may reuse historical attachments from the active branch."""
+    from ekb_api.services.context_engine import ContextEngineService
+
+    conv_id, branch_id, msg1_id, msg2_id = _seed_conversation_with_branch(env)
+    att_id = _seed_ready_attachment_with_chunk(env, conv_id, label="reuse1", msg_id=msg1_id)
+
+    ce = ContextEngineService(env["engine"])
+    refs, dropped = ce._load_historical_attachments(
+        tenant_id=env["tenant"],
+        branch_id=branch_id,
+        current_user_message_id=msg2_id,
+        owner_user_id=env["user"],
+        conversation_id=conv_id,
+    )
+    assert len(refs) == 1
+    assert refs[0].attachment_id == att_id
+    assert refs[0].content == "content of reuse1"
+    assert dropped == []
+
+
+def test_historical_attachment_acl_owner_revalidation(env) -> None:
+    """Spec 02 §9: owner mismatch → dropped (fail-closed)."""
+    from ekb_api.services.context_engine import ContextEngineService
+
+    conv_id, branch_id, msg1_id, msg2_id = _seed_conversation_with_branch(env)
+    att_id = _seed_ready_attachment_with_chunk(env, conv_id, label="acl1", msg_id=msg1_id)
+    other_user = _seed_other_user(env)
+
+    with env["engine"].begin() as conn:
+        conn.execute(text(
+            "UPDATE attachments SET owner_user_id = :ou WHERE id = :id"
+        ), {"ou": other_user, "id": att_id})
+
+    ce = ContextEngineService(env["engine"])
+    refs, dropped = ce._load_historical_attachments(
+        tenant_id=env["tenant"],
+        branch_id=branch_id,
+        current_user_message_id=msg2_id,
+        owner_user_id=env["user"],
+        conversation_id=conv_id,
+    )
+    assert refs == []
+    assert att_id in dropped
+
+
+def test_historical_attachment_acl_state_revalidation(env) -> None:
+    """Spec 02 §9: trashed attachment → dropped (fail-closed)."""
+    from ekb_api.services.context_engine import ContextEngineService
+
+    conv_id, branch_id, msg1_id, msg2_id = _seed_conversation_with_branch(env)
+    att_id = _seed_ready_attachment_with_chunk(env, conv_id, label="acl2", msg_id=msg1_id)
+
+    with env["engine"].begin() as conn:
+        conn.execute(text(
+            "UPDATE attachments SET status = 'TRASHED' WHERE id = :id"
+        ), {"id": att_id})
+
+    ce = ContextEngineService(env["engine"])
+    refs, dropped = ce._load_historical_attachments(
+        tenant_id=env["tenant"],
+        branch_id=branch_id,
+        current_user_message_id=msg2_id,
+        owner_user_id=env["user"],
+        conversation_id=conv_id,
+    )
+    assert refs == []
+    assert att_id in dropped
+
+
+def test_historical_attachment_retention_expired(env) -> None:
+    """Spec 02 §9: expired attachment → dropped (fail-closed)."""
+    from ekb_api.services.context_engine import ContextEngineService
+
+    conv_id, branch_id, msg1_id, msg2_id = _seed_conversation_with_branch(env)
+    att_id = _seed_ready_attachment_with_chunk(env, conv_id, label="expire1", msg_id=msg1_id)
+
+    with env["engine"].begin() as conn:
+        conn.execute(text(
+            "UPDATE attachments SET expires_at = '2020-01-01T00:00:00Z' WHERE id = :id"
+        ), {"id": att_id})
+
+    ce = ContextEngineService(env["engine"])
+    refs, dropped = ce._load_historical_attachments(
+        tenant_id=env["tenant"],
+        branch_id=branch_id,
+        current_user_message_id=msg2_id,
+        owner_user_id=env["user"],
+        conversation_id=conv_id,
+    )
+    assert refs == []
+    assert att_id in dropped
+
+
+def test_historical_attachment_retention_deleted(env) -> None:
+    """Spec 02 §9: deleted attachment → dropped (fail-closed)."""
+    from ekb_api.services.context_engine import ContextEngineService
+
+    conv_id, branch_id, msg1_id, msg2_id = _seed_conversation_with_branch(env)
+    att_id = _seed_ready_attachment_with_chunk(env, conv_id, label="del1", msg_id=msg1_id)
+
+    with env["engine"].begin() as conn:
+        conn.execute(text(
+            "UPDATE attachments SET deleted_at = '2026-08-13T00:00:00Z' WHERE id = :id"
+        ), {"id": att_id})
+
+    ce = ContextEngineService(env["engine"])
+    refs, dropped = ce._load_historical_attachments(
+        tenant_id=env["tenant"],
+        branch_id=branch_id,
+        current_user_message_id=msg2_id,
+        owner_user_id=env["user"],
+        conversation_id=conv_id,
+    )
+    assert refs == []
+    assert att_id in dropped
+
+
+def test_load_attachments_acl_strict_owner(env) -> None:
+    """ContextEngineService._load_attachments enforces owner scope (PH5-1)."""
+    from ekb_api.services.context_engine import ContextEngineService
+
+    conv_id, _, _, _ = _seed_conversation_with_branch(env)
+    att_id = _seed_ready_attachment_with_chunk(env, conv_id, label="strict1")
+
+    ce = ContextEngineService(env["engine"])
+    other_user = _seed_other_user(env)
+    # Wrong owner → dropped
+    refs, dropped = ce._load_attachments(
+        env["tenant"], [att_id],
+        owner_user_id=other_user, conversation_id=conv_id,
+    )
+    assert refs == []
+    assert att_id in dropped
+
+    # Correct owner → loaded
+    refs, dropped = ce._load_attachments(
+        env["tenant"], [att_id],
+        owner_user_id=env["user"], conversation_id=conv_id,
+    )
+    assert len(refs) == 1
+    assert refs[0].attachment_id == att_id
+
+
+def test_load_context_retention_expired_raises(env) -> None:
+    """AttachmentService.load_context raises on expired attachment (PH5-1)."""
+    conv_id, _, _, _ = _seed_conversation_with_branch(env)
+    att_id = _seed_ready_attachment_with_chunk(env, conv_id, label="lc1")
+
+    with env["engine"].begin() as conn:
+        conn.execute(text(
+            "UPDATE attachments SET expires_at = '2020-01-01T00:00:00Z' WHERE id = :id"
+        ), {"id": att_id})
+
+    svc = AttachmentService(env["engine"])
+    with pytest.raises(AttachmentStateConflict):
+        svc.load_context(
+            tenant_id=env["tenant"],
+            owner_user_id=env["user"],
+            attachment_ids=[att_id],
+            conversation_id=conv_id,
+        )
 
 
 # ---- promotion ------------------------------------------------------------

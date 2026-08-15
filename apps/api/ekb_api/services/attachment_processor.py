@@ -22,7 +22,7 @@ from ekb_api.services.attachments import (
     AttachmentStatus,
 )
 from ekb_api.services.ocr import OcrResult, run_ocr
-from ekb_api.services.vision import VisionCapability, decide_image_mode
+from ekb_api.services.vision import VisionCapability, resolve_vision_strategy
 
 
 class StorageReader(Protocol):
@@ -92,7 +92,11 @@ def process_attachment(
         service.mark_ready(tenant_id=tenant_id, actor_id=actor_id, attachment_id=attachment_id)
         return {"attachment_id": attachment_id, "status": AttachmentStatus.READY, **result}
     except Exception as exc:  # noqa: BLE001
-        detail = {"error": str(exc), "at": utc_now()}
+        detail: dict[str, Any] = {"error": str(exc), "at": utc_now()}
+        # Surface explicit error codes (e.g. VISION_UNAVAILABLE) for the API layer.
+        error_code = getattr(exc, "error_code", None)
+        if error_code:
+            detail["error_code"] = error_code
         try:
             service.mark_failed(tenant_id=tenant_id, actor_id=actor_id, attachment_id=attachment_id)
         except Exception:  # noqa: BLE001
@@ -156,13 +160,15 @@ def _process_image(
     mime: str,
     config: ProcessingConfig,
 ) -> dict[str, Any]:
-    usage_mode, method = decide_image_mode(config.vision)
+    # Three-stage Vision cascade (spec 02 §9):
+    # 1. Native Vision → 2. Remote adapter → 3. VisionUnavailable
+    strategy = resolve_vision_strategy(config.vision, config.ocr)
     width, height = _probe_image_size(raw)
-    if usage_mode == "VISION":
+    if strategy.stage == "native_vision":
         # Native vision: attach the image directly, no OCR text needed.
         service.write_image_artifact(
             tenant_id=tenant_id, attachment_id=attachment_id, width=width, height=height,
-            method=method, caption=None, confidence=None,
+            method=strategy.method, caption=None, confidence=None,
         )
         service.write_artifact(
             tenant_id=tenant_id, attachment_id=attachment_id, parser_version="vision-1",
@@ -170,11 +176,11 @@ def _process_image(
             token_estimate=0, status="READY", usage_mode="VISION",
         )
         return {
-            "kind": "image", "usage_mode": "VISION", "method": method,
+            "kind": "image", "usage_mode": "VISION", "method": strategy.method,
             "width": width, "height": height,
         }
 
-    # OCR fallback path.
+    # Stage 2: Remote adapter (OCR/caption fallback).
     ocr_result: OcrResult = run_ocr(config.ocr, raw, mime=mime)
     service.write_image_artifact(
         tenant_id=tenant_id, attachment_id=attachment_id, width=width, height=height,

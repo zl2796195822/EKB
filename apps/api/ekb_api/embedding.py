@@ -75,15 +75,25 @@ def embed_batch(
     raise EmbeddingError(f"所有远程 embedding provider 均失败: {last_exc}")
 
 
-def embed_one(text: str) -> list[float]:
+def embed_one(
+    text: str, *, tenant_id: str | None = None, user_id: str | None = None
+) -> list[float]:
     """单条 embedding，便于检索时对 query 向量化。
 
     M4-1：接入 query embedding 缓存。Spec 5.4 明确允许缓存 query embedding，
     且 embedding 是纯函数（文本→向量），跨租户安全。键含模型版本，
     换 embedding 模型时旧向量自动失效。
+
+    传入 tenant_id + user_id 时走运行时 Provider 解析（DB 配置），
+    否则回退到静态环境配置——与 embed_batch 保持同一来源优先级。
     """
     settings = get_settings()
-    providers = settings.embedding_providers
+    if tenant_id and user_id:
+        from ekb_api.core.config import get_runtime_embedding_providers
+
+        providers = get_runtime_embedding_providers(tenant_id=tenant_id, user_id=user_id)
+    else:
+        providers = settings.embedding_providers
     model_version = providers[0].model if providers else "unconfigured"
     cache_key = (model_version, text_hash(text))
 
@@ -93,7 +103,7 @@ def embed_one(text: str) -> list[float]:
         return cached
 
     CACHE_MISSES.inc(type="embedding")
-    vec = embed_batch([text])[0]
+    vec = embed_batch([text], tenant_id=tenant_id, user_id=user_id)[0]
     query_embedding_cache.put(cache_key, vec)
     return vec
 

@@ -546,12 +546,7 @@ def _backfill_turns(connection: Connection, now: str) -> dict[str, int]:
             "the spec status mapping is fixed and must not be guessed"
         )
 
-    connection.execute(
-        text(
-            "UPDATE qa_turns SET updated_at=COALESCE(completed_at, created_at) "
-            "WHERE updated_at IS NULL"
-        )
-    )
+    connection.execute(text(_turn_updated_at_backfill_sql(connection.dialect.name)))
     for state, event in TERMINAL_EVENT_BY_STATE.items():
         connection.execute(
             text(
@@ -616,6 +611,21 @@ def _backfill_turns(connection: Connection, now: str) -> dict[str, int]:
         "turn_user_message_paired": paired,
         "turn_user_message_unpaired": unpaired,
     }
+
+
+def _turn_updated_at_backfill_sql(dialect: str) -> str:
+    """Return the legacy timestamp backfill with PostgreSQL's explicit cast."""
+
+    if dialect == "postgresql":
+        return (
+            "UPDATE qa_turns SET updated_at=COALESCE("
+            "NULLIF(completed_at, '')::TIMESTAMPTZ, "
+            "NULLIF(created_at, '')::TIMESTAMPTZ) WHERE updated_at IS NULL"
+        )
+    return (
+        "UPDATE qa_turns SET updated_at=COALESCE(completed_at, created_at) "
+        "WHERE updated_at IS NULL"
+    )
 
 
 def apply_v4_007(engine: Engine) -> MigrationResult:

@@ -104,6 +104,16 @@ def build_engine(database_url: str | None = None):
         kwargs["pool_timeout"] = int(os.getenv("EKB_DB_POOL_TIMEOUT", "30"))
         kwargs["pool_recycle"] = int(os.getenv("EKB_DB_POOL_RECYCLE", "1800"))
 
+        # 纵深防御：单进程 uvicorn 在请求被取消 / 进程被 SIGKILL 重启时，
+        # 正在事务中的连接不会被应用层 `session.close()` 归还，会在服务端变成
+        # 孤儿 `idle in transaction` 长期占满连接池（默认 idle_in_transaction_session_timeout=0
+        # 永不回收），导致后续 /qa/ask 在 fetch_search_context 处阻塞卡死。
+        # 这里给每个新建连接显式设置超时，配合服务端 ALTER SYSTEM 设置，
+        # 让泄漏事务在 30s 后自动被杀、连接池自愈。EKB_DB_IDLE_IN_TX_TIMEOUT=0 可关闭。
+        idle_in_tx = os.getenv("EKB_DB_IDLE_IN_TX_TIMEOUT", "30s")
+        if idle_in_tx and idle_in_tx != "0":
+            connect_args["options"] = f"-c idle_in_transaction_session_timeout={idle_in_tx}"
+
     engine = create_engine(database_url, connect_args=connect_args, **kwargs)
     if database_url.startswith("sqlite"):
 
@@ -177,59 +187,24 @@ def init_db() -> None:
     else:
         _set_pgvector_health(required=False, available=None, status="not_applicable")
 
-    prepare_legacy_schema(engine, seed=True)
-
-    # Seeded fresh rows must exist before deterministic v3 membership/profile backfill.
-    # Ordered, checksum-locked chain — keep in sync with migrations/v3_fullstack.CHAIN.
-    from ekb_api.migrations.v3_001_identity import apply_v3_001
-    from ekb_api.migrations.v3_002_content import apply_v3_002
-    from ekb_api.migrations.v3_003_analytics import apply_v3_003
-    from ekb_api.migrations.v3_004_apps import apply_v3_004
-    from ekb_api.migrations.v3_005_analytics_compat import apply_v3_005
-    from ekb_api.migrations.v3_005_llm import apply_v3_005 as apply_v3_005_llm
-    from ekb_api.migrations.v3_006_apps_compat import apply_v3_006
-    from ekb_api.migrations.v3_007_content_governance_compat import apply_v3_007
-    from ekb_api.migrations.v3_008_content_hierarchy import apply_v3_008
-
-    apply_v3_001(engine)
-    apply_v3_002(engine)
-    apply_v3_003(engine)
-    apply_v3_004(engine)
-    apply_v3_005(engine)
-    apply_v3_006(engine)
-    apply_v3_007(engine)
-    apply_v3_005_llm(engine)
-    apply_v3_008(engine)
-
-    # Local/test startup owns only the additive provider-security boundary.
-    # The production entrypoint runs the complete v4 chain explicitly; it must
-    # not silently perform a PostgreSQL cutover or storage migration here.
     from ekb_api.core.config import get_settings
 
-    if not get_settings().is_production:
-        from ekb_api.migrations.v4_001_migration_provenance import apply_v4_001
-        from ekb_api.migrations.v4_002_runtime_jobs import apply_v4_002
-        from ekb_api.migrations.v4_003_provider_security import apply_v4_003
-        from ekb_api.migrations.v4_004_postgres_cutover import apply_v4_004
-        from ekb_api.migrations.v4_005_retention_governance import apply_v4_005
-        from ekb_api.migrations.v4_006_storage_ingestion import apply_v4_006
-        from ekb_api.migrations.v4_007_chat_graph import apply_v4_007
-        from ekb_api.migrations.v4_008_attachments import apply_v4_008
-        from ekb_api.migrations.v4_009_qa_route_audit import apply_v4_009
+    # Production has already applied and verified the full chain in the
+    # entrypoint. Worker imports must not rerun legacy migration code, because
+    # PostgreSQL's historical v3 catalog uses the compatibility wrapper in the
+    # authoritative v4 runner.
+    if get_settings().is_production:
+        return
 
-        apply_v4_001(engine)
-        apply_v4_002(engine)
-        apply_v4_003(engine)
-        # v4_004 is a local cutover ledger only; no DSN switch or data move.
-        apply_v4_004(engine)
-        apply_v4_005(engine)
-        # Local development owns the complete additive business chain so the
-        # browser can exercise real upload, ingestion, chat and attachment
-        # tables. Production still uses the explicit migration runner.
-        apply_v4_006(engine)
-        apply_v4_007(engine)
-        apply_v4_008(engine)
-        apply_v4_009(engine)
+    prepare_legacy_schema(engine, seed=True)
+
+    # Local/test startup owns the full additive chain. Reuse its canonical
+    # ordering and PostgreSQL compatibility wrapper instead of duplicating v3
+    # calls here.
+    from ekb_api.migrations.v4_fullstack import CHAIN
+
+    for step in CHAIN:
+        step.apply(engine)
 
 
 def _init_pgvector(engine, *, settings=None) -> None:
@@ -258,7 +233,6 @@ def _init_pgvector(engine, *, settings=None) -> None:
 
     try:
         with engine.begin() as conn:
-            conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
             installed = conn.execute(
                 text(
                     "SELECT EXISTS ("
@@ -266,6 +240,15 @@ def _init_pgvector(engine, *, settings=None) -> None:
                     ")"
                 )
             ).scalar_one()
+            if not installed:
+                conn.execute(text("CREATE EXTENSION vector"))
+                installed = conn.execute(
+                    text(
+                        "SELECT EXISTS ("
+                        "SELECT 1 FROM pg_extension WHERE extname = 'vector'"
+                        ")"
+                    )
+                ).scalar_one()
             if not installed:
                 raise RuntimeError("pgvector extension is not installed")
     except Exception as exc:  # noqa: BLE001

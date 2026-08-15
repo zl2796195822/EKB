@@ -106,6 +106,9 @@ class _FakeSettings:
         self.llm_compaction_ratio = 0.75
         self.compaction_recent_rounds_keep = 3
         self.compaction_summary_ratio_target = 0.35
+        # PH1 Conversation Engine：legacy 内联路径测试保持 False，
+        # 与 test_multi_turn.py 的 setdefault 约定一致（新引擎有独立 v4 测试套件）。
+        self.ce_turn_engine_enabled = False
         # 杂项
         self.max_upload_bytes = 0
 

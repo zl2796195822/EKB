@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
 
@@ -14,13 +15,18 @@ from sqlalchemy import text
 from ekb_api.core.auth import get_live_auth_context
 from ekb_api.core.authorization import CAP_KB_READ, CAP_KB_WRITE
 from ekb_api.core.db import build_engine, prepare_legacy_schema
+from ekb_api.core.errors import ApiError
 from ekb_api.domain import AuthContext, TenantRole
 from ekb_api.main import app
 from ekb_api.migrations.v4_fullstack import CHAIN
 from ekb_api.routers import kb_upload
-from ekb_api.services.ingestion import IngestService, STAGES, create_version_for_item
+from ekb_api.services.ingestion import STAGES, IngestService, create_version_for_item
 from ekb_api.services.jobs import get_job_service
-from ekb_api.services.storage import LocalFilesystemStorageClient, UploadService
+from ekb_api.services.storage import (
+    LocalFilesystemStorageClient,
+    UploadService,
+    _session_is_expired,
+)
 
 
 def _apply_chain(engine) -> None:
@@ -60,6 +66,154 @@ def _create_batch(env, count: int = 8):
         ],
     )
     return service, result.batch_id, [item.upload_item_id for item in result.items]
+
+
+def test_create_batch_replay_keeps_the_create_contract_and_defers_sessions(env) -> None:
+    service = UploadService(env["engine"], storage_client=env["storage"])
+    request_id = "directory-replay-contract"
+    items = [
+        {
+            "client_item_id": "short-client-id",
+            "relative_path": "金博/手册/README.md",
+            "byte_size": 7,
+            "browser_mime": "text/markdown",
+        }
+    ]
+    first = service.create_batch(
+        tenant_id=env["tenant"],
+        created_by=env["user"],
+        kb_id=env["kb"],
+        mode="DIRECTORY",
+        client_request_id=request_id,
+        items=items,
+    )
+    replay = service.create_batch(
+        tenant_id=env["tenant"],
+        created_by=env["user"],
+        kb_id=env["kb"],
+        mode="DIRECTORY",
+        client_request_id=request_id,
+        items=items,
+    )
+
+    assert replay.created is False
+    assert replay.batch_id == first.batch_id
+    assert replay.items[0].accepted is True
+    assert replay.items[0].upload_item_id == first.items[0].upload_item_id
+    assert first.items[0].upload_session is None
+    assert replay.items[0].upload_session is None
+    with env["engine"].connect() as connection:
+        assert connection.execute(text("SELECT COUNT(*) FROM upload_sessions")).scalar_one() == 0
+
+    opened = service.open_session(tenant_id=env["tenant"], item_id=first.items[0].upload_item_id)
+    assert opened["upload_urls"]
+
+
+def test_open_session_recognizes_completed_item_without_reopening_or_duplicate_version(env) -> None:
+    service = UploadService(env["engine"], storage_client=env["storage"])
+    created = service.create_batch(
+        tenant_id=env["tenant"],
+        created_by=env["user"],
+        kb_id=env["kb"],
+        mode="DIRECTORY",
+        client_request_id="completed-item-retry",
+        items=[{"client_item_id": "manual", "relative_path": "金博/manual.md", "byte_size": 4}],
+    )
+    item_id = created.items[0].upload_item_id
+    service.open_session(tenant_id=env["tenant"], item_id=item_id)
+    content = b"data"
+    sha256 = hashlib.sha256(content).hexdigest()
+    env["storage"].write_object(
+        tenant_id=env["tenant"],
+        object_key=f"uploads/{env['tenant']}/{env['kb']}/{item_id}",
+        data=content,
+    )
+    completed = service.complete_upload(tenant_id=env["tenant"], item_id=item_id, sha256=sha256)
+
+    resumed = service.open_session(tenant_id=env["tenant"], item_id=item_id)
+
+    assert resumed == {
+        "already_completed": True,
+        "document_id": completed.document_id,
+        "ingest_job_id": completed.ingest_job_id,
+        "status": "COMPLETING",
+    }
+    with env["engine"].connect() as connection:
+        assert connection.execute(
+            text("SELECT status FROM upload_items WHERE id=:item"), {"item": item_id}
+        ).scalar_one() == "COMPLETING"
+        assert connection.execute(
+            text("SELECT state FROM upload_sessions WHERE upload_item_id=:item"), {"item": item_id}
+        ).scalar_one() == "COMPLETED"
+
+
+def test_rejected_item_cannot_open_or_abort_a_upload_session(env) -> None:
+    service = UploadService(env["engine"], storage_client=env["storage"])
+    created = service.create_batch(
+        tenant_id=env["tenant"],
+        created_by=env["user"],
+        kb_id=env["kb"],
+        mode="DIRECTORY",
+        client_request_id="rejected-item-session",
+        items=[{"client_item_id": "empty", "relative_path": "金博/empty.md", "byte_size": 0}],
+    )
+    item_id = created.items[0].upload_item_id
+
+    with pytest.raises(ApiError, match="UPLOAD_ITEM_NOT_RESUMABLE"):
+        service.open_session(tenant_id=env["tenant"], item_id=item_id)
+    with pytest.raises(ApiError, match="UPLOAD_ITEM_NOT_RESUMABLE"):
+        service.abort_session(tenant_id=env["tenant"], item_id=item_id)
+
+
+def test_open_session_renews_a_near_expiry_active_session(env) -> None:
+    service = UploadService(env["engine"], storage_client=env["storage"])
+    _, _, item_ids = _create_batch(env, count=1)
+    item_id = item_ids[0]
+    service.open_session(tenant_id=env["tenant"], item_id=item_id)
+    near_expiry = (datetime.now(timezone.utc) + timedelta(seconds=30)).isoformat().replace("+00:00", "Z")
+    with env["engine"].begin() as connection:
+        connection.execute(
+            text("UPDATE upload_sessions SET expires_at=:expires WHERE upload_item_id=:item"),
+            {"expires": near_expiry, "item": item_id},
+        )
+
+    renewed = service.open_session(tenant_id=env["tenant"], item_id=item_id)
+
+    assert renewed["expires_at"] > near_expiry
+
+
+def test_session_expiry_comparison_accepts_postgresql_timestamp_values() -> None:
+    now = datetime(2026, 8, 14, 8, 0, tzinfo=timezone.utc)
+    future = now + timedelta(minutes=5)
+    past = now - timedelta(minutes=5)
+
+    assert _session_is_expired(future, now=now) is False
+    assert _session_is_expired(str(future), now=now) is False
+    assert _session_is_expired(past, now=now) is True
+
+
+def test_create_batch_replay_rejects_a_different_manifest(env) -> None:
+    service = UploadService(env["engine"], storage_client=env["storage"])
+    service.create_batch(
+        tenant_id=env["tenant"],
+        created_by=env["user"],
+        kb_id=env["kb"],
+        mode="DIRECTORY",
+        client_request_id="manifest-conflict",
+        items=[{"client_item_id": "one", "relative_path": "one.md", "byte_size": 1}],
+    )
+
+    with pytest.raises(Exception) as exc_info:
+        service.create_batch(
+            tenant_id=env["tenant"],
+            created_by=env["user"],
+            kb_id=env["kb"],
+            mode="DIRECTORY",
+            client_request_id="manifest-conflict",
+            items=[{"client_item_id": "one", "relative_path": "two.md", "byte_size": 1}],
+        )
+
+    assert "IDEMPOTENCY_KEY_CONFLICT" in str(exc_info.value)
 
 
 def _create_job_for_item(env, item_id: str, *, suffix: str):

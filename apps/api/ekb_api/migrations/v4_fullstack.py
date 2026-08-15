@@ -30,6 +30,7 @@ from ekb_api.migrations import (
     v4_007_chat_graph,
     v4_008_attachments,
     v4_009_qa_route_audit,
+    v4_010_conversation_engine_unification,
 )
 
 
@@ -284,6 +285,13 @@ CHAIN = (
         apply_name="apply_v4_009",
         verify_name="verify_v4_009",
         rollback_name="rollback_v4_009_dry_run",
+    ),
+    _step(
+        v4_010_conversation_engine_unification.VERSION,
+        v4_010_conversation_engine_unification,
+        apply_name="apply_v4_010",
+        verify_name="verify_v4_010",
+        rollback_name="rollback_v4_010_dry_run",
     ),
 )
 

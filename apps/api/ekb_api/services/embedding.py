@@ -116,15 +116,16 @@ def _provider_for_profile(
             text(
                 "SELECT p.provider_key, m.model_id "
                 "FROM llm_providers p JOIN llm_models m ON m.provider_id=p.id "
-                "WHERE p.id=:provider AND p.tenant_id=:tenant AND p.user_id=:user "
-                "AND m.id=:model AND m.tenant_id=:tenant AND m.user_id=:user "
-                "AND p.is_enabled=1 AND m.is_enabled=1"
+                "WHERE p.id=:provider AND p.tenant_id=:tenant "
+                "AND m.id=:model AND m.tenant_id=:tenant "
+                "AND p.is_enabled=:enabled AND m.is_enabled=:enabled"
             ),
             {
                 "provider": profile.llm_provider_id,
                 "model": profile.model_id,
                 "tenant": tenant_id,
                 "user": user_id,
+                "enabled": True,
             },
         ).first()
     if row is None:

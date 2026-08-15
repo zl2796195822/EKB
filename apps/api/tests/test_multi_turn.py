@@ -83,6 +83,9 @@ def _settings_patch(monkeypatch, **overrides: Any) -> None:
     orig = get_settings()
     valid_fields = {f.name for f in dataclasses.fields(orig)}
     clean = {k: v for k, v in overrides.items() if k in valid_fields}
+    # Legacy mock-store tests exercise the inline store path; force the new
+    # ConversationApplicationService path off so they keep working unchanged.
+    clean.setdefault("ce_turn_engine_enabled", False)
     data = {f.name: getattr(orig, f.name) for f in dataclasses.fields(orig)}
     data.update(clean)
     new_settings = type(orig)(**data)
@@ -835,6 +838,7 @@ class TestTask9CancelFlow:
 
         from ekb_api.routers import qa as qa_ns
         _patch_store_conv(monkeypatch)
+        _settings_patch(monkeypatch)
         monkeypatch.setattr(qa_ns, "retrieve", lambda *a, **kw: [])
         monkeypatch.setattr(qa_ns, "generate_answer_stream", _gen_stream)
 

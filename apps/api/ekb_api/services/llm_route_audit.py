@@ -117,13 +117,15 @@ def _resolve_db_ids(
                     " AND m.tenant_id = p.tenant_id AND m.user_id = p.user_id "
                     "WHERE p.id IS NOT NULL AND p.tenant_id = :tenant_id "
                     "AND p.user_id = :actor_id AND p.provider_key = :provider_key "
-                    "AND m.model_id = :model_id AND p.is_enabled = 1 AND m.is_enabled = 1"
+                    "AND m.model_id = :model_id AND p.is_enabled = :enabled "
+                    "AND m.is_enabled = :enabled"
                 ),
                 {
                     "tenant_id": tenant_id,
                     "actor_id": actor_id,
                     "provider_key": provider_key,
                     "model_id": model_name,
+                    "enabled": True,
                 },
             ).mappings().first()
     except Exception as exc:  # noqa: BLE001

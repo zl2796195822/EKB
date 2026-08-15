@@ -167,7 +167,7 @@ class TurnService:
                 text(
                     "SELECT turn_id FROM qa_turns WHERE tenant_id=:tenant_id "
                     "AND actor_id=:actor_id AND conversation_id=:conversation_id "
-                    "AND request_id=:client_turn_id"
+                    "AND client_turn_id=:client_turn_id"
                 ),
                 {
                     "tenant_id": tenant_id,
@@ -221,17 +221,18 @@ class TurnService:
             connection.execute(
                 text(
                     "INSERT INTO qa_turns "
-                    "(turn_id, request_id, tenant_id, actor_id, conversation_id,"
-                    " assistant_message_id, user_message_id, stream_version, status,"
-                    " last_seq, state_version, requested_provider_id, requested_model_id,"
-                    " created_at, updated_at) "
-                    "VALUES (:turn_id,:request_id,:tenant_id,:actor_id,:conversation_id,"
-                    ":assistant_message_id,:user_message_id,2,:status,0,0,"
+                    "(turn_id, request_id, client_turn_id, tenant_id, actor_id,"
+                    " conversation_id, assistant_message_id, user_message_id,"
+                    " stream_version, status, last_seq, state_version,"
+                    " requested_provider_id, requested_model_id, created_at, updated_at) "
+                    "VALUES (:turn_id,:request_id,:client_turn_id,:tenant_id,:actor_id,"
+                    ":conversation_id,:assistant_message_id,:user_message_id,2,:status,0,0,"
                     ":requested_provider_id,:requested_model_id,:created_at,:updated_at)"
                 ),
                 {
                     "turn_id": turn_id,
-                    "request_id": client_turn_id,
+                    "request_id": request_id,
+                    "client_turn_id": client_turn_id,
                     "tenant_id": tenant_id,
                     "actor_id": actor_id,
                     "conversation_id": conversation_id,
@@ -243,6 +244,40 @@ class TurnService:
                     "created_at": now,
                     "updated_at": now,
                 },
+            )
+
+            # Create the first attempt row (PH0 v4_010 turn_attempts table).
+            # capability_snapshot is filled by GenerationWorker when the model
+            # is resolved; here we record the QUEUED attempt for lease/recovery.
+            attempt_id = new_id()
+            _insert_attempt_ddl = (
+                "INSERT INTO turn_attempts "
+                "(id, tenant_id, turn_id, attempt_no, capability_snapshot,"
+                " sampling_snapshot, state, created_at) "
+                "VALUES (:id,:tenant_id,:turn_id,1,:capability_snapshot,"
+                "'{}',:state,:created_at)"
+            )
+            if connection.dialect.name == "postgresql":
+                _insert_attempt_ddl = _insert_attempt_ddl.replace(
+                    "'{}'", "'{}'::jsonb"
+                ).replace(":capability_snapshot", "CAST(:capability_snapshot AS jsonb)")
+            connection.execute(
+                text(_insert_attempt_ddl),
+                {
+                    "id": attempt_id,
+                    "tenant_id": tenant_id,
+                    "turn_id": turn_id,
+                    "capability_snapshot": "{}",
+                    "state": "QUEUED",
+                    "created_at": now,
+                },
+            )
+            connection.execute(
+                text(
+                    "UPDATE qa_turns SET active_attempt_id=:attempt_id "
+                    "WHERE turn_id=:turn_id AND tenant_id=:tenant_id"
+                ),
+                {"attempt_id": attempt_id, "turn_id": turn_id, "tenant_id": tenant_id},
             )
 
             snapshot_rows = self._write_snapshots(

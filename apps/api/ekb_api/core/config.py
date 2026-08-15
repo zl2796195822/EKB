@@ -82,6 +82,9 @@ class ModelProvider:
     # capabilities from a model name or a provider preset.
     display_name: str | None = None
     capabilities: dict | None = None
+    # Database primary key for actor-scoped configured models. Static
+    # environment providers intentionally leave this unset.
+    id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -141,6 +144,19 @@ class Settings:
     sse_v2_delta_max_bytes: int
     # Delta 合并：时间窗口阈值（毫秒），保证延迟不膨胀
     sse_v2_delta_flush_ms: int
+    # --- Conversation Engine Unification (PH0-PH5) feature flags ---
+    # 影子构建 context manifest，不改变 Provider 输入；用于 hash/token 预算对比
+    ce_shadow_context: bool
+    # 新 Turn Engine 开关（默认开，渐进迁移 /qa/ask 到 ConversationApplicationService）
+    ce_turn_engine_enabled: bool
+    # SSE cursor replay 开关（turn_events 持久化 + Last-Event-ID 重放）
+    ce_event_replay_enabled: bool
+    # 前端切换到 POST turn + GET events（灰度）
+    ce_frontend_cutover: bool
+    # turn_events 过期天数（必须大于最大生成时长）
+    ce_event_retention_days: int
+    # Generation lease 过期秒数（请求线程崩溃后孤儿 lease 恢复阈值）
+    ce_generation_lease_seconds: float
     # 单文件上传大小上限（字节），0 表示不限制；租户可单独覆盖
     max_upload_bytes: int
     # v4 provider credential encryption key.  This is intentionally separate
@@ -149,6 +165,9 @@ class Settings:
     # S3-compatible object storage.  An empty endpoint means the feature is
     # unavailable; callers must fail closed rather than use local disk/mocks.
     object_storage_endpoint: str
+    # Optional private endpoint for API/worker object reads and deletes.  The
+    # public endpoint remains the only address included in browser presigned URLs.
+    object_storage_internal_endpoint: str
     object_storage_bucket: str
     object_storage_region: str
     object_storage_access_key: str
@@ -348,11 +367,19 @@ def get_settings() -> Settings:
         sse_v2_delta_max_tokens=int(os.getenv("EKB_SSE_V2_DELTA_TOKENS", "2")),
         sse_v2_delta_max_bytes=int(os.getenv("EKB_SSE_V2_DELTA_BYTES", "128")),
         sse_v2_delta_flush_ms=int(os.getenv("EKB_SSE_V2_DELTA_FLUSH_MS", "10")),
+        # --- Conversation Engine Unification feature flags ---
+        ce_shadow_context=os.getenv("EKB_CE_SHADOW_CONTEXT", "false").lower() == "true",
+        ce_turn_engine_enabled=os.getenv("EKB_CE_TURN_ENGINE_ENABLED", "true").lower() == "true",
+        ce_event_replay_enabled=os.getenv("EKB_CE_EVENT_REPLAY_ENABLED", "true").lower() == "true",
+        ce_frontend_cutover=os.getenv("EKB_CE_FRONTEND_CUTOVER", "false").lower() == "true",
+        ce_event_retention_days=int(os.getenv("EKB_CE_EVENT_RETENTION_DAYS", "7")),
+        ce_generation_lease_seconds=float(os.getenv("EKB_CE_GENERATION_LEASE_SECONDS", "300")),
         max_upload_bytes=int(
             os.getenv("EKB_MAX_UPLOAD_BYTES", str(50 * 1024 * 1024))
         ),  # 默认 50MB
         provider_master_key=os.getenv("EKB_PROVIDER_MASTER_KEY", ""),
         object_storage_endpoint=os.getenv("EKB_OBJECT_STORAGE_ENDPOINT", ""),
+        object_storage_internal_endpoint=os.getenv("EKB_OBJECT_STORAGE_INTERNAL_ENDPOINT", ""),
         object_storage_bucket=os.getenv("EKB_OBJECT_STORAGE_BUCKET", ""),
         object_storage_region=os.getenv("EKB_OBJECT_STORAGE_REGION", "us-east-1"),
         object_storage_access_key=os.getenv("EKB_OBJECT_STORAGE_ACCESS_KEY", ""),
@@ -372,6 +399,34 @@ def get_settings() -> Settings:
 
 class _LLMConfigUnavailable(Exception):
     """数据库/迁移未就绪时的软失败标记，不影响启动。"""
+
+
+def _catalog_whitelist_ids(preset_provider_id: str | None) -> set[str] | None:
+    """返回 preset 的 catalog_models 白名单 model_id 集合；无白名单返回 None。
+
+    语义与 services.v3_llm._provider_catalog_whitelist 一致，供 AI 助手运行时
+    复用，确保「模型服务 UI 可见的模型」与「AI 助手可选用模型」严格对齐。
+    """
+    if not preset_provider_id:
+        return None
+    try:
+        from ekb_api.services.llm_provider_catalog import get_preset_provider
+
+        preset = get_preset_provider(preset_provider_id)
+    except Exception:
+        return None
+    if not preset:
+        return None
+    catalog_models = preset.get("catalog_models")
+    if not isinstance(catalog_models, list) or len(catalog_models) == 0:
+        return None
+    ids: set[str] = set()
+    for m in catalog_models:
+        if isinstance(m, dict):
+            mid = m.get("id")
+            if isinstance(mid, str) and mid:
+                ids.add(mid)
+    return ids or None
 
 
 def _load_runtime_model_providers_from_db(
@@ -412,7 +467,7 @@ def _load_runtime_model_providers_from_db(
                 text(
                     """
                     SELECT p.id, p.provider_key, p.name, p.default_chat_endpoint,
-                           p.endpoint_configs, c.ciphertext
+                           p.endpoint_configs, c.ciphertext, p.preset_provider_id
                     FROM llm_providers AS p
                     JOIN provider_credentials AS c
                       ON c.id = p.credential_id
@@ -427,11 +482,11 @@ def _load_runtime_model_providers_from_db(
                         AND c.owner_user_id IS NULL
                         AND c.ownership_key = 'TEAM')
                      )
-                    WHERE p.tenant_id = :t AND p.user_id = :u
-                      AND p.is_enabled = 1
+                    WHERE p.tenant_id = :t
+                      AND p.is_enabled = :enabled
                     """
                 ),
-                {"t": tenant_id, "u": user_id},
+                {"t": tenant_id, "u": user_id, "enabled": True},
             ).fetchall()
 
             for row in rows:
@@ -440,6 +495,9 @@ def _load_runtime_model_providers_from_db(
                 default_endpoint = row[3]
                 endpoint_configs_raw = row[4] or "{}"
                 ciphertext = row[5] or ""
+                # preset_provider_id 用于套用 catalog_models 白名单（与模型服务 UI 一致）
+                preset_pid = str(row[6]) if row[6] else None
+                whitelist_ids = _catalog_whitelist_ids(preset_pid)
 
                 # 解密失败或没有 provider master key 时，该配置不可用；
                 # 不回退到旧 api_key，也不把异常细节暴露给调用方。
@@ -488,26 +546,31 @@ def _load_runtime_model_providers_from_db(
                 model_rows = session.execute(
                     text(
                         """
-                        SELECT model_id, display_name, model_type, capabilities,
-                               tenant_id, user_id
+                        SELECT id, model_id, display_name, model_type, capabilities,
+                               tenant_id, user_id, is_custom
                         FROM llm_models
                         WHERE provider_id = :pid
-                          AND tenant_id = :t AND user_id = :u
-                          AND is_enabled = 1
+                          AND tenant_id = :t
+                          AND is_enabled = :enabled
                         ORDER BY created_at ASC
                         """
                     ),
-                    {"pid": provider_id, "t": tenant_id, "u": user_id},
+                    {"pid": provider_id, "t": tenant_id, "u": user_id, "enabled": True},
                 ).fetchall()
 
-                models_to_use: list[tuple[str, str, dict]] = []
+                models_to_use: list[tuple[str, str, str, dict]] = []
                 for m in model_rows:
-                    mid, mname, mtype = str(m[0]), str(m[1] or m[0]), (m[2] or "chat")
+                    db_model_id = str(m[0])
+                    mid, mname, mtype = str(m[1]), str(m[2] or m[1]), (m[3] or "chat")
                     if not mid.strip() or "/" in mid:
                         # Public ids use provider_key/model_id.  An embedded
                         # slash would make the selected provider ambiguous.
                         continue
-                    model_capabilities = m[3] or {}
+                    # catalog_models 白名单过滤（与模型服务 UI list_llm_models 一致）：
+                    # 非自定义模型必须出现在 preset 白名单内，否则 UI 不可见也不应被 AI 助手选用。
+                    if whitelist_ids is not None and int(m[7] or 0) == 0 and mid not in whitelist_ids:
+                        continue
+                    model_capabilities = m[4] or {}
                     if isinstance(model_capabilities, str):
                         try:
                             model_capabilities = json.loads(model_capabilities)
@@ -516,11 +579,11 @@ def _load_runtime_model_providers_from_db(
                     if not isinstance(model_capabilities, dict):
                         continue
                     if kind == "chat" and not (mtype and "embedding" in mtype.lower()):
-                        models_to_use.append((mid, mname, model_capabilities))
+                        models_to_use.append((db_model_id, mid, mname, model_capabilities))
                     elif kind == "embedding" and mtype and "embedding" in mtype.lower():
-                        models_to_use.append((mid, mname, model_capabilities))
+                        models_to_use.append((db_model_id, mid, mname, model_capabilities))
 
-                for mid, mname, model_capabilities in models_to_use:
+                for db_model_id, mid, mname, model_capabilities in models_to_use:
                     runtime_name = f"{provider_key}/{mid}"
                     out.append(
                         ModelProvider(
@@ -535,6 +598,7 @@ def _load_runtime_model_providers_from_db(
                             ),
                             display_name=mname,
                             capabilities=dict(model_capabilities),
+                            id=db_model_id,
                         )
                     )
     except _LLMConfigUnavailable:

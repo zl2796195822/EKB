@@ -37,6 +37,9 @@ if [[ "${environment_lower}" == "production" ]]; then
   case "${admin_name_lower}" in
     admin|ekb\ admin) fail "default_admin_identity" ;;
   esac
+  case "${EKB_DEV_PASSWORD}" in
+    admin|change-me-local-only) fail "default_admin_password" ;;
+  esac
 fi
 
 if [[ "${database_url}" == sqlite://* ]]; then

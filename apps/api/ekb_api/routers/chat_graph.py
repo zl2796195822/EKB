@@ -15,11 +15,14 @@ Two invariants are enforced at the boundary rather than deeper down:
 
 from __future__ import annotations
 
+import json
 from dataclasses import asdict, is_dataclass
 from typing import Annotated, Any, Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Header, Query
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+from sqlalchemy import text
 
 from ekb_api.core.auth import get_live_auth_context
 from ekb_api.core.authorization import CAP_QA_ASK, assert_capability
@@ -387,6 +390,53 @@ def get_turn(
     return {"turn": _dump(turn), "snapshots": snapshots}
 
 
+@router.get("/turns/{turn_id}/context")
+def get_turn_context(
+    turn_id: str,
+    auth: Annotated[AuthContext, Depends(get_live_auth_context)],
+) -> dict:
+    """Return context manifest for a turn (safe, no sensitive content).
+
+    Spec 02 §11.2 — surfaces token budget, compaction range and component
+    counts so the assistant UI can render a context diagnostic panel.  Only
+    hashes and IDs are stored in ``turn_context_manifests``; no prompt text,
+    attachment plaintext or secrets are ever returned.
+    """
+    assert_capability(auth, CAP_QA_ASK)
+    with get_engine().connect() as conn:
+        row = conn.execute(
+            text(
+                "SELECT manifest_hash, available_input_tokens, used_input_tokens,"
+                " reserved_output_tokens, provider_safety_margin, component_refs,"
+                " compaction_summary_id FROM turn_context_manifests"
+                " WHERE turn_id=:turn_id AND tenant_id=:tenant_id"
+            ),
+            {"turn_id": turn_id, "tenant_id": auth.tenant_id},
+        ).first()
+    if row is None:
+        return {"available": False}
+    raw_refs = row[5]
+    if isinstance(raw_refs, dict):
+        refs = raw_refs
+    elif isinstance(raw_refs, (str, bytes)) and raw_refs:
+        refs = json.loads(raw_refs)
+    else:
+        refs = {}
+    return {
+        "available": True,
+        "manifest_hash": row[0],
+        "available_input_tokens": int(row[1]),
+        "used_input_tokens": int(row[2]),
+        "reserved_output_tokens": int(row[3]),
+        "provider_safety_margin": int(row[4]),
+        "compaction_summary_id": row[6],
+        "included_message_count": len(refs.get("included_message_ids") or []),
+        "dropped_message_count": len(refs.get("dropped_message_ids") or []),
+        "evidence_count": len(refs.get("evidence_ids") or []),
+        "compaction_strategy": refs.get("compaction_strategy", "none"),
+    }
+
+
 @router.post("/turns/{turn_id}/cancel")
 def cancel_turn(
     turn_id: str,
@@ -471,3 +521,91 @@ def _turn_creation_response(creation) -> dict:
         "reused": creation.reused,
         "snapshots": list(creation.snapshots),
     }
+
+
+@router.get("/turns/{turn_id}/events")
+def stream_turn_events(
+    turn_id: str,
+    auth: Annotated[AuthContext, Depends(get_live_auth_context)],
+    last_event_id: Optional[str] = Header(None, alias="Last-Event-ID"),
+) -> StreamingResponse:
+    """Authenticated SSE event stream with cursor replay (spec 03 §1.2, §3).
+
+    Accepts ``Last-Event-ID`` header ({turn_id}:{seq}) to resume from a
+    specific position.  Replays all persisted events with seq > cursor,
+    then follows live events if the turn is still active.
+    """
+    assert_capability(auth, CAP_QA_ASK)
+    from ekb_api.services.generation_worker import TurnEventStore
+
+    # Validate turn ownership
+    service = _turns()
+    try:
+        turn = service.get(tenant_id=auth.tenant_id, turn_id=turn_id)
+        if turn.actor_id != auth.actor_id:
+            raise TurnNotFound(turn_id)
+    except TurnNotFound as exc:
+        raise ApiError(404, "NOT_FOUND", "Turn not found") from exc
+
+    # Parse Last-Event-ID to get cursor seq
+    cursor_seq = 0
+    if last_event_id:
+        parts = last_event_id.rsplit(":", 1)
+        if len(parts) == 2:
+            try:
+                cursor_seq = int(parts[1])
+            except ValueError:
+                pass
+
+    event_store = TurnEventStore(get_engine())
+
+    def event_generator():
+        # Replay persisted events
+        events = event_store.replay(
+            tenant_id=auth.tenant_id,
+            turn_id=turn_id,
+            after_seq=cursor_seq,
+        )
+        for event in events:
+            yield event.to_sse(turn_id)
+
+        # If turn is terminal, we're done after replay
+        if turn.state in ("COMPLETED", "STOPPED", "FAILED"):
+            return
+
+        # Live follow: poll for new events until terminal
+        # (PH3 will replace this with a more efficient mechanism)
+        import time
+
+        last_seq = events[-1].seq if events else cursor_seq
+        max_polls = 7200  # 2 hours at 1s interval
+        for _ in range(max_polls):
+            time.sleep(1.0)
+            new_events = event_store.replay(
+                tenant_id=auth.tenant_id,
+                turn_id=turn_id,
+                after_seq=last_seq,
+            )
+            if not new_events:
+                yield ": heartbeat\n\n"
+                continue
+            for event in new_events:
+                yield event.to_sse(turn_id)
+                last_seq = event.seq
+                # Check if this was a terminal event
+                if event.event_type in (
+                    "turn.completed",
+                    "turn.stopped",
+                    "turn.failed",
+                ):
+                    return
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )

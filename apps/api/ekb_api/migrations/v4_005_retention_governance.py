@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass
 from typing import Any, Optional
 
@@ -274,6 +275,106 @@ def _drop_index_if_exists(connection: Connection, name: str) -> None:
             connection.execute(text(f"DROP INDEX {name}"))
 
 
+_THIRTY_DAY_INTERVAL = re.compile(
+    r"(?:interval\s+'30\s+days'|'30\s+days'\s*::\s*"
+    r"(?:interval|pg_catalog\.interval)|cast\s*\(\s*'30\s+days'\s+as\s+"
+    r"(?:interval|pg_catalog\.interval)\s*\))",
+    re.IGNORECASE,
+)
+
+
+def _strip_outer_parentheses(expression: str) -> str:
+    expression = expression.strip()
+    while expression.startswith("(") and expression.endswith(")"):
+        depth = 0
+        in_string = False
+        closes_at_end = True
+        index = 0
+        while index < len(expression):
+            char = expression[index]
+            if char == "'":
+                if in_string and index + 1 < len(expression) and expression[index + 1] == "'":
+                    index += 2
+                    continue
+                in_string = not in_string
+            elif not in_string:
+                if char == "(":
+                    depth += 1
+                elif char == ")":
+                    depth -= 1
+                    if depth == 0 and index != len(expression) - 1:
+                        closes_at_end = False
+                        break
+                    if depth < 0:
+                        closes_at_end = False
+                        break
+            index += 1
+        if not closes_at_end or in_string or depth != 0:
+            break
+        expression = expression[1:-1].strip()
+    return expression
+
+
+def _top_level_operator_positions(expression: str, operator: str) -> tuple[int, ...]:
+    positions: list[int] = []
+    depth = 0
+    in_string = False
+    index = 0
+    while index < len(expression):
+        char = expression[index]
+        if char == "'":
+            if in_string and index + 1 < len(expression) and expression[index + 1] == "'":
+                index += 2
+                continue
+            in_string = not in_string
+        elif not in_string:
+            if char == "(":
+                depth += 1
+            elif char == ")":
+                depth -= 1
+                if depth < 0:
+                    return ()
+            elif depth == 0 and expression.startswith(operator, index):
+                positions.append(index)
+                index += len(operator)
+                continue
+        index += 1
+    if in_string or depth != 0:
+        return ()
+    return tuple(positions)
+
+
+def _is_valid_30_day_check(sqltext: str) -> bool:
+    """Match the exact PostgreSQL 30-day retention expression.
+
+    PostgreSQL may render the interval as ``interval '30 days'``, a typed
+    literal, or ``CAST(... AS interval)``.  Parse the two top-level operators
+    so an unrelated substring or an additional predicate cannot pass.
+    """
+    normalized = " ".join(str(sqltext).split())
+    if not normalized or ";" in normalized or "--" in normalized or "/*" in normalized:
+        return False
+    expression = _strip_outer_parentheses(normalized).lower()
+    equal_positions = _top_level_operator_positions(expression, "=")
+    if len(equal_positions) != 1:
+        return False
+    equal_at = equal_positions[0]
+    if _strip_outer_parentheses(expression[:equal_at]) != "expires_at":
+        return False
+    right = _strip_outer_parentheses(expression[equal_at + 1 :])
+    plus_positions = _top_level_operator_positions(right, "+")
+    if len(plus_positions) != 1:
+        return False
+    plus_at = plus_positions[0]
+    deleted_at = _strip_outer_parentheses(right[:plus_at])
+    interval = _strip_outer_parentheses(right[plus_at + 1 :])
+    return deleted_at == "deleted_at" and _THIRTY_DAY_INTERVAL.fullmatch(interval) is not None
+
+
+def _has_valid_30_day_check(constraints: list[dict[str, Any]]) -> bool:
+    return any(_is_valid_30_day_check(str(item.get("sqltext") or "")) for item in constraints)
+
+
 def _catalog(connection: Connection) -> tuple[str, ...]:
     inspector = inspect(connection)
     tables = set(inspector.get_table_names())
@@ -299,13 +400,11 @@ def _catalog(connection: Connection) -> tuple[str, ...]:
             f"{VERSION} verification failed: missing indexes={','.join(missing_indexes)}"
         )
     if connection.dialect.name == "postgresql":
-        checks = " ".join(
-            str(c.get("sqltext") or "").lower()
-            for c in inspector.get_check_constraints("deletion_batches")
-        )
-        has_30 = "interval '30 days'" in checks
-        has_30_normalized = "interval 30 days" in checks.replace("'", "")
-        if not has_30 and not has_30_normalized:
+        constraints = [
+            {**constraint, "sqltext": str(constraint.get("sqltext") or "")}
+            for constraint in inspector.get_check_constraints("deletion_batches")
+        ]
+        if not _has_valid_30_day_check(constraints):
             # Require the retention-window check only on PostgreSQL.
             raise RuntimeError(
                 f"{VERSION} verification failed: deletion_batches 30-day check missing"

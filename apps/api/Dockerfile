@@ -28,11 +28,21 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel \
  && pip install --no-cache-dir --retries 3 --timeout 60 -e ".[prod]" \
  || pip install --no-cache-dir --retries 3 --timeout 60 -e .
 
+# The cl100k_base ranks are fetched by tiktoken upstream on first use.  Warm
+# them while building the image so document ingestion never depends on egress.
+ENV TIKTOKEN_CACHE_DIR=/app/.cache/tiktoken
+RUN mkdir -p "$TIKTOKEN_CACHE_DIR" \
+ && python3 -c 'import tiktoken; tiktoken.get_encoding("cl100k_base")'
+
 # 应用代码 + 迁移 + entrypoint + admin 脚本
 COPY ekb_api/ ./ekb_api/
+# 全局代理补丁：让 urllib（阻塞式 LLM/embedding 调用）默认走 mihomo 出口。
+# 仅当运行时传入 HTTPS_PROXY/https_proxy 才生效，否则不影响内网直连。
+COPY sitecustomize.py /usr/local/lib/python3.11/site-packages/sitecustomize.py
 COPY entrypoint.sh ./entrypoint.sh
 COPY ensure_admin.py ./ensure_admin.py
-RUN chmod +x /app/entrypoint.sh /app/ensure_admin.py 2>/dev/null || true
+COPY repair_admin_access.py ./repair_admin_access.py
+RUN chmod +x /app/entrypoint.sh /app/ensure_admin.py /app/repair_admin_access.py 2>/dev/null || true
 
 # 生产默认 env（启动时用 --env-file 覆盖，见上方示例）
 ENV PYTHONUNBUFFERED=1 \

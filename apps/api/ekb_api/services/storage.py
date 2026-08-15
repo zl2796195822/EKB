@@ -75,6 +75,21 @@ class ObjectHead:
     sha256: Optional[str]
 
 
+def _session_is_expired(expires_at: object, *, now: Optional[datetime] = None) -> bool:
+    """Compare a session expiry as a real UTC instant across SQL dialects."""
+
+    if isinstance(expires_at, datetime):
+        value = expires_at
+    else:
+        try:
+            value = datetime.fromisoformat(str(expires_at).strip().replace("Z", "+00:00"))
+        except (TypeError, ValueError):
+            return True
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value <= (now or datetime.now(timezone.utc))
+
+
 class LocalFilesystemStorageClient:
     """Durable local object store for development only.
 
@@ -163,6 +178,7 @@ class S3CompatibleStorageClient:
         self,
         *,
         endpoint: str,
+        internal_endpoint: str | None = None,
         bucket: str,
         region: str,
         access_key: str,
@@ -173,19 +189,24 @@ class S3CompatibleStorageClient:
 
         if not _is_remote_provider_url(endpoint):
             raise ObjectStorageUnavailable("object storage endpoint must be a remote HTTP URL")
+        if internal_endpoint and not _is_remote_provider_url(internal_endpoint):
+            raise ObjectStorageUnavailable(
+                "object storage internal endpoint must be a remote HTTP URL"
+            )
         if not bucket or not access_key or not secret_key:
             raise ObjectStorageUnavailable("object storage bucket and credentials are required")
         self.endpoint = endpoint.rstrip("/")
+        self.internal_endpoint = (internal_endpoint or endpoint).rstrip("/")
         self.bucket = bucket
         self.region = region or "us-east-1"
         self.access_key = access_key
         self.secret_key = secret_key
         self.path_style = bool(path_style)
 
-    def _url(self, object_key: str) -> str:
+    def _url(self, object_key: str, *, endpoint: str | None = None) -> str:
         if not object_key or ".." in Path(object_key).parts:
             raise ObjectStorageUnavailable("invalid object key")
-        parts = urlsplit(self.endpoint)
+        parts = urlsplit(endpoint or self.endpoint)
         encoded_key = quote(object_key, safe="/-_.~")
         if self.path_style:
             path = f"{parts.path.rstrip('/')}/{quote(self.bucket, safe='/-_.~')}/{encoded_key}"
@@ -311,7 +332,7 @@ class S3CompatibleStorageClient:
         import urllib.error
         import urllib.request
 
-        url = self._url(object_key)
+        url = self._url(object_key, endpoint=self.internal_endpoint)
         payload = data or b""
         url, headers = self._signature(
             method=method,
@@ -321,7 +342,11 @@ class S3CompatibleStorageClient:
         )
         request = urllib.request.Request(url, data=data, method=method, headers=headers)
         try:
-            with urllib.request.urlopen(request, timeout=60) as response:
+            # The private endpoint is deployment-controlled.  Avoid inherited
+            # HTTP(S)_PROXY settings routing object bytes through a proxy.
+            with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(
+                request, timeout=60
+            ) as response:
                 return response.read()
         except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError) as exc:
             raise ObjectStorageUnavailable("object storage request failed") from exc
@@ -421,6 +446,9 @@ def build_storage_client() -> StorageClient:
     try:
         return S3CompatibleStorageClient(
             endpoint=endpoint,
+            internal_endpoint=str(
+                getattr(settings, "object_storage_internal_endpoint", "") or ""
+            ),
             bucket=str(getattr(settings, "object_storage_bucket", "") or ""),
             region=str(getattr(settings, "object_storage_region", "us-east-1") or "us-east-1"),
             access_key=str(getattr(settings, "object_storage_access_key", "") or ""),
@@ -504,6 +532,7 @@ class PreflightResult:
     error_code: Optional[str] = None
     error_detail: Optional[dict] = None
     upload_session: Optional[dict] = None
+    replay_status: Optional[str] = None
 
 
 @dataclass
@@ -612,6 +641,86 @@ class UploadService:
             raise ApiError(404, "NOT_FOUND", "上传项不存在或不在当前租户")
         return row
 
+    def _replay_batch_result(
+        self,
+        connection,
+        *,
+        tenant_id: str,
+        kb_id: str,
+        mode: str,
+        batch,
+        items: list[dict],
+    ) -> BatchResult:
+        """Return the create-batch contract for an idempotency replay.
+
+        The Upload Center projection deliberately has a different shape. A
+        repeated create request exposes the original item IDs, which the
+        browser opens just before it starts each object transfer.
+        """
+        requested = sorted(
+            (
+                str(item.get("client_item_id", "")),
+                str(item.get("relative_path", "")),
+                int(item.get("byte_size", 0)),
+            )
+            for item in items
+        )
+        stored_rows = connection.execute(
+            text(
+                "SELECT client_item_id, display_path, byte_size FROM upload_items "
+                "WHERE batch_id=:batch"
+            ),
+            {"batch": str(batch.id)},
+        ).all()
+        stored = sorted(
+            (str(row.client_item_id), str(row.display_path), int(row.byte_size))
+            for row in stored_rows
+        )
+        if str(batch.knowledge_base_id) != kb_id or str(batch.mode) != mode or requested != stored:
+            raise ApiError(409, "IDEMPOTENCY_KEY_CONFLICT", "幂等请求与已有上传批次不一致")
+
+        rows = connection.execute(
+            text(
+                "SELECT ui.* FROM upload_items ui "
+                "WHERE ui.batch_id=:batch ORDER BY ui.client_item_id"
+            ),
+            {"batch": str(batch.id)},
+        ).all()
+        replayed: list[PreflightResult] = []
+        for row in rows:
+            status = str(row.status)
+            error_detail = row.error_detail
+            if isinstance(error_detail, str):
+                try:
+                    error_detail = json.loads(error_detail)
+                except json.JSONDecodeError:
+                    error_detail = None
+            result = PreflightResult(
+                client_item_id=str(row.client_item_id),
+                accepted=status != "REJECTED",
+                normalized_relative_path=str(row.normalized_relative_path),
+                display_path=str(row.display_path),
+                byte_size=int(row.byte_size),
+                detected_mime=None,
+                upload_item_id=str(row.id),
+                error_code=str(row.error_code) if row.error_code else None,
+                error_detail=error_detail if isinstance(error_detail, dict) else None,
+            )
+            if not result.accepted:
+                replayed.append(result)
+                continue
+
+            item_completed = status in {"UPLOADED", "COMPLETING", "COMPLETED"}
+            if item_completed:
+                result.replay_status = "ALREADY_COMPLETED"
+            replayed.append(result)
+        return BatchResult(
+            batch_id=str(batch.id),
+            status=str(batch.status),
+            created=False,
+            items=replayed,
+        )
+
     # -- preflight --
 
     def preflight_item(
@@ -700,13 +809,20 @@ class UploadService:
             self._require_kb(connection, tenant_id, kb_id)
             existing = connection.execute(
                 text(
-                    "SELECT id FROM upload_batches "
+                    "SELECT id, knowledge_base_id, mode, status FROM upload_batches "
                     "WHERE tenant_id=:tenant AND created_by=:user AND client_request_id=:cr"
                 ),
                 {"tenant": tenant_id, "user": created_by, "cr": client_request_id},
             ).first()
             if existing is not None:
-                return self.get_batch(tenant_id=tenant_id, batch_id=str(existing.id))
+                return self._replay_batch_result(
+                    connection,
+                    tenant_id=tenant_id,
+                    kb_id=kb_id,
+                    mode=mode,
+                    batch=existing,
+                    items=items,
+                )
 
             preflights = [
                 self.preflight_item(
@@ -787,15 +903,6 @@ class UploadService:
                         "status": "WAITING" if preflight.accepted else "REJECTED",
                     },
                 )
-                if preflight.accepted:
-                    preflight.upload_session = self._open_session(
-                        connection,
-                        tenant_id=tenant_id,
-                        kb_id=kb_id,
-                        item_id=item_id,
-                        byte_size=preflight.byte_size,
-                        detected_mime=preflight.detected_mime,
-                    ).__dict__
                 result_items.append(preflight)
 
         return BatchResult(batch_id=batch_id, status="ACCEPTED", created=True, items=result_items)
@@ -822,21 +929,6 @@ class UploadService:
             text("SELECT * FROM upload_sessions WHERE upload_item_id=:item"),
             {"item": item_id},
         ).first()
-        if existing is not None:
-            object_key = _object_key(tenant_id, kb_id, item_id)
-            return _SessionRecord(
-                session_id=str(existing.id),
-                method=str(existing.method),
-                provider_upload_id=existing.provider_upload_id,
-                upload_urls=[
-                    self.storage.get_object_url(
-                        tenant_id=tenant_id,
-                        object_key=object_key,
-                    )
-                ],
-                part_size=existing.part_size,
-                expires_at=str(existing.expires_at),
-            )
         object_key = _object_key(tenant_id, kb_id, item_id)
         presigned = self.storage.put_presigned(
             tenant_id=tenant_id,
@@ -854,28 +946,49 @@ class UploadService:
             .replace("+00:00", "Z")
         )
         session_id = str(uuid4())
+        if existing is None:
+            connection.execute(
+                text(
+                    "INSERT INTO upload_sessions "
+                    "(id, tenant_id, upload_item_id, method, provider_upload_id, state, "
+                    "part_size, expires_at, created_at, updated_at) "
+                    "VALUES (:id, :tenant, :item, :method, :puid, 'ACTIVE', :part, "
+                    ":expires, :created, :updated)"
+                ),
+                {
+                    "id": session_id,
+                    "tenant": tenant_id,
+                    "item": item_id,
+                    "method": method,
+                    "puid": presigned.provider_upload_id,
+                    "part": part_size,
+                    "expires": expires_at,
+                    "created": now,
+                    "updated": now,
+                },
+            )
+        else:
+            session_id = str(existing.id)
+            connection.execute(
+                text(
+                    "UPDATE upload_sessions SET method=:method, provider_upload_id=:puid, "
+                    "state='ACTIVE', part_size=:part, expires_at=:expires, updated_at=:updated "
+                    "WHERE id=:id"
+                ),
+                {
+                    "id": session_id,
+                    "method": method,
+                    "puid": presigned.provider_upload_id,
+                    "part": part_size,
+                    "expires": expires_at,
+                    "updated": now,
+                },
+            )
         connection.execute(
             text(
-                "INSERT INTO upload_sessions "
-                "(id, tenant_id, upload_item_id, method, provider_upload_id, state, "
-                "part_size, expires_at, created_at, updated_at) "
-                "VALUES (:id, :tenant, :item, :method, :puid, 'ACTIVE', :part, "
-                ":expires, :created, :updated)"
+                "UPDATE upload_items SET status='UPLOADING', error_code=NULL, "
+                "error_detail=NULL WHERE id=:item"
             ),
-            {
-                "id": session_id,
-                "tenant": tenant_id,
-                "item": item_id,
-                "method": method,
-                "puid": presigned.provider_upload_id,
-                "part": part_size,
-                "expires": expires_at,
-                "created": now,
-                "updated": now,
-            },
-        )
-        connection.execute(
-            text("UPDATE upload_items SET status='UPLOADING' WHERE id=:item"),
             {"item": item_id},
         )
         return _SessionRecord(
@@ -897,6 +1010,36 @@ class UploadService:
     ) -> dict:
         with self.engine.begin() as connection:
             item = self._require_item(connection, tenant_id, item_id)
+            if str(item.status) in {"COMPLETING", "COMPLETED"}:
+                version = connection.execute(
+                    text(
+                        "SELECT id, doc_id FROM document_versions "
+                        "WHERE source_object_id=:source AND tenant_id=:tenant "
+                        "ORDER BY created_at DESC LIMIT 1"
+                    ),
+                    {"source": item.source_object_id, "tenant": tenant_id},
+                ).first()
+                if version is not None:
+                    job = connection.execute(
+                        text(
+                            "SELECT id FROM ingest_jobs WHERE document_version_id=:version "
+                            "AND tenant_id=:tenant LIMIT 1"
+                        ),
+                        {"version": str(version.id), "tenant": tenant_id},
+                    ).first()
+                    return {
+                        "already_completed": True,
+                        "document_id": str(version.doc_id),
+                        "ingest_job_id": str(job.id) if job is not None else "",
+                        "status": str(item.status),
+                    }
+                raise ApiError(
+                    409,
+                    "UPLOAD_COMPLETION_INCONSISTENT",
+                    "上传项已完成但缺少版本投影，无法安全续传",
+                )
+            if str(item.status) not in {"WAITING", "UPLOADING", "FAILED", "ABORTED"}:
+                raise ApiError(409, "UPLOAD_ITEM_NOT_RESUMABLE", "上传项当前状态不可续传")
             return self._open_session(
                 connection,
                 tenant_id=tenant_id,
@@ -937,7 +1080,7 @@ class UploadService:
                 and str(item.status) not in ("COMPLETING", "COMPLETED")
             ):
                 raise ApiError(409, "UPLOAD_SESSION_INVALID", "上传会话无效，请重新上传")
-            if str(session.state) == "ACTIVE" and str(session.expires_at) <= utc_now():
+            if str(session.state) == "ACTIVE" and _session_is_expired(session.expires_at):
                 raise ApiError(409, "UPLOAD_SESSION_EXPIRED", "上传会话已过期，请重新上传")
 
             # Idempotency: already completed -> re-establish (no-op) version.
@@ -1065,6 +1208,8 @@ class UploadService:
     def abort_session(self, *, tenant_id: str, item_id: str) -> None:
         with self.engine.begin() as connection:
             item = self._require_item(connection, tenant_id, item_id)
+            if str(item.status) not in {"WAITING", "UPLOADING", "FAILED", "ABORTED"}:
+                raise ApiError(409, "UPLOAD_ITEM_NOT_RESUMABLE", "上传项当前状态不可取消或续传")
             session = connection.execute(
                 text("SELECT * FROM upload_sessions WHERE upload_item_id=:item"),
                 {"item": item_id},

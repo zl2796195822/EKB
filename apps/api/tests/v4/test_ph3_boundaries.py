@@ -74,6 +74,59 @@ def test_s3_presign_is_remote_and_does_not_expose_secret() -> None:
     assert "X-Amz-Signature=" in presigned.upload_urls[0]
 
 
+def test_s3_uses_private_endpoint_for_server_side_object_operations(monkeypatch) -> None:
+    client = S3CompatibleStorageClient(
+        endpoint="https://objects.example.invalid",
+        internal_endpoint="http://172.17.0.1:2443",
+        bucket="ekb-test",
+        region="us-east-1",
+        access_key="ACCESS_KEY",
+        secret_key="SECRET_VALUE",
+    )
+    public = client.put_presigned(
+        tenant_id="tenant-1",
+        object_key="uploads/tenant-1/kb-1/item-1",
+        byte_size=4,
+        method="SINGLE",
+        part_size=None,
+        expires_in_seconds=60,
+    )
+    assert public.upload_urls[0].startswith("https://objects.example.invalid/")
+
+    captured: dict[str, object] = {}
+
+    class _Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self) -> bytes:
+            return b"server-side bytes"
+
+    class _Opener:
+        def open(self, request, timeout):
+            captured["url"] = request.full_url
+            captured["timeout"] = timeout
+            return _Response()
+
+    def _build_opener(*handlers):
+        captured["handlers"] = handlers
+        return _Opener()
+
+    import urllib.request
+
+    monkeypatch.setattr(urllib.request, "build_opener", _build_opener)
+    result = client.get_object_bytes(
+        tenant_id="tenant-1", object_key="uploads/tenant-1/kb-1/item-1"
+    )
+    assert result == b"server-side bytes"
+    assert str(captured["url"]).startswith("http://172.17.0.1:2443/")
+    assert captured["timeout"] == 60
+    assert len(captured["handlers"]) == 1
+
+
 def test_embedding_fails_closed_when_unconfigured() -> None:
     with pytest.raises(EmbeddingUnavailable):
         build_embedding_client()

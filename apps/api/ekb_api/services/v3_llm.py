@@ -219,7 +219,12 @@ def _secret_error(exc: Exception) -> ApiError:
 
 
 def _upsert_provider_secret(session, auth: AuthContext, provider_id: str, plaintext: str) -> None:
-    """Persist a remote Provider secret only in provider_credentials."""
+    """Persist a remote Provider secret only in provider_credentials.
+
+    Admin (OWNER/ADMIN) credentials are stored with ownership_scope='TEAM' so
+    every tenant member can use the model service; non-admin writes (if ever
+    allowed) fall back to PERSONAL.
+    """
     if not plaintext:
         _revoke_provider_secret(session, auth, provider_id)
         return
@@ -228,12 +233,17 @@ def _upsert_provider_secret(session, auth: AuthContext, provider_id: str, plaint
     except Exception as exc:  # normalize crypto/config errors at the API boundary
         raise _secret_error(exc) from exc
 
+    is_admin = str(auth.tenant_role) in ("OWNER", "ADMIN")
+    scope = "TEAM" if is_admin else "PERSONAL"
+    ownership_key = "TEAM" if is_admin else f"USER:{auth.actor_id}"
+    owner_user = None if is_admin else auth.actor_id
+
     current = session.execute(
         text(
             "SELECT credential_id FROM llm_providers "
-            "WHERE id=:id AND tenant_id=:tenant AND user_id=:user"
+            "WHERE id=:id AND tenant_id=:tenant"
         ),
-        {"id": provider_id, "tenant": auth.tenant_id, "user": auth.actor_id},
+        {"id": provider_id, "tenant": auth.tenant_id},
     ).scalar()
     now = utc_now()
     if current:
@@ -242,14 +252,14 @@ def _upsert_provider_secret(session, auth: AuthContext, provider_id: str, plaint
                 "UPDATE provider_credentials SET ciphertext=:ciphertext, "
                 "key_version=:key_version, secret_last4=:last4, status='ACTIVE', "
                 "rotated_at=:rotated_at "
-                "WHERE id=:id AND tenant_id=:tenant AND owner_user_id=:user "
-                "AND ownership_scope='PERSONAL' AND ownership_key=:ownership_key"
+                "WHERE id=:id AND tenant_id=:tenant AND ownership_scope=:scope "
+                "AND ownership_key=:ownership_key"
             ),
             {
                 "id": str(current),
                 "tenant": auth.tenant_id,
-                "user": auth.actor_id,
-                "ownership_key": f"USER:{auth.actor_id}",
+                "scope": scope,
+                "ownership_key": ownership_key,
                 "ciphertext": envelope.ciphertext,
                 "key_version": envelope.key_version,
                 "last4": envelope.secret_last4,
@@ -265,14 +275,15 @@ def _upsert_provider_secret(session, auth: AuthContext, provider_id: str, plaint
                 "INSERT INTO provider_credentials "
                 "(id, tenant_id, owner_user_id, ownership_scope, ownership_key, "
                 "ciphertext, key_version, secret_last4, status, created_at) "
-                "VALUES (:id,:tenant,:user,'PERSONAL',:ownership_key,:ciphertext,"
+                "VALUES (:id,:tenant,:user,:scope,:ownership_key,:ciphertext,"
                 ":key_version,:last4,'ACTIVE',:created_at)"
             ),
             {
                 "id": credential_id,
                 "tenant": auth.tenant_id,
-                "user": auth.actor_id,
-                "ownership_key": f"USER:{auth.actor_id}",
+                "user": owner_user,
+                "scope": scope,
+                "ownership_key": ownership_key,
                 "ciphertext": envelope.ciphertext,
                 "key_version": envelope.key_version,
                 "last4": envelope.secret_last4,
@@ -282,15 +293,15 @@ def _upsert_provider_secret(session, auth: AuthContext, provider_id: str, plaint
         session.execute(
             text(
                 "UPDATE llm_providers SET credential_id=:credential_id, "
-                "ownership_scope='PERSONAL', ownership_key=:ownership_key "
-                "WHERE id=:id AND tenant_id=:tenant AND user_id=:user"
+                "ownership_scope=:scope, ownership_key=:ownership_key "
+                "WHERE id=:id AND tenant_id=:tenant"
             ),
             {
                 "credential_id": credential_id,
-                "ownership_key": f"USER:{auth.actor_id}",
+                "scope": scope,
+                "ownership_key": ownership_key,
                 "id": provider_id,
                 "tenant": auth.tenant_id,
-                "user": auth.actor_id,
             },
         )
 
@@ -306,24 +317,24 @@ def _revoke_provider_secret(session, auth: AuthContext, provider_id: str) -> Non
     current = session.execute(
         text(
             "SELECT credential_id FROM llm_providers "
-            "WHERE id=:id AND tenant_id=:tenant AND user_id=:user"
+            "WHERE id=:id AND tenant_id=:tenant"
         ),
-        {"id": provider_id, "tenant": auth.tenant_id, "user": auth.actor_id},
+        {"id": provider_id, "tenant": auth.tenant_id},
     ).scalar()
     if current:
         session.execute(
             text(
                 "UPDATE provider_credentials SET status='REVOKED', rotated_at=:now "
-                "WHERE id=:id AND tenant_id=:tenant AND owner_user_id=:user"
+                "WHERE id=:id AND tenant_id=:tenant"
             ),
-            {"id": str(current), "tenant": auth.tenant_id, "user": auth.actor_id, "now": utc_now()},
+            {"id": str(current), "tenant": auth.tenant_id, "now": utc_now()},
         )
     session.execute(
         text(
             "UPDATE llm_providers SET credential_id=NULL, api_key=NULL "
-            "WHERE id=:id AND tenant_id=:tenant AND user_id=:user"
+            "WHERE id=:id AND tenant_id=:tenant"
         ),
-        {"id": provider_id, "tenant": auth.tenant_id, "user": auth.actor_id},
+        {"id": provider_id, "tenant": auth.tenant_id},
     )
 
 
@@ -334,9 +345,9 @@ def _read_provider_secret(session, auth: AuthContext, provider_row: Any) -> str:
     row = session.execute(
         text(
             "SELECT ciphertext FROM provider_credentials "
-            "WHERE id=:id AND tenant_id=:tenant AND owner_user_id=:user "
-            "AND ownership_scope='PERSONAL' AND ownership_key=:ownership_key "
-            "AND status='ACTIVE'"
+            "WHERE id=:id AND tenant_id=:tenant AND status='ACTIVE' "
+            "AND ((ownership_scope='PERSONAL' AND owner_user_id=:user "
+            "AND ownership_key=:ownership_key) OR ownership_scope='TEAM')"
         ),
         {
             "id": str(credential_id),
@@ -532,7 +543,7 @@ def list_llm_providers(auth: AuthContext) -> list[LLMProvider]:
                 "logo, description, websites, default_chat_endpoint, endpoint_configs, "
                 "auth_type, api_key_label, api_features, settings, model_list_source, credential_id, "
                 "is_enabled, created_at, updated_at "
-                "FROM llm_providers WHERE tenant_id = :t AND user_id = :u"
+                "FROM llm_providers WHERE tenant_id = :t"
             ),
             {"t": auth.tenant_id, "u": auth.actor_id},
         ).mappings().all()
@@ -619,7 +630,7 @@ def get_llm_provider(auth: AuthContext, provider_id: str) -> LLMProvider | None:
                     "logo, description, websites, default_chat_endpoint, endpoint_configs, "
                     "auth_type, api_key_label, api_features, settings, model_list_source, credential_id, "
                     "is_enabled, created_at, updated_at "
-                    "FROM llm_providers WHERE tenant_id = :t AND user_id = :u AND preset_provider_id = :ppid"
+                    "FROM llm_providers WHERE tenant_id = :t AND preset_provider_id = :ppid"
                 ),
                 {"t": auth.tenant_id, "u": auth.actor_id, "ppid": key},
             ).mappings().first()
@@ -676,7 +687,7 @@ def get_llm_provider(auth: AuthContext, provider_id: str) -> LLMProvider | None:
                 "logo, description, websites, default_chat_endpoint, endpoint_configs, "
                 "auth_type, api_key_label, api_features, settings, model_list_source, credential_id, "
                 "is_enabled, created_at, updated_at "
-                "FROM llm_providers WHERE id = :id AND tenant_id = :t AND user_id = :u"
+                "FROM llm_providers WHERE id = :id AND tenant_id = :t"
             ),
             {"id": provider_id, "t": auth.tenant_id, "u": auth.actor_id},
         ).mappings().first()
@@ -691,6 +702,8 @@ def get_llm_provider(auth: AuthContext, provider_id: str) -> LLMProvider | None:
 
 
 def create_llm_provider(auth: AuthContext, data: dict) -> LLMProvider:
+    if str(auth.tenant_role) not in ("OWNER", "ADMIN"):
+        raise _permission_denied()
     preset_provider_id = data.get("preset_provider_id")
     provider_secret = data.get("api_key")
     merged: dict = {}
@@ -788,6 +801,8 @@ def create_llm_provider(auth: AuthContext, data: dict) -> LLMProvider:
 
 
 def update_llm_provider(auth: AuthContext, provider_id: str, data: dict) -> LLMProvider:
+    if str(auth.tenant_role) not in ("OWNER", "ADMIN"):
+        raise _permission_denied()
     SessionLocal = get_session_local()
     with SessionLocal() as session:
         row = session.execute(
@@ -798,7 +813,7 @@ def update_llm_provider(auth: AuthContext, provider_id: str, data: dict) -> LLMP
         ).mappings().first()
         if row is None:
             raise _not_found("LLM Provider")
-        if str(row["tenant_id"]) != auth.tenant_id or str(row["user_id"]) != auth.actor_id:
+        if str(row["tenant_id"]) != auth.tenant_id:
             raise _permission_denied()
         if is_local_provider_key(str(row["provider_key"])):
             raise _remote_provider_required()
@@ -824,8 +839,10 @@ def update_llm_provider(auth: AuthContext, provider_id: str, data: dict) -> LLMP
                 set_clauses.append(f"{json_field} = :{json_field}")
                 params[json_field] = json.dumps(data[json_field], ensure_ascii=False)
 
-        credential_changed = "api_key" in data and data["api_key"] is not None
-        if not set_clauses and not credential_changed:
+        credential_present = "api_key" in data
+        credential_changed = credential_present and data["api_key"] is not None
+        credential_revoke = credential_present and data["api_key"] is None
+        if not set_clauses and not credential_changed and not credential_revoke:
             session.close()
             provider = get_llm_provider(auth, provider_id)
             if provider is None:
@@ -840,6 +857,8 @@ def update_llm_provider(auth: AuthContext, provider_id: str, data: dict) -> LLMP
             session.execute(text(stmt), params)
         if credential_changed:
             _upsert_provider_secret(session, auth, provider_id, str(data["api_key"]))
+        elif credential_revoke:
+            _revoke_provider_secret(session, auth, provider_id)
         session.commit()
 
     provider = get_llm_provider(auth, provider_id)
@@ -852,6 +871,8 @@ def update_llm_provider(auth: AuthContext, provider_id: str, data: dict) -> LLMP
 
 
 def delete_llm_provider(auth: AuthContext, provider_id: str) -> bool:
+    if str(auth.tenant_role) not in ("OWNER", "ADMIN"):
+        raise _permission_denied()
     if provider_id.startswith("preset:"):
         return False
     SessionLocal = get_session_local()
@@ -862,14 +883,14 @@ def delete_llm_provider(auth: AuthContext, provider_id: str) -> bool:
         ).mappings().first()
         if row is None:
             return False
-        if str(row["tenant_id"]) != auth.tenant_id or str(row["user_id"]) != auth.actor_id:
+        if str(row["tenant_id"]) != auth.tenant_id:
             raise _permission_denied()
         session.execute(
-            text("DELETE FROM llm_models WHERE provider_id = :pid AND tenant_id = :t AND user_id = :u"),
+            text("DELETE FROM llm_models WHERE provider_id = :pid AND tenant_id = :t"),
             {"pid": provider_id, "t": auth.tenant_id, "u": auth.actor_id},
         )
         result = session.execute(
-            text("DELETE FROM llm_providers WHERE id = :id AND tenant_id = :t AND user_id = :u"),
+            text("DELETE FROM llm_providers WHERE id = :id AND tenant_id = :t"),
             {"id": provider_id, "t": auth.tenant_id, "u": auth.actor_id},
         )
         session.commit()
@@ -927,7 +948,7 @@ def list_llm_models(auth: AuthContext, provider_id: str) -> list[LLMModel]:
             row = session.execute(
                 text(
                     "SELECT id, preset_provider_id, provider_key, endpoint_configs FROM llm_providers "
-                    "WHERE tenant_id = :t AND user_id = :u AND preset_provider_id = :ppid"
+                    "WHERE tenant_id = :t AND preset_provider_id = :ppid"
                 ),
                 {"t": auth.tenant_id, "u": auth.actor_id, "ppid": key},
             ).mappings().one_or_none()
@@ -941,7 +962,7 @@ def list_llm_models(auth: AuthContext, provider_id: str) -> list[LLMModel]:
             prow = session.execute(
                 text(
                     "SELECT id, preset_provider_id, provider_key, endpoint_configs FROM llm_providers "
-                    "WHERE id = :id AND tenant_id = :t AND user_id = :u"
+                    "WHERE id = :id AND tenant_id = :t"
                 ),
                 {"id": provider_id, "t": auth.tenant_id, "u": auth.actor_id},
             ).mappings().one_or_none()
@@ -962,7 +983,7 @@ def list_llm_models(auth: AuthContext, provider_id: str) -> list[LLMModel]:
                 "model_type, context_window, max_output_tokens, endpoint_type, "
                 "capabilities, input_price, output_price, is_enabled, is_custom, "
                 "notes, created_at, updated_at "
-                "FROM llm_models WHERE provider_id = :pid AND tenant_id = :t AND user_id = :u "
+                "FROM llm_models WHERE provider_id = :pid AND tenant_id = :t "
                 "ORDER BY created_at ASC"
             ),
             {"pid": resolved_pid, "t": auth.tenant_id, "u": auth.actor_id},
@@ -989,7 +1010,7 @@ def get_llm_model(auth: AuthContext, model_id: str) -> LLMModel | None:
                 "model_type, context_window, max_output_tokens, endpoint_type, "
                 "capabilities, input_price, output_price, is_enabled, is_custom, "
                 "notes, created_at, updated_at "
-                "FROM llm_models WHERE id = :id AND tenant_id = :t AND user_id = :u"
+                "FROM llm_models WHERE id = :id AND tenant_id = :t"
             ),
             {"id": model_id, "t": auth.tenant_id, "u": auth.actor_id},
         ).mappings().first()
@@ -1002,6 +1023,8 @@ def get_llm_model(auth: AuthContext, model_id: str) -> LLMModel | None:
 
 
 def create_llm_model(auth: AuthContext, provider_id: str, data: dict) -> LLMModel:
+    if str(auth.tenant_role) not in ("OWNER", "ADMIN"):
+        raise _permission_denied()
     if provider_id.startswith("preset:"):
         raise ApiError(status.HTTP_400_BAD_REQUEST, "INVALID_REQUEST", "预设服务商未保存，无法添加模型。请先创建 Provider 实例。")
     SessionLocal = get_session_local()
@@ -1015,7 +1038,7 @@ def create_llm_model(auth: AuthContext, provider_id: str, data: dict) -> LLMMode
         ).mappings().first()
         if prow is None:
             raise _not_found("LLM Provider")
-        if str(prow["tenant_id"]) != auth.tenant_id or str(prow["user_id"]) != auth.actor_id:
+        if str(prow["tenant_id"]) != auth.tenant_id:
             raise _permission_denied()
         if not _provider_row_is_remote(prow):
             raise _remote_provider_required()
@@ -1073,6 +1096,8 @@ def create_llm_model(auth: AuthContext, provider_id: str, data: dict) -> LLMMode
 
 
 def update_llm_model(auth: AuthContext, model_id: str, data: dict) -> LLMModel:
+    if str(auth.tenant_role) not in ("OWNER", "ADMIN"):
+        raise _permission_denied()
     SessionLocal = get_session_local()
     with SessionLocal() as session:
         row = session.execute(
@@ -1081,7 +1106,7 @@ def update_llm_model(auth: AuthContext, model_id: str, data: dict) -> LLMModel:
         ).mappings().first()
         if row is None:
             raise _not_found("LLM Model")
-        if str(row["tenant_id"]) != auth.tenant_id or str(row["user_id"]) != auth.actor_id:
+        if str(row["tenant_id"]) != auth.tenant_id:
             raise _permission_denied()
 
         set_clauses: list[str] = []
@@ -1128,6 +1153,8 @@ def update_llm_model(auth: AuthContext, model_id: str, data: dict) -> LLMModel:
 
 
 def delete_llm_model(auth: AuthContext, model_id: str) -> bool:
+    if str(auth.tenant_role) not in ("OWNER", "ADMIN"):
+        raise _permission_denied()
     SessionLocal = get_session_local()
     with SessionLocal() as session:
         row = session.execute(
@@ -1136,10 +1163,10 @@ def delete_llm_model(auth: AuthContext, model_id: str) -> bool:
         ).mappings().first()
         if row is None:
             return False
-        if str(row["tenant_id"]) != auth.tenant_id or str(row["user_id"]) != auth.actor_id:
+        if str(row["tenant_id"]) != auth.tenant_id:
             raise _permission_denied()
         result = session.execute(
-            text("DELETE FROM llm_models WHERE id = :id AND tenant_id = :t AND user_id = :u"),
+            text("DELETE FROM llm_models WHERE id = :id AND tenant_id = :t"),
             {"id": model_id, "t": auth.tenant_id, "u": auth.actor_id},
         )
         session.commit()
@@ -1230,6 +1257,8 @@ def _fetch_remote_models(provider_row: dict[str, Any], api_key: str) -> list[dic
 
 
 def sync_models_from_provider(auth: AuthContext, provider_id: str) -> dict:
+    if str(auth.tenant_role) not in ("OWNER", "ADMIN"):
+        raise _permission_denied()
     if provider_id.startswith("preset:"):
         raise ApiError(
             status.HTTP_400_BAD_REQUEST,
@@ -1249,7 +1278,7 @@ def sync_models_from_provider(auth: AuthContext, provider_id: str) -> dict:
         ).mappings().first()
         if prow is None:
             raise _not_found("LLM Provider")
-        if str(prow["tenant_id"]) != auth.tenant_id or str(prow["user_id"]) != auth.actor_id:
+        if str(prow["tenant_id"]) != auth.tenant_id:
             raise _permission_denied()
         if not _provider_row_is_remote(prow):
             raise _remote_provider_required()

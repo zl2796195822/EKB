@@ -124,6 +124,30 @@ def test_production_default_sqlite_is_rejected_before_migration(tmp_path: Path) 
     assert "runtime-token-secret" not in result.stdout
 
 
+def test_production_default_runtime_password_is_rejected_before_migration(tmp_path: Path) -> None:
+    marker = tmp_path / "started"
+    result = _run_entrypoint(
+        tmp_path,
+        {
+            "EKB_ENV": "production",
+            "EKB_TOKEN_SECRET": "runtime-token-secret",
+            "EKB_DATABASE_URL": "postgresql://db.example.invalid/ekb",
+            "EKB_DEV_USER_EMAIL": "operator@example.invalid",
+            "EKB_DEV_USER_NAME": "Operator",
+            "EKB_DEV_PASSWORD": "admin",
+            "EKB_APPS_MASTER_KEY": "runtime-master-key",
+        },
+        "sh",
+        "-c",
+        f"touch {marker}",
+    )
+
+    assert result.returncode != 0
+    assert not marker.exists()
+    assert "default_admin_password" in result.stdout
+    assert "runtime-token-secret" not in result.stdout
+
+
 def test_migration_failure_does_not_start_command(tmp_path: Path) -> None:
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()

@@ -525,15 +525,22 @@ class AttachmentService:
         attachment_ids: list[str],
         conversation_id: Optional[str] = None,
     ) -> list[dict[str, Any]]:
-        """Load only owner-scoped, processed attachment text for an LLM context."""
+        """Load only owner-scoped, processed attachment text for an LLM context.
+
+        Spec 02 §9: every turn revalidates tenant, actor, attachment state,
+        retention and object availability.  Expired/deleted/purged items
+        fail closed.
+        """
         if not attachment_ids:
             return []
         contexts: list[dict[str, Any]] = []
+        now_iso = utc_now()
         with self._engine.connect() as conn:
             for attachment_id in dict.fromkeys(attachment_ids):
                 row = conn.execute(
                     text(
-                        "SELECT id, owner_user_id, conversation_id, status, detected_mime "
+                        "SELECT id, owner_user_id, conversation_id, status, detected_mime, "
+                        "expires_at, deleted_at, purged_at "
                         "FROM attachments WHERE id=:a AND tenant_id=:t"
                     ),
                     {"a": attachment_id, "t": tenant_id},
@@ -546,6 +553,11 @@ class AttachmentService:
                     raise AttachmentOwnershipError(attachment_id, owner_user_id)
                 if row[3] not in (AttachmentStatus.READY, AttachmentStatus.ATTACHED):
                     raise AttachmentStateConflict(attachment_id, row[3], AttachmentStatus.READY)
+                # Retention revalidation (spec 02 §9)
+                if row[5] and str(row[5]) <= now_iso:
+                    raise AttachmentStateConflict(attachment_id, "expired", AttachmentStatus.READY)
+                if row[6] or row[7]:
+                    raise AttachmentStateConflict(attachment_id, "deleted", AttachmentStatus.READY)
                 artifacts = conn.execute(
                     text(
                         "SELECT metadata FROM attachment_artifacts "

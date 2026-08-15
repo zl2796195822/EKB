@@ -17,10 +17,39 @@ from sqlalchemy import inspect, text
 
 from ekb_api.core.db import build_engine, prepare_legacy_schema
 from ekb_api.migrations.v4_004_postgres_cutover import V4_004_CHECKSUM
-from ekb_api.migrations.v4_005_retention_governance import V4_005_CHECKSUM
+from ekb_api.migrations.v4_005_retention_governance import (
+    V4_005_CHECKSUM,
+    _has_valid_30_day_check,
+)
 from ekb_api.migrations.v4_fullstack import KNOWN_VERSIONS
 
 API_ROOT = Path(__file__).resolve().parents[2]
+
+
+@pytest.mark.parametrize(
+    "sqltext",
+    [
+        "expires_at = deleted_at + interval '30 days'",
+        "((expires_at) = ((deleted_at) + ('30 days'::interval)))",
+        "expires_at = deleted_at + CAST('30 days' AS interval)",
+        "(expires_at) = (deleted_at + CAST('30 days' AS pg_catalog.interval))",
+    ],
+)
+def test_v4_005_accepts_postgresql_constraint_rendering(sqltext: str) -> None:
+    assert _has_valid_30_day_check([{"sqltext": sqltext}]) is True
+
+
+@pytest.mark.parametrize(
+    "sqltext",
+    [
+        "expires_at = deleted_at + '31 days'::interval",
+        "expires_at = deleted_at + interval '30 hours'",
+        "expires_at = deleted_at + '30 days'::text",
+        "expires_at = deleted_at + '30 days'::interval OR deleted_at IS NULL",
+    ],
+)
+def test_v4_005_rejects_constraint_with_invalid_or_extra_predicate(sqltext: str) -> None:
+    assert _has_valid_30_day_check([{"sqltext": sqltext}]) is False
 
 
 def _run(database: Path, *extra: str) -> subprocess.CompletedProcess[str]:

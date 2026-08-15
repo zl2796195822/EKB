@@ -47,6 +47,12 @@ def retrieve(
 
     M4-3 优化：多路召回共享检索上下文（一次 DB 查询 + 一次 BM25）+ 线程池并行。
     """
+    # 通用模式（未选知识库）：不加载全租户 chunk、不建 BM25、不调改写 LLM，
+    # 直接返回空，跳到生成阶段。否则 fetch_search_context 会对空 kb_ids 仍加载
+    # 全部租户 chunk 并构建 BM25（万级 chunk 耗时可观），既无用又压占 DB 连接。
+    if not kb_ids:
+        return []
+
     # M4-3：投机并行——原始 query 检索与 rewrite_query 同时启动。
     # 原始 query 本就是 queries[0]（rewrite_query 返回 [question, ...]），
     # 先用原始 query 预取检索上下文并跑一路检索，同时 LLM 改写在另一线程执行。
@@ -61,7 +67,12 @@ def retrieve(
             _safe_rewrite, query, route, tenant_id=auth.tenant_id, user_id=auth.actor_id
         )
         original_future = pool.submit(
-            store.search_with_context, ctx, query, _RECALL_TOP_K
+            store.search_with_context,
+            ctx,
+            query,
+            _RECALL_TOP_K,
+            tenant_id=auth.tenant_id,
+            user_id=auth.actor_id,
         )
 
         original_chunks = original_future.result()
@@ -79,7 +90,14 @@ def retrieve(
     if sub_queries:
         with ThreadPoolExecutor(max_workers=_MAX_WORKERS) as pool:
             futures = [
-                pool.submit(store.search_with_context, ctx, sq, _RECALL_TOP_K)
+                pool.submit(
+                    store.search_with_context,
+                    ctx,
+                    sq,
+                    _RECALL_TOP_K,
+                    tenant_id=auth.tenant_id,
+                    user_id=auth.actor_id,
+                )
                 for sq in sub_queries
             ]
             sub_results = [f.result() for f in futures]

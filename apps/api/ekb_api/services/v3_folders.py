@@ -105,7 +105,7 @@ def _folder_rows(
             "WHERE l.tenant_id=f.tenant_id AND l.folder_id=f.id AND d.status <> 'DELETED') "
             "FROM folders f WHERE "
             + " AND ".join(filters)
-            + " ORDER BY f.name COLLATE NOCASE, f.id"
+            + " ORDER BY LOWER(f.name), f.id"
         ),
         params,
     ).all()

@@ -236,6 +236,15 @@ def _legacy_conversation(engine, *, tenant: str, user: str) -> dict[str, str]:
 # ---------------------------------------------------------------------------
 
 
+def test_v4_007_timestamp_backfill_casts_legacy_values_for_postgres() -> None:
+    from ekb_api.migrations.v4_007_chat_graph import _turn_updated_at_backfill_sql
+
+    postgres_sql = _turn_updated_at_backfill_sql("postgresql")
+    assert "NULLIF(completed_at, '')::TIMESTAMPTZ" in postgres_sql
+    assert "NULLIF(created_at, '')::TIMESTAMPTZ" in postgres_sql
+    assert "::TIMESTAMPTZ" not in _turn_updated_at_backfill_sql("sqlite")
+
+
 def test_v4_007_backfills_branch_graph_without_guessing(tmp_path: Path) -> None:
     engine = build_engine(f"sqlite:///{tmp_path / 'backfill.db'}")
     prepare_legacy_schema(engine, seed=True)
