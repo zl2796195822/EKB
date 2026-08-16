@@ -713,6 +713,16 @@ Nginx 配置：
 - **部署完成**（commit `edb398f` + Dockerfile 补 configure_embedding_profile.py）：本机 docker buildx amd64（daocloud 基础镜像已缓存）→ docker save/gzip 168MB → scp → docker load；回滚点 tag `ekb/ekb-api:pre-launch-20260816-rollback`（旧镜像 cc65c228a88c）；旧容器 `ekb-api-v4` 停止并改名 `ekb-api-v4-old-20260816` 保留；新容器 `ekb-api-v4-launch`（--network host、--volumes-from 旧容器、--env-file /opt/ekb/ekb_api_v4.env.rebuilt）绑 8000 运行中 healthy。验证：entrypoint bootstrap+verify+admin PASS、healthz 200（直连+nginx）、`str(auth.tenant_role)`=0 处/`auth.tenant_role.value`=8 处、CLI 在镜像内。
 - **待完成**：生产登录验收需要用户提供管理员口令（admin@ekb.local 或 2796195822@qq.com 的现行口令——受管渠道重置过，容器 env 的 EKB_DEV_PASSWORD 已失效；用户已选择"提供现有口令"）；口令到手后验证 tenant_role 修复（admin GET /llm/providers 应含 endpoint_configs）+ QA 引用问答 E2E；TLS：443 被 xray 占用，需用户决策证书方案。服务器 root 凭据仅运行时使用，不写入本文件或任何文件。
 
+## 2026-08-16 对话 UI 一致性与流式输出优化（commit 689f0ca，未部署）
+
+- 用户反馈「AI 助手对话 UI 没有一致性和整体对齐」，基于代码审计完成前端优化：
+  - **布局对称化**：assistant 消息从 100% 通栏收敛为 min(94%, 680px)，与 user 气泡（min(82%,610px) 靠右）同体系；统一 padding/圆角，user 右上 / assistant 左上 4px 小圆角形成对话指向；meta 行 gap/字号统一。
+  - **状态区统一**：citations/feedback/actions 间距统一 9px、图标 12px；feedback 按钮改为 bordered 与 actions 一致。
+  - **tokens 化**：assistant.css 43+ 处硬编码 #hex → semantic tokens + color-mix（0 残留），与 Dashboard 对齐；补 tokens.css 缺失的 `--v2-color-surface-overlay`/`text-inverse`/`surface-soft` 映射；markdown 代码块改用 `--color-code-bg/text/border` tokens——暗色主题（html[data-theme='dark']）自动适配（此前助手页暗色下浅色背景失效）。
+  - **流式优化**：首 token 前骨架占位（shimmer）替代文本 + body min-height 52px 防跳动；AssistantMarkdown 流式拆分——已闭合主体按 stable 内容 memo 冻结（不随 delta 重解析），未闭合 ``` 围栏尾部作纯文本逐步追加（v2-md-stream-tail），长回答流式不再整块闪烁；光标保留。
+  - 新增 v3.assistant-ui-consistency.test.tsx 5 例；全量 113 passed、typecheck、build 通过。
+- 浏览器验证受限：IAB 环境点击/键盘命令异常（click 超时、broker mismatch），登录 UI 交互无法完成，视觉以组件渲染测试锁定；本地 dev 服务（API 8023 + vite 5174）已停止。未部署生产（前端发布需走 release 流程）。
+
 ## 2026-08-16 生产 QA 全链路验收通过（slash 模型名修复 + 用户口令验收）
 
 - **新生产缺陷修复**：用户口令登录验收时 QA 检索报 `EmbeddingError('未配置远程 embedding provider')`。根因：`config._load_runtime_model_providers_from_db` 对任何含 `/` 的模型 id 一律过滤（防 provider_key/model_id 歧义），而 OpenAI 兼容 embedding 模型名 `BAAI/bge-m3` 天然含命名空间斜杠 → siliconflow embedding 永远解析不到（摄取时 worker 走静态 env 配置所以向量能生成，掩盖了缺陷）。修复（commit `1725dc7`）：`'/'` 过滤仅对 chat kind 生效，embedding 放行；回归测试 `test_runtime_loader_accepts_namespaced_embedding_model_ids`（真实 DB 集成：TEAM credential 解密 + 斜杠模型名；调试中还发现测试表缺 `created_at` 列导致 `ORDER BY` 查询抛错被外层 `except: return []` 吞、以及 `SecretEnvelope` 的 `str()` 是 repr 而非 ciphertext 两个陷阱）。后端全量 `510 passed, 2 skipped`。
