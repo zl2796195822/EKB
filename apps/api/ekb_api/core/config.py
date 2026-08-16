@@ -562,9 +562,13 @@ def _load_runtime_model_providers_from_db(
                 for m in model_rows:
                     db_model_id = str(m[0])
                     mid, mname, mtype = str(m[1]), str(m[2] or m[1]), (m[3] or "chat")
-                    if not mid.strip() or "/" in mid:
+                    if not mid.strip() or ("/" in mid and kind == "chat"):
                         # Public ids use provider_key/model_id.  An embedded
                         # slash would make the selected provider ambiguous.
+                        # Embedding model names such as BAAI/bge-m3 use a
+                        # namespace slash by convention (OpenAI-compatible
+                        # /embeddings model field), so only chat ids are
+                        # rejected here.
                         continue
                     # catalog_models 白名单过滤（与模型服务 UI list_llm_models 一致）：
                     # 非自定义模型必须出现在 preset 白名单内，否则 UI 不可见也不应被 AI 助手选用。

@@ -11,6 +11,7 @@ import json
 
 import pytest
 from sqlalchemy import text
+from sqlalchemy.orm import sessionmaker
 
 from ekb_api.core.config import ModelProvider
 from ekb_api.core.db import build_engine
@@ -196,3 +197,83 @@ def test_profile_client_shares_tenant_runtime_provider_and_isolates_tenant(monke
             profile=_profile(),
         )
     assert calls == [("tenant-a", "actor-a"), ("tenant-a", "actor-b")]
+
+
+def test_runtime_loader_accepts_namespaced_embedding_model_ids(monkeypatch) -> None:
+    """BAAI/bge-m3-style model ids contain a slash and must not be dropped.
+
+    Regression for the production QA failure: the runtime provider loader
+    rejected any model id containing "/" to keep provider_key/model_id ids
+    unambiguous, which silently excluded every namespaced embedding model
+    (e.g. BAAI/bge-m3) and made retrieval fail with
+    EmbeddingError("未配置远程 embedding provider").
+    """
+    import ekb_api.core.config as config
+    from ekb_api.core.config import get_settings
+    from ekb_api.services import secrets as provider_secrets
+
+    monkeypatch.setenv("EKB_PROVIDER_MASTER_KEY", "test-master-" + "x" * 32)
+    get_settings.cache_clear()
+
+    engine = build_engine("sqlite:///:memory:")
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "CREATE TABLE llm_providers ("
+                "id text PRIMARY KEY, tenant_id text, user_id text, provider_key text, "
+                "name text, default_chat_endpoint text, endpoint_configs text, "
+                "credential_id text, is_enabled integer, preset_provider_id text)"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE TABLE provider_credentials ("
+                "id text PRIMARY KEY, tenant_id text, ciphertext text, status text, "
+                "ownership_scope text, owner_user_id text, ownership_key text)"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE TABLE llm_models ("
+                "id text PRIMARY KEY, tenant_id text, user_id text, provider_id text, "
+                "model_id text, display_name text, model_type text, capabilities text, "
+                "is_enabled integer, is_custom integer, created_at text)"
+            )
+        )
+        envelope = provider_secrets.encrypt("runtime-test-key")
+        connection.execute(
+            text(
+                "INSERT INTO llm_providers VALUES "
+                "('p1','tenant-a','owner','siliconflow','SiliconFlow',"
+                "'openai-chat-completions','{\"openai-chat-completions\":"
+                "{\"baseUrl\":\"https://api.siliconflow.invalid/v1\"}}',"
+                "'c1',1,NULL)"
+            )
+        )
+        connection.execute(
+            text(
+                "INSERT INTO provider_credentials VALUES "
+                "('c1','tenant-a',:ct,'ACTIVE','TEAM',NULL,'TEAM')"
+            ),
+            {"ct": envelope.ciphertext},
+        )
+        connection.execute(
+            text(
+                "INSERT INTO llm_models VALUES "
+                "('m1','tenant-a','owner','p1','BAAI/bge-m3','BAAI/bge-m3',"
+                "'embedding','{}',1,1,'2026-08-16T00:00:00Z')"
+            )
+        )
+
+    monkeypatch.setattr(
+        "ekb_api.core.db.get_session_local",
+        lambda: sessionmaker(bind=engine, expire_on_commit=False),
+    )
+    providers = config._load_runtime_model_providers_from_db(
+        tenant_id="tenant-a", user_id="actor-b", kind="embedding"
+    )
+    assert [p.name for p in providers] == ["siliconflow/BAAI/bge-m3"]
+    assert providers[0].model == "BAAI/bge-m3"
+    assert str(providers[0].base_url).endswith("/embeddings")
+    assert providers[0].api_key == "runtime-test-key"
+    engine.dispose()
