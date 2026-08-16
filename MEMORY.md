@@ -724,3 +724,14 @@ Nginx 配置：
   - **引用可回放**：`messages.citations` JSON 列已持久化（citation_id/index/type/title/section_path/version/updated_at 含生成时文档版本）；`message_citations` 关系表（v4_007 预留）代码未写、0 行——技术债，功能走 JSON 列不受影响；
   - 对话/turn 落库：conversations=37、messages=80、qa_turns=40。
 - **上线就绪度更新**：embedding 终态（READY/检索/引用问答）已生产验证通过；剩余：① TLS（443 被 xray 占用，需用户决策证书方案，80 明文现状）；② 新摄取 E2E 抽查（worker 为旧镜像，建议后续统一升级）；③ 检查单签字。对外口径可从「上传控制面可用 / 知识入库终态不可用」升级为「核心问答闭环生产可用，TLS 未启用」。
+
+## 2026-08-16 生产 TLS 验证 + 新摄取 E2E 全链验收（两任务完成）
+
+- **TLS 实况修正**：8443 HTTPS 早已配置且可用——Let's Encrypt 证书 `app.gjxhj.eu.cc`（2026-11-13 到期，DNS 解析到 172.245.71.158）+ `gjxhj.eu.cc`（10-21 到期）双 SNI；公网 `https://app.gjxhj.eu.cc:8443` 登录 + `/me` 验证通过；nginx 80 明文 + 8443 HTTPS 并存（8443 为 default_server）。443 被 xray 占用（UDP redir 翻墙），EKB 走 8443 是既定拓扑。**检查单 TLS REQUIRED 项实际已满足**。
+- **worker 升级**：新 worker `ekb-ingest-worker-v4-launch`（统一 launch-candidate 镜像 + `python3 -m ekb_api.runtime_worker`）运行 healthy；旧 worker `ekb-ingest-worker-v4`（23h，旧镜像）保留未停（SKIP LOCKED 双 worker 安全，建议后续停用）。
+- **新摄取 E2E 全链验收（生产实测，含两个新缺陷修复）**：
+  - 缺陷 A：`EKB_OBJECT_STORAGE_ENDPOINT=http://172.245.71.158:2443` 指向无监听端口，且 storage 校验把 LLM 的 remote-only 防回环误用于 internal endpoint → batch 创建 `OBJECT_STORAGE_UNAVAILABLE`。修复（commit `c52779f`）：internal endpoint 放行回环（仅要求 http(s)），public endpoint 保持严格 remote-only；回归测试 3 例。
+  - 缺陷 B：ENDPOINT 配了带路径的 `.../ekb-s3`，storage `_url` 又拼 bucket 名 → presigned URL 双重 `/ekb-s3/ekb-s3/uploads/...`，PUT 的对象 key 被污染，complete 的 internal head 404 → `OBJECT_CHECKSUM_MISMATCH`。修复：env ENDPOINT 改为 `https://app.gjxhj.eu.cc:8443`（不带 bucket 路径），nginx `^~ /ekb-s3/` 反代 MinIO 路径对齐。
+  - 最终链路：batch ACCEPTED → session（presigned `https://app.gjxhj.eu.cc:8443/ekb-s3/...`）→ PUT 200 → complete 200（version+document+ingest_job）→ **item READY**、文档 `e2e-2.md` READY（304 总数）、1 chunk 带真实向量（内容正确）、ingest job SUCCEEDED(1 attempt)；
+  - **检索闭环**：问「连接池排查顺序」返回精确引用新文档内容的回答（finish_reason=stop、confidence=medium、「依据《上传E2E 2026-08-16 二轮》中的记录」）——新 worker 的 DB 动态 embedding 解析（slash 修复后）真实工作。
+- **上线就绪度最终更新**：核心闭环（上传→READY→检索→引用问答）与 TLS 8443 均生产验证通过；剩余非阻塞项：旧 worker 停用、message_citations 关系表空（引用走 messages.citations JSON 列，技术债）、检查单正式签字、新摄取浏览器端（curl 已覆盖协议全链）。对外口径可升级为「生产核心闭环可用」。
