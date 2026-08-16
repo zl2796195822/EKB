@@ -10,7 +10,7 @@ PRESET_PROVIDERS: list[dict] = [
     {
         "id": "deepseek",
         "name": "深度求索 DeepSeek",
-        "description": "深度求索推出的大语言模型 API，提供推理模型和通用对话模型。2026 官方在售仅 2 款：DeepSeek Chat（通用对话）和 DeepSeek Reasoner（深度推理）。",
+        "description": "深度求索推出的大语言模型 API。2026 官方在售 2 款：DeepSeek V4 Flash（通用对话/高并发低成本）与 DeepSeek V4 Pro（深度推理/旗舰）。旧名 deepseek-chat / deepseek-reasoner 已于 2026/07/24 停用。",
         "default_chat_endpoint": "openai-chat-completions",
         "endpoint_configs": {
             "openai-chat-completions": {
@@ -22,28 +22,29 @@ PRESET_PROVIDERS: list[dict] = [
         },
         "auth_type": "api-key",
         "auth_optional": False,
-        # 2026 Q2 起：GUI 展示只保留官方白名单在售模型，不再允许 API 返回的 v3/v4-pro/v4-flash 等历史灰度模型混入
+        # GUI 展示只保留官方白名单在售模型（deepseek-v4-flash / deepseek-v4-pro），
+        # 不再允许 API 返回的历史灰度模型（deepseek-chat / deepseek-reasoner 等）混入
         "model_list_source": "catalog+api",
         "catalog_models": [
             {
-                "id": "deepseek-chat",
-                "name": "DeepSeek Chat",
+                "id": "deepseek-v4-flash",
+                "name": "DeepSeek V4 Flash",
                 "model_type": "chat",
-                "context_window": 65536,
-                "max_output_tokens": 8192,
+                "context_window": 1000000,
+                "max_output_tokens": 384000,
                 "capabilities": {"chat": True, "tool_use": True},
                 "input_price": "0.14",
                 "output_price": "0.28",
             },
             {
-                "id": "deepseek-reasoner",
-                "name": "DeepSeek Reasoner",
+                "id": "deepseek-v4-pro",
+                "name": "DeepSeek V4 Pro",
                 "model_type": "reasoning",
-                "context_window": 65536,
-                "max_output_tokens": 8192,
+                "context_window": 1000000,
+                "max_output_tokens": 384000,
                 "capabilities": {"reasoning": True, "chat": True, "tool_use": True},
-                "input_price": "0.55",
-                "output_price": "2.19",
+                "input_price": "0.435",
+                "output_price": "0.87",
             },
         ],
         "websites": {

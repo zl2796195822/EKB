@@ -405,8 +405,8 @@ def _default_model_attrs(model_id: str, model_type: str | None) -> tuple[str, di
     price_map: dict[tuple[str, str], tuple[str, str]] = {
         ("deepseek", "chat"): ("0.14", "0.28"),
         ("deepseek", "reasoning"): ("0.55", "2.19"),
-        ("deepseek-v4-flash", "chat"): ("0.10", "0.20"),
-        ("deepseek-v4-pro", "chat"): ("0.27", "1.10"),
+        ("deepseek-v4-flash", "chat"): ("0.14", "0.28"),
+        ("deepseek-v4-pro", "chat"): ("0.435", "0.87"),
         ("deepseek-reasoner", "reasoning"): ("0.55", "2.19"),
         ("deepseek-r1", "reasoning"): ("0.55", "2.19"),
         ("gpt-4o", "chat"): ("2.50", "10.00"),

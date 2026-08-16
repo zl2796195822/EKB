@@ -370,7 +370,7 @@ class LLMModel(Base):
     user_id = Column(String(36), nullable=False, index=True)
     """所属 LLM Provider"""
     provider_id = Column(String(36), nullable=False, index=True)
-    """模型唯一 ID，如 deepseek-chat、claude-sonnet-4-20250514"""
+    """模型唯一 ID，如 deepseek-v4-flash、claude-sonnet-4-20250514"""
     model_id = Column(String(128), nullable=False)
     """模型展示名"""
     display_name = Column(String(256), nullable=False)

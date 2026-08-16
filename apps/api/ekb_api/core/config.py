@@ -288,7 +288,7 @@ def _parse_providers() -> list[ModelProvider]:
                     kind="chat",
                     base_url=os.getenv("EKB_LLM_API_URL", ""),
                     api_key=os.getenv("EKB_LLM_API_KEY", ""),
-                    model=os.getenv("EKB_LLM_MODEL", "deepseek-chat"),
+                    model=os.getenv("EKB_LLM_MODEL", "deepseek-v4-flash"),
                     timeout_seconds=float(os.getenv("EKB_LLM_TIMEOUT", "30")),
                 )
             )
