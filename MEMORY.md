@@ -713,6 +713,15 @@ Nginx 配置：
 - **部署完成**（commit `edb398f` + Dockerfile 补 configure_embedding_profile.py）：本机 docker buildx amd64（daocloud 基础镜像已缓存）→ docker save/gzip 168MB → scp → docker load；回滚点 tag `ekb/ekb-api:pre-launch-20260816-rollback`（旧镜像 cc65c228a88c）；旧容器 `ekb-api-v4` 停止并改名 `ekb-api-v4-old-20260816` 保留；新容器 `ekb-api-v4-launch`（--network host、--volumes-from 旧容器、--env-file /opt/ekb/ekb_api_v4.env.rebuilt）绑 8000 运行中 healthy。验证：entrypoint bootstrap+verify+admin PASS、healthz 200（直连+nginx）、`str(auth.tenant_role)`=0 处/`auth.tenant_role.value`=8 处、CLI 在镜像内。
 - **待完成**：生产登录验收需要用户提供管理员口令（admin@ekb.local 或 2796195822@qq.com 的现行口令——受管渠道重置过，容器 env 的 EKB_DEV_PASSWORD 已失效；用户已选择"提供现有口令"）；口令到手后验证 tenant_role 修复（admin GET /llm/providers 应含 endpoint_configs）+ QA 引用问答 E2E；TLS：443 被 xray 占用，需用户决策证书方案。服务器 root 凭据仅运行时使用，不写入本文件或任何文件。
 
+## 2026-08-16 无框对话布局 + 流式锁定会话切换（commit 01af6dc，已发布 release 20260816-ui-frameless）
+
+- 用户第二轮 UI 反馈：① 回答生成时不能选择别的会话；② 去掉消息气泡框——用户消息右对齐、AI 回答左对齐、无 UI 框；③ 整体布局合理。
+- 实现：
+  - **流式锁定会话**：AssistantSidebar 新增 `streaming` prop，流式时会话项 disabled（灰化 + title「回答生成中，完成后才能切换会话」），此前只是点击被拦截但无禁用视觉（"点了没反应"）；顶部知识库 select 维持 disabled。
+  - **无框布局**：message-body 移除 border/background/圆角（padding 0 2px），内容无框展示；用户消息右对齐（min(88%,640px) justify-self end）、AI 回答左对齐（全宽）；meta 行名字+时间按角色对齐。
+  - **整体布局**：消息列表 760→820px、间距 22→24px、正文 12→13px（markdown 同步）；引用从 pill 改为无框文字链接风格（primary 色）；会话禁用态灰化。
+- 验证：113 passed、typecheck、build；已发布生产（同标准流程：release 目录 + current symlink 原子切换 + nginx -t/reload + 公网双入口 bundle 验证 `index-Be3otNDx.js`/`index-r4YD9Plb.css`、CSS 含新标记）。回滚点：`current.old-frameless-20260816`、`current.old-20260816`、`releases/20260816-ui-consistency`。
+
 ## 2026-08-16 对话 UI 一致性与流式输出优化（commit 689f0ca，已发布生产）
 
 - 用户反馈「AI 助手对话 UI 没有一致性和整体对齐」，基于代码审计完成前端优化：
