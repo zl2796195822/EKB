@@ -42,7 +42,8 @@ COPY sitecustomize.py /usr/local/lib/python3.11/site-packages/sitecustomize.py
 COPY entrypoint.sh ./entrypoint.sh
 COPY ensure_admin.py ./ensure_admin.py
 COPY repair_admin_access.py ./repair_admin_access.py
-RUN chmod +x /app/entrypoint.sh /app/ensure_admin.py /app/repair_admin_access.py 2>/dev/null || true
+COPY configure_embedding_profile.py ./configure_embedding_profile.py
+RUN chmod +x /app/entrypoint.sh /app/ensure_admin.py /app/repair_admin_access.py /app/configure_embedding_profile.py 2>/dev/null || true
 
 # 生产默认 env（启动时用 --env-file 覆盖，见上方示例）
 ENV PYTHONUNBUFFERED=1 \
