@@ -114,6 +114,43 @@ def _keyword_score(query: str, content: str) -> float:
     return float(term_hits + cjk_hits + ascii_hits)
 
 
+def _is_postgres() -> bool:
+    """当前引擎是否为 PostgreSQL（决定向量检索走 SQL 还是 Python）。"""
+    from ekb_api.core.db import DATABASE_URL  # noqa: PLC0415
+
+    return DATABASE_URL.startswith("postgresql")
+
+
+def _pg_native_semantic_scores(rows, query_vec, qdim: int, threshold: float) -> dict[str, float]:
+    """PostgreSQL 原生余弦分：一次 SQL 走 pgvector `<=>`（HNSW/顺序扫），返回 {chunk_id: score}。
+
+    - 仅对 `embedding IS NOT NULL` 且维度匹配的行打分（`vector_dims()` 是 pgvector 维度函数，
+      只有 PG 有；本函数只被 `_is_postgres()` 分支调用，SQLite 不会执行到这里）。
+    - 查询向量以 pgvector 字面量文本 `[1.0, 2.0, ...]` 绑定并 `::vector` 强转，
+      避免依赖驱动对 Python list 的隐式向量适配（psycopg2 默认会把 list 绑成 ARRAY 语法）。
+    - 任何失败（vector 列未就绪 / 表缺失 / 驱动异常）静默回退空 dict，由 Python 层兜底。
+    """
+    from ekb_api.core.db import get_engine  # noqa: PLC0415
+
+    ids = [str(row.id) for row in rows]
+    if not ids:
+        return {}
+    try:
+        with get_engine().connect() as conn:
+            result = conn.execute(
+                text(
+                    "SELECT id::text AS cid, 1 - (embedding <=> :qvec::vector) AS score "
+                    "FROM chunks "
+                    "WHERE id = ANY(:ids) "
+                    "AND embedding IS NOT NULL AND vector_dims(embedding) = :qdim"
+                ),
+                {"ids": ids, "qvec": str(query_vec), "qdim": qdim},
+            )
+            return {str(row[0]): float(row[1]) for row in result.fetchall()}
+    except Exception:
+        return {}
+
+
 def _decode_preview_text(raw_bytes: bytes) -> str:
     """M1-04 前的 demo 级解析，已被 ekb_api.parsing 替代。保留供种子数据兼容。"""
     text = raw_bytes[:8000].decode("utf-8", errors="ignore").strip()
@@ -1118,9 +1155,16 @@ class SqlStore:
             query_vec = embed_one(query, tenant_id=tenant_id, user_id=user_id)
             qdim = len(query_vec)
             threshold = settings.retrieval_cosine_threshold
+            # PostgreSQL：预取 pgvector SQL `<=>`（HNSW 索引）原生余弦分；SQLite 跳过。
+            native_scores: dict[str, float] = {}
+            if _is_postgres():
+                native_scores = _pg_native_semantic_scores(rows, query_vec, qdim, threshold)
             for i, row in enumerate(rows):
                 if row.embedding and len(row.embedding) == qdim:
-                    score = cosine_similarity(query_vec, row.embedding)
+                    # 原生分可用则用之（SQL 已按维度/非空过滤），否则回退 Python 层余弦。
+                    score = native_scores.get(str(row.id))
+                    if score is None:
+                        score = cosine_similarity(query_vec, row.embedding)
                     semantic_scores[i] = score
                     if score >= threshold:
                         candidates.add(i)

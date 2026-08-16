@@ -31,6 +31,7 @@ from ekb_api.migrations import (
     v4_008_attachments,
     v4_009_qa_route_audit,
     v4_010_conversation_engine_unification,
+    v4_011_pgvector_embedding,
 )
 
 
@@ -292,6 +293,13 @@ CHAIN = (
         apply_name="apply_v4_010",
         verify_name="verify_v4_010",
         rollback_name="rollback_v4_010_dry_run",
+    ),
+    _step(
+        v4_011_pgvector_embedding.VERSION,
+        v4_011_pgvector_embedding,
+        apply_name="apply_v4_011",
+        verify_name="verify_v4_011",
+        rollback_name="rollback_v4_011_dry_run",
     ),
 )
 

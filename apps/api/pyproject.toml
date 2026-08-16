@@ -15,6 +15,7 @@ dependencies = [
   "tiktoken>=0.7,<1",
   "structlog>=24.0,<25",
   "psycopg2-binary>=2.9,<3",
+  "pgvector>=0.3,<1",
   "opentelemetry-sdk>=1.25,<2",
   "opentelemetry-instrumentation-fastapi>=0.46b0,<1",
   "cryptography>=41.0,<50",

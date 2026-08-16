@@ -3,6 +3,7 @@ from __future__ import annotations
 from sqlalchemy import JSON, Boolean, Column, Integer, String, Text
 
 from ekb_api.core.db import Base
+from ekb_api.core.embedding_types import EmbeddingVector
 
 
 class Tenant(Base):
@@ -102,7 +103,9 @@ class Chunk(Base):
     content = Column(Text, nullable=False)
     content_hash = Column(String(128), nullable=True)
     token_count = Column(Integer, nullable=True)
-    embedding = Column(JSON, nullable=True)
+    # pgvector 原生向量列（v4_011）：PostgreSQL 走 VECTOR + HNSW（ix_chunks_embedding_hnsw），
+    # SQLite 降级为 JSON，读取/写入始终是 list[float]。
+    embedding = Column(EmbeddingVector(), nullable=True)
     created_at = Column(String(32), nullable=False)
     updated_at = Column(String(32), nullable=False)
 
@@ -334,7 +337,9 @@ class LLMProvider(Base):
     websites = Column(JSON, nullable=False, default=dict)
     """默认聊天端点类型：openai-chat-completions / anthropic-messages / ollama-chat 等"""
     default_chat_endpoint = Column(String(64), nullable=True)
-    """各端点配置字典：{ endpoint_type: { baseUrl, adapterFamily, reasoningFormatType, modelsApiUrls } }"""
+    """各端点配置字典：
+    { endpoint_type: { baseUrl, adapterFamily, reasoningFormatType, modelsApiUrls } }
+    """
     endpoint_configs = Column(JSON, nullable=False, default=dict)
     """认证类型：api-key / oauth / iam-aws / api-key-aws / iam-gcp / iam-azure"""
     auth_type = Column(String(32), nullable=False, default="api-key")

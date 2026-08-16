@@ -182,6 +182,11 @@ def bootstrap_legacy_schema(database_url: str) -> None:
     """
     engine = build_engine(database_url)
     try:
+        # EmbeddingVector 在 PostgreSQL 上 DDL 为原生 VECTOR 列（v4_011），
+        # 必须先确保 pgvector 扩展可用，否则 create_all 会因 vector 类型
+        # 不存在而失败。SQLite 跳过（无 pg_extension）。
+        if not database_url.startswith("sqlite"):
+            _init_pgvector(engine)
         prepare_legacy_schema(engine, seed=False)
     finally:
         engine.dispose()
@@ -195,8 +200,8 @@ def init_db() -> None:
     engine = get_engine()
 
     # PostgreSQL：初始化 pgvector 扩展（幂等；SQLite 跳过）。
-    # pgvector 为 Chunk.embedding 列提供原生 HNSW/IVFFlat 索引支持，
-    # 当前实现仍在 Python 层做余弦相似度，pgvector 为后续优化预留。
+    # v4_011 起 Chunk.embedding 在 PostgreSQL 上是 pgvector 原生 VECTOR 列
+    # （HNSW 索引 ix_chunks_embedding_hnsw），必须先建扩展再建表。
     if not DATABASE_URL.startswith("sqlite"):
         _init_pgvector(engine)
     else:
@@ -225,8 +230,8 @@ def init_db() -> None:
 def _init_pgvector(engine, *, settings=None) -> None:
     """在 PostgreSQL 中创建并验证 pgvector 扩展。
 
-    pgvector 扩展允许使用 VECTOR 类型和 ivfflat/hnsw 索引。
-    当前 Chunk.embedding 使用 JSON/JSONB 列，pgvector 为将来切换原生向量列预留。
+    pgvector 扩展提供原生 VECTOR 类型和 ivfflat/hnsw 索引；v4_011 起
+    Chunk.embedding 在 PostgreSQL 上即为此原生列（HNSW 余弦索引）。
     生产环境或显式 required 配置下失败必须阻断启动；开发/测试环境仅在
     非 required 时允许降级，但必须留下可观测状态。
     """
