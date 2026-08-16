@@ -189,10 +189,17 @@ class S3CompatibleStorageClient:
 
         if not _is_remote_provider_url(endpoint):
             raise ObjectStorageUnavailable("object storage endpoint must be a remote HTTP URL")
-        if internal_endpoint and not _is_remote_provider_url(internal_endpoint):
-            raise ObjectStorageUnavailable(
-                "object storage internal endpoint must be a remote HTTP URL"
-            )
+        if internal_endpoint:
+            # The internal endpoint is the container->MinIO path, which is
+            # intentionally loopback/private (MinIO stays bound to 127.0.0.1);
+            # only require a well-formed http(s) URL here.  The public
+            # ``endpoint`` above keeps the strict remote-only check because it
+            # is embedded in presigned URLs handed to browsers.
+            parsed_internal = urlsplit(internal_endpoint)
+            if parsed_internal.scheme not in ("http", "https") or not parsed_internal.hostname:
+                raise ObjectStorageUnavailable(
+                    "object storage internal endpoint must be an http(s) URL"
+                )
         if not bucket or not access_key or not secret_key:
             raise ObjectStorageUnavailable("object storage bucket and credentials are required")
         self.endpoint = endpoint.rstrip("/")

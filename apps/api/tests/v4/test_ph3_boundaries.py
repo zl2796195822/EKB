@@ -191,3 +191,38 @@ def test_sanitize_detail_drops_unknown_and_sensitive_keys() -> None:
     assert "provider_trace" not in cleaned
     assert "stderr" not in cleaned
     assert sanitize_detail(None) == {}
+
+
+def test_s3_internal_endpoint_accepts_loopback_while_public_stays_remote_only() -> None:
+    """Regression: the container->MinIO path is loopback by design, but the
+    strict remote-only check (meant for the public presigned endpoint) was
+    applied to it, making loopback MinIO deployments fail with
+    OBJECT_STORAGE_UNAVAILABLE on every upload batch creation."""
+    client = S3CompatibleStorageClient(
+        endpoint="https://objects.example.invalid",
+        internal_endpoint="http://127.0.0.1:9000",
+        bucket="ekb-test",
+        region="us-east-1",
+        access_key="ACCESS_KEY",
+        secret_key="SECRET_VALUE",
+    )
+    assert client.internal_endpoint == "http://127.0.0.1:9000"
+    # The public endpoint must remain strictly remote (no loopback/SSRF).
+    with pytest.raises(ObjectStorageUnavailable):
+        S3CompatibleStorageClient(
+            endpoint="http://127.0.0.1:9000",
+            bucket="ekb-test",
+            region="us-east-1",
+            access_key="ACCESS_KEY",
+            secret_key="SECRET_VALUE",
+        )
+    # Malformed internal URLs are still rejected.
+    with pytest.raises(ObjectStorageUnavailable):
+        S3CompatibleStorageClient(
+            endpoint="https://objects.example.invalid",
+            internal_endpoint="ftp://127.0.0.1:9000",
+            bucket="ekb-test",
+            region="us-east-1",
+            access_key="ACCESS_KEY",
+            secret_key="SECRET_VALUE",
+        )
