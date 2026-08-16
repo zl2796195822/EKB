@@ -713,7 +713,7 @@ Nginx 配置：
 - **部署完成**（commit `edb398f` + Dockerfile 补 configure_embedding_profile.py）：本机 docker buildx amd64（daocloud 基础镜像已缓存）→ docker save/gzip 168MB → scp → docker load；回滚点 tag `ekb/ekb-api:pre-launch-20260816-rollback`（旧镜像 cc65c228a88c）；旧容器 `ekb-api-v4` 停止并改名 `ekb-api-v4-old-20260816` 保留；新容器 `ekb-api-v4-launch`（--network host、--volumes-from 旧容器、--env-file /opt/ekb/ekb_api_v4.env.rebuilt）绑 8000 运行中 healthy。验证：entrypoint bootstrap+verify+admin PASS、healthz 200（直连+nginx）、`str(auth.tenant_role)`=0 处/`auth.tenant_role.value`=8 处、CLI 在镜像内。
 - **待完成**：生产登录验收需要用户提供管理员口令（admin@ekb.local 或 2796195822@qq.com 的现行口令——受管渠道重置过，容器 env 的 EKB_DEV_PASSWORD 已失效；用户已选择"提供现有口令"）；口令到手后验证 tenant_role 修复（admin GET /llm/providers 应含 endpoint_configs）+ QA 引用问答 E2E；TLS：443 被 xray 占用，需用户决策证书方案。服务器 root 凭据仅运行时使用，不写入本文件或任何文件。
 
-## 2026-08-16 对话 UI 一致性与流式输出优化（commit 689f0ca，未部署）
+## 2026-08-16 对话 UI 一致性与流式输出优化（commit 689f0ca，已发布生产）
 
 - 用户反馈「AI 助手对话 UI 没有一致性和整体对齐」，基于代码审计完成前端优化：
   - **布局对称化**：assistant 消息从 100% 通栏收敛为 min(94%, 680px)，与 user 气泡（min(82%,610px) 靠右）同体系；统一 padding/圆角，user 右上 / assistant 左上 4px 小圆角形成对话指向；meta 行 gap/字号统一。
@@ -721,7 +721,8 @@ Nginx 配置：
   - **tokens 化**：assistant.css 43+ 处硬编码 #hex → semantic tokens + color-mix（0 残留），与 Dashboard 对齐；补 tokens.css 缺失的 `--v2-color-surface-overlay`/`text-inverse`/`surface-soft` 映射；markdown 代码块改用 `--color-code-bg/text/border` tokens——暗色主题（html[data-theme='dark']）自动适配（此前助手页暗色下浅色背景失效）。
   - **流式优化**：首 token 前骨架占位（shimmer）替代文本 + body min-height 52px 防跳动；AssistantMarkdown 流式拆分——已闭合主体按 stable 内容 memo 冻结（不随 delta 重解析），未闭合 ``` 围栏尾部作纯文本逐步追加（v2-md-stream-tail），长回答流式不再整块闪烁；光标保留。
   - 新增 v3.assistant-ui-consistency.test.tsx 5 例；全量 113 passed、typecheck、build 通过。
-- 浏览器验证受限：IAB 环境点击/键盘命令异常（click 超时、broker mismatch），登录 UI 交互无法完成，视觉以组件渲染测试锁定；本地 dev 服务（API 8023 + vite 5174）已停止。未部署生产（前端发布需走 release 流程）。
+- 浏览器验证受限：IAB 环境点击/键盘命令异常（click 超时、broker mismatch），登录 UI 交互无法完成，视觉以组件渲染测试锁定；本地 dev 服务（API 8023 + vite 5174）已停止。
+- **已发布生产**（用户确认「每次改动都需要发布」，release `20260816-ui-consistency`）：本地 build → tgz 上传 → `/opt/ekb/web/releases/20260816-ui-consistency/dist/` → `current` 目录原子切换为 symlink（旧目录备份 `current.old-20260816` + `current.pre-ui-20260816` 双重回滚点）→ `nginx -t` + reload。验证：http 80 与 https 8443 均返回新 bundle（`index-pDs3R6eC.js` / `index-8la0wG-n.css`）、JS/CSS 200、新 CSS 含 `v2-m4-stream-placeholder`/`v2-md-stream-tail`/color-mix 标记。**后续每次前端改动都走此发布流程**。
 
 ## 2026-08-16 生产 QA 全链路验收通过（slash 模型名修复 + 用户口令验收）
 
