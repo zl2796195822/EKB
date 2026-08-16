@@ -56,7 +56,8 @@ def retrieve(
     # M4-3：投机并行——原始 query 检索与 rewrite_query 同时启动。
     # 原始 query 本就是 queries[0]（rewrite_query 返回 [question, ...]），
     # 先用原始 query 预取检索上下文并跑一路检索，同时 LLM 改写在另一线程执行。
-    ctx = store.fetch_search_context(auth, kb_ids)
+    # M4-9：传入原始 query 供 pgvector ANN 预筛候选池（防全表加载 OOM）。
+    ctx = store.fetch_search_context(auth, kb_ids, query=query)
     if ctx is None:
         # 无可见 KB 或无 chunk：跳过改写直接返回空。
         return []

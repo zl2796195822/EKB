@@ -107,6 +107,11 @@ class Settings:
     retrieval_rrf_k: int  # RRF 常数（排名衰减）。
     retrieval_rerank_pool: int  # rerank 候选池大小（融合后精排上限）。
     retrieval_bm25_enabled: bool  # 是否启用 BM25 词法重排信号。
+    # M4-9 检索候选池上限：SQL 层预筛最多取此数量的 chunk 进内存打分。
+    # 防全表加载（.all()）——大数据量知识库（数万 chunk × embedding 数组）会 OOM 崩溃 worker。
+    # PostgreSQL 走 pgvector HNSW 原生 ANN（ORDER BY embedding <=> LIMIT pool）；
+    # 其余引擎用关键词 LIKE 预筛 + LIMIT pool。
+    retrieval_pool_size: int
     # 生成参数（全局，不随 provider 变动）。
     llm_temperature: float
     llm_max_tokens: int
@@ -177,6 +182,8 @@ class Settings:
     object_storage_access_key: str
     object_storage_secret_key: str
     object_storage_path_style: bool
+    # --- Redis（可选，fail-open 降级进程内）---
+    redis_url: str
 
     @property
     def is_production(self) -> bool:
@@ -339,6 +346,8 @@ def get_settings() -> Settings:
         retrieval_rrf_k=int(os.getenv("EKB_RETRIEVAL_RRF_K", "60")),
         retrieval_rerank_pool=int(os.getenv("EKB_RETRIEVAL_RERANK_POOL", "20")),
         retrieval_bm25_enabled=os.getenv("EKB_RETRIEVAL_BM25", "true").lower() == "true",
+        # 默认 1000：远超测试/小库数据量，不改变小库行为；防止数万 chunk 全表加载。
+        retrieval_pool_size=int(os.getenv("EKB_RETRIEVAL_POOL_SIZE", "1000")),
         llm_temperature=float(os.getenv("EKB_LLM_TEMPERATURE", "0.1")),
         llm_max_tokens=int(os.getenv("EKB_LLM_MAX_TOKENS", "1024")),
         # M4-6 Multi-Turn Chat 配置
@@ -392,6 +401,7 @@ def get_settings() -> Settings:
         object_storage_secret_key=os.getenv("EKB_OBJECT_STORAGE_SECRET_KEY", ""),
         object_storage_path_style=os.getenv("EKB_OBJECT_STORAGE_PATH_STYLE", "true").lower()
         in {"1", "true", "yes", "on"},
+        redis_url=os.getenv("EKB_REDIS_URL", ""),
     )
 
 

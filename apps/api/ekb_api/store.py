@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 from sqlalchemy import inspect, text
@@ -151,6 +151,21 @@ def _pg_native_semantic_scores(rows, query_vec, qdim: int, threshold: float) -> 
         return {}
 
 
+def _query_keywords(query: str) -> list[str]:
+    """从 query 提取用于 LIKE 预筛的关键词（ASCII 词 + 中文 2-gram，最多 4 个）。
+
+    只用于非 ANN 路径的候选池预筛（SQLite / embedding 不可用），配合 LIMIT pool
+    防止全表加载；精确打分仍由池内 BM25 + 语义门禁完成。
+    """
+    import re
+
+    tokens: list[str] = [tok.lower() for tok in re.findall(r"[A-Za-z0-9_]{2,}", query)]
+    cjk = re.sub(r"[^一-鿿]", "", query)
+    if cjk:
+        tokens.extend(cjk[i : i + 2] for i in range(max(0, len(cjk) - 1)))
+    return tokens[:4]
+
+
 def _decode_preview_text(raw_bytes: bytes) -> str:
     """M1-04 前的 demo 级解析，已被 ekb_api.parsing 替代。保留供种子数据兼容。"""
     text = raw_bytes[:8000].decode("utf-8", errors="ignore").strip()
@@ -164,13 +179,19 @@ class SearchContext:
     """M4-3 检索优化：预取的检索上下文，多路召回共享。
 
     避免每个子查询重复全表扫描 + 重复建 BM25 索引。
+
+    M4-9：候选池有上限（retrieval_pool_size）。PostgreSQL 走 pgvector HNSW 原生
+    ANN 预筛（ORDER BY embedding <=> LIMIT pool），ann_query/native_scores 记录
+    该预筛所用的 query 与余弦分；子查询与 ann_query 不同时需重新 embed + 池内打分。
     """
 
-    rows: list  # ORM Chunk rows
+    rows: list  # ORM Chunk rows（已限池，规模 <= retrieval_pool_size）
     corpus: list[str]
     bm25: Optional[object]  # _Bm25 实例或 None
     has_embeddings: bool
     settings: object  # Settings 实例
+    ann_query: Optional[str] = None  # 池是基于哪个 query 预筛的（PG ANN 分支）
+    native_scores: dict = field(default_factory=dict)  # {chunk_id: 余弦分}（PG ANN 分支）
 
 
 class SqlStore:
@@ -670,7 +691,9 @@ class SqlStore:
 
         返回 True 表示允许本次问答（并计费），False 表示已超额（调用方应拒绝，如 429）。
         配额 0 表示不限；跨自然日自动清零。未知租户 fail-open 放行，避免阻断正常请求。
-        注：SQLite 无 SELECT FOR UPDATE，依赖短会话串行写；生产 PG 可加行锁强化。
+
+        Redis 启用时用 Redis INCR + TTL（键 = ekb:quota:qa:{tenant}:{date}）做跨实例
+        原子计数，跨自然日自动过期；Redis 未配置/失败降级 DB 计数（原逻辑）。
         """
         from ekb_api import models as _models
 
@@ -682,8 +705,24 @@ class SqlStore:
                 return True
             # 容忍历史脏数据（如旧迁移把 'default' 写进整型列）：非数字一律按不限处理。
             quota = _as_int(tenant.quota_daily_qa, default=0)
-            if quota <= 0:
-                return True  # 不限
+        if quota <= 0:
+            return True  # 不限
+
+        # Redis 原子计数路径（fail-open：异常时降级 DB，不阻断服务）。
+        try:
+            from ekb_api.core.redis_client import incr as redis_incr  # noqa: PLC0415
+            from ekb_api.core.redis_client import is_redis_enabled  # noqa: PLC0415
+
+            if is_redis_enabled():
+                count_key = f"ekb:quota:qa:{tenant_id}:{today}"
+                ttl = 24 * 60 * 60  # 跨日自动失效（当天剩余秒数由 Redis TTL 兜底）
+                count = redis_incr(count_key, ttl_seconds=ttl)
+                return count <= quota
+        except Exception:  # noqa: BLE001
+            pass  # 降级 DB 计数
+
+        # DB 计数（原逻辑）。
+        with SessionLocal() as session:
             usage = session.query(_models.TenantDailyUsage).filter_by(tenant_id=tenant_id).first()
             if usage is None or usage.usage_date != today:
                 usage = _models.TenantDailyUsage(tenant_id=tenant_id, usage_date=today, qa_count=0)
@@ -1080,13 +1119,106 @@ class SqlStore:
 
     # ---- M4-3 检索优化：共享上下文 + 并行多路召回 ----
 
-    def fetch_search_context(
-        self, auth: AuthContext, kb_ids: list[str]
-    ) -> Optional[SearchContext]:
-        """一次性获取检索上下文：allowed_kb_ids + rows + BM25 索引 + embedding 可用性。
+    def _fetch_pg_ann_pool(
+        self,
+        auth: AuthContext,
+        query: str,
+        kb_ids: set[str],
+        pool_size: int,
+    ) -> tuple[list, dict]:
+        """pgvector 原生 ANN：ORDER BY embedding <=> :q LIMIT pool，只取最相似候选。
 
-        M4-3 优化：多路召回时避免 N 次重复全表查询 + N 次重复建 BM25 索引。
-        retrieve 层调用一次，各子查询共享同一上下文。
+        返回 (rows, native_scores)。embedding 调用失败 / vector 列未就绪时抛异常，
+        由 fetch_search_context 捕获后降级关键词预筛（不中断检索流程）。
+        """
+        from ekb_api.core.db import get_engine
+        from ekb_api.embedding import embed_one
+
+        query_vec = embed_one(query, tenant_id=auth.tenant_id, user_id=auth.actor_id)
+        qdim = len(query_vec)
+        ids = [str(k) for k in kb_ids]
+        with get_engine().connect() as conn:
+            result = conn.execute(
+                text(
+                    "SELECT c.id::text AS cid, 1 - (c.embedding <=> :qvec::vector) AS score "
+                    "FROM chunks c JOIN documents d ON d.id = c.doc_id "
+                    "WHERE d.status = :status AND c.tenant_id = :tenant "
+                    "AND c.kb_id = ANY(:kb_ids) "
+                    "AND c.embedding IS NOT NULL AND vector_dims(c.embedding) = :qdim "
+                    "ORDER BY c.embedding <=> :qvec::vector LIMIT :pool"
+                ),
+                {
+                    "status": DocumentStatus.READY.value,
+                    "tenant": str(auth.tenant_id),
+                    "kb_ids": ids,
+                    "qvec": str(query_vec),
+                    "qdim": qdim,
+                    "pool": pool_size,
+                },
+            ).fetchall()
+        if not result:
+            return [], {}
+        chunk_ids = [str(row[0]) for row in result]
+        native = {str(row[0]): float(row[1]) for row in result}
+        rows = self._load_chunk_rows(str(auth.tenant_id), chunk_ids)
+        return rows, native
+
+    def _fetch_kw_pool(
+        self,
+        auth: AuthContext,
+        query: Optional[str],
+        kb_ids: set[str],
+        pool_size: int,
+    ) -> list:
+        """非 ANN 候选池：关键词 LIKE 预筛 + LIMIT pool（防全表加载）。
+
+        无可用关键词时退化为 LIMIT pool（SQLite/开发环境；生产走 PG ANN 不会到这里）。
+        """
+        SessionLocal = get_session_local()
+        query_stmt = (
+            SessionLocal()
+            .query(models.Chunk)
+            .join(models.Document, models.Document.id == models.Chunk.doc_id)
+            .filter(models.Document.status == DocumentStatus.READY.value)
+            .filter(models.Chunk.tenant_id == auth.tenant_id)
+            .filter(models.Chunk.kb_id.in_(kb_ids))
+        )
+        keywords = _query_keywords(query or "")
+        # OR 召回：任一关键词命中即入池（池内再由 BM25 + 语义门禁精排收窄）。
+        # 用 AND 会漏掉仅部分命中相关 chunk（如 query「数据库连接池」只命中含「连接」的）。
+        if keywords:
+            from sqlalchemy import or_
+
+            query_stmt = query_stmt.filter(
+                or_(*(models.Chunk.content.contains(kw) for kw in keywords[:4]))
+            )
+        return query_stmt.limit(pool_size).all()
+
+    def _load_chunk_rows(self, tenant_id: str, chunk_ids: list[str]) -> list:
+        """按 id 加载 ORM chunk（ANN 预筛后），保持与全量查询一致的 Chunk 模型对象。"""
+        if not chunk_ids:
+            return []
+        SessionLocal = get_session_local()
+        with SessionLocal() as session:
+            return (
+                session.query(models.Chunk)
+                .filter(models.Chunk.tenant_id == tenant_id)
+                .filter(models.Chunk.id.in_(chunk_ids))
+                .all()
+            )
+
+    def fetch_search_context(
+        self,
+        auth: AuthContext,
+        kb_ids: list[str],
+        query: Optional[str] = None,
+    ) -> Optional[SearchContext]:
+        """一次性获取检索上下文：allowed_kb_ids + 候选池 + BM25 索引 + embedding 可用性。
+
+        M4-9：候选池 SQL 层限制（retrieval_pool_size），防全表加载 OOM：
+          - PostgreSQL + embedding：pgvector HNSW 原生 ANN（ORDER BY embedding <=> LIMIT pool）
+          - 其余引擎：关键词 LIKE 预筛 + LIMIT pool
+        M4-3：多路召回共享同一上下文（一次 DB 查询 + 一次 BM25 索引）。
         """
         from ekb_api.core.config import get_settings
         from ekb_api.ranking import _Bm25
@@ -1097,20 +1229,26 @@ class SqlStore:
         if not allowed_kb_ids:
             return None
 
-        SessionLocal = get_session_local()
-        with SessionLocal() as session:
-            rows = (
-                session.query(models.Chunk)
-                .join(models.Document, models.Document.id == models.Chunk.doc_id)
-                .filter(models.Document.status == DocumentStatus.READY.value)
-                .filter(models.Chunk.tenant_id == auth.tenant_id)
-                .filter(models.Chunk.kb_id.in_(allowed_kb_ids))
-                .all()
-            )
+        settings = get_settings()
+        pool_size = max(1, settings.retrieval_pool_size)
+
+        rows: list = []
+        ann_query: Optional[str] = None
+        native_scores: dict = {}
+        if _is_postgres() and query and settings.embedding_enabled:
+            try:
+                rows, native_scores = self._fetch_pg_ann_pool(
+                    auth, query, allowed_kb_ids, pool_size
+                )
+                ann_query = query
+            except Exception:
+                # embedding 调用失败 / vector 列未就绪：降级关键词预筛，不中断检索。
+                rows = self._fetch_kw_pool(auth, query, allowed_kb_ids, pool_size)
+        else:
+            rows = self._fetch_kw_pool(auth, query, allowed_kb_ids, pool_size)
         if not rows:
             return None
 
-        settings = get_settings()
         corpus = [f"{r.title} {' '.join(r.section_path or [])} {r.content}" for r in rows]
         bm25 = _Bm25(corpus) if settings.retrieval_bm25_enabled else None
         has_embeddings = any(r.embedding for r in rows)
@@ -1120,6 +1258,8 @@ class SqlStore:
             bm25=bm25,
             has_embeddings=has_embeddings,
             settings=settings,
+            ann_query=ann_query,
+            native_scores=native_scores,
         )
 
     def search_with_context(
@@ -1151,27 +1291,44 @@ class SqlStore:
         # 语义/关键词代理分 + 候选门禁。
         semantic_scores = [0.0] * len(rows)
         candidates: set[int] = set()
+        threshold = settings.retrieval_cosine_threshold
+        # M4-9：池若由 pgvector ANN 预筛（ctx.ann_query == query），直接复用 SQL 层原生
+        # 余弦分（避免重复 embed + 全池 SQL）。否则尝试 embed + 池内 Python 余弦；
+        # embedding 不可用（provider 失败/未配置）时降级纯关键词门禁，不中断检索流。
+        native_scores = ctx.native_scores if ctx.ann_query == query else {}
         if ctx.has_embeddings:
-            query_vec = embed_one(query, tenant_id=tenant_id, user_id=user_id)
-            qdim = len(query_vec)
-            threshold = settings.retrieval_cosine_threshold
-            # PostgreSQL：预取 pgvector SQL `<=>`（HNSW 索引）原生余弦分；SQLite 跳过。
-            native_scores: dict[str, float] = {}
-            if _is_postgres():
-                native_scores = _pg_native_semantic_scores(rows, query_vec, qdim, threshold)
-            for i, row in enumerate(rows):
-                if row.embedding and len(row.embedding) == qdim:
-                    # 原生分可用则用之（SQL 已按维度/非空过滤），否则回退 Python 层余弦。
+            if native_scores:
+                for i, row in enumerate(rows):
                     score = native_scores.get(str(row.id))
                     if score is None:
-                        score = cosine_similarity(query_vec, row.embedding)
+                        continue
                     semantic_scores[i] = score
                     if score >= threshold:
                         candidates.add(i)
-            if not candidates:
-                for i in range(len(rows)):
-                    if _keyword_score(query, ctx.corpus[i]) > 0:
-                        candidates.add(i)
+                if not candidates:
+                    for i in range(len(rows)):
+                        if _keyword_score(query, ctx.corpus[i]) > 0:
+                            candidates.add(i)
+            else:
+                try:
+                    query_vec = embed_one(query, tenant_id=tenant_id, user_id=user_id)
+                    qdim = len(query_vec)
+                    for i, row in enumerate(rows):
+                        # 维度不一致跳过（混合库：真 embedding 与本地降级向量共存）。
+                        if row.embedding and len(row.embedding) == qdim:
+                            score = cosine_similarity(query_vec, row.embedding)
+                            semantic_scores[i] = score
+                            if score >= threshold:
+                                candidates.add(i)
+                    if not candidates:
+                        for i in range(len(rows)):
+                            if _keyword_score(query, ctx.corpus[i]) > 0:
+                                candidates.add(i)
+                except Exception:
+                    # embedding provider 不可用：降级纯关键词门禁（不抛错导致 SSE 断流）。
+                    for i in range(len(rows)):
+                        if _keyword_score(query, ctx.corpus[i]) > 0:
+                            candidates.add(i)
         else:
             for i in range(len(rows)):
                 if _keyword_score(query, ctx.corpus[i]) > 0:
@@ -1199,86 +1356,21 @@ class SqlStore:
 
         门禁保留：仅对「已通过原门禁（余弦阈值或关键词命中）的候选集」做 BM25 重排，
         不引入门禁之外的 chunk，严格保持「无相关证据 → 空 → LLM 拒答」行为。
+
+        M4-9：委托 fetch_search_context + search_with_context —— SQL 层候选池限上限
+        （pgvector HNSW ANN / 关键词 LIKE + LIMIT），杜绝全表加载 OOM；
+        embedding 不可用时降级纯关键词门禁，不中断检索。
         """
-        from ekb_api.core.config import get_settings
-        from ekb_api.embedding import cosine_similarity, embed_one
-        from ekb_api.ranking import _Bm25, rerank
-
-        allowed_kb_ids = {
-            kb.id for kb in self.list_knowledge_bases(auth) if not kb_ids or kb.id in kb_ids
-        }
-        if not allowed_kb_ids:
+        ctx = self.fetch_search_context(auth, kb_ids, query=query)
+        if ctx is None:
             return []
-
-        SessionLocal = get_session_local()
-        with SessionLocal() as session:
-            rows = (
-                session.query(models.Chunk)
-                .join(models.Document, models.Document.id == models.Chunk.doc_id)
-                .filter(models.Document.status == DocumentStatus.READY.value)
-                .filter(models.Chunk.tenant_id == auth.tenant_id)
-                .filter(models.Chunk.kb_id.in_(allowed_kb_ids))
-                .all()
-            )
-        if not rows:
-            return []
-
-        settings = get_settings()
-        corpus = [f"{r.title} {' '.join(r.section_path or [])} {r.content}" for r in rows]
-
-        # 词法 BM25（全语料，作为重排信号）。
-        if settings.retrieval_bm25_enabled:
-            lexical_scores = _Bm25(corpus).scores(query)
-        else:
-            lexical_scores = [0.0] * len(rows)
-
-        # 语义/关键词代理分 + 候选门禁（与原 search 行为一致，保留拒答）。
-        has_embeddings = any(r.embedding for r in rows)
-        semantic_scores = [0.0] * len(rows)
-        candidates: set[int] = set()
-        if has_embeddings:
-            query_vec = embed_one(query, tenant_id=auth.tenant_id, user_id=auth.actor_id)
-            qdim = len(query_vec)
-            threshold = settings.retrieval_cosine_threshold
-            for i, row in enumerate(rows):
-                # 维度不一致跳过（混合库：真 embedding 与本地降级向量共存）。
-                if row.embedding and len(row.embedding) == qdim:
-                    score = cosine_similarity(query_vec, row.embedding)
-                    semantic_scores[i] = score
-                    if score >= threshold:
-                        candidates.add(i)
-            # 语义无命中：回退关键词门禁（与原 _search_cosine 行为一致）。
-            if not candidates:
-                for i in range(len(rows)):
-                    if _keyword_score(query, corpus[i]) > 0:
-                        candidates.add(i)
-        else:
-            for i in range(len(rows)):
-                if _keyword_score(query, corpus[i]) > 0:
-                    candidates.add(i)
-
-        if not candidates:
-            return []
-
-        # 池 = 全部门禁候选（不提前按语义分截断）。
-        # 旧实现按语义分取前 retrieval_rerank_pool 名，无 embedding 时语义分恒为 0，
-        # 该截断退化为「按 chunk 入库序号」截断，候选一旦超过池大小就会把相关 gold 提前丢弃
-        # （真实 KB 文档较多时复现：复合/跨 SOP 题走拒答）。现改为把全部候选交给 rerank，
-        # 由 rerank 用「语义排名 + 词法 BM25 排名 + 查询重合度」在池内精排，再 [:top_k]。
-        # chunk.score 由 rerank 写回融合分，供 retrieve() 跨查询 max-score 融合使用。
-        cand_idx = sorted(candidates)
-        pool_chunks = [self._chunk_from_row(rows[i]) for i in cand_idx]
-        pool_sem = [semantic_scores[i] for i in cand_idx]
-        pool_lex = [lexical_scores[i] for i in cand_idx]
-        reranked = rerank(
+        return self.search_with_context(
+            ctx,
             query,
-            pool_chunks,
-            semantic_scores=pool_sem,
-            lexical_scores=pool_lex,
-            pool_size=len(pool_chunks),
-            rrf_k=settings.retrieval_rrf_k,
+            top_k,
+            tenant_id=auth.tenant_id,
+            user_id=auth.actor_id,
         )
-        return reranked[:top_k]
 
     # ---- 会话 ----
 
