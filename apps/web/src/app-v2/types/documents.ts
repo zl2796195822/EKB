@@ -176,16 +176,28 @@ export type BulkFileStatus =
   | 'failed'
   | 'skipped'
 
+export type BulkUploadPhase = 'hashing' | 'transferring'
+
 export interface BulkFileProgress {
   readonly id: string
   readonly path: string
   readonly size: number
   readonly status: BulkFileStatus
+  /** 已经传输到对象存储的字节数；仅在上传中的条目上实时更新。 */
+  readonly uploadedBytes?: number
+  /** 仅在上传中区分本地完整性校验和对象传输。 */
+  readonly uploadPhase?: BulkUploadPhase
   readonly data?: UploadAcceptedView
   readonly error?: AdapterError
   readonly skippedReason?: string
   readonly batchId?: string
   readonly uploadItemId?: string
+}
+
+/** Identifiers retained by the modal to resume a failed server upload item. */
+export interface BulkUploadResumeItem {
+  readonly batchId: string
+  readonly uploadItemId: string
 }
 
 export interface BulkUploadProgress {
@@ -197,13 +209,30 @@ export interface BulkUploadProgress {
 }
 
 export interface BulkUploadOptions {
+  /** 服务端批次类型。目录选择必须保留相对路径并标记为 DIRECTORY。 */
+  readonly mode?: 'MULTI_FILE' | 'DIRECTORY'
   /** 并发数，默认 4 */
   readonly concurrency?: number
-  /** 单文件上传前的幂等 key 生成器；默认 kbId+path+size+lastModified */
-  readonly buildIdempotencyKey?: (kbId: string, item: BulkFileItem) => string
+  /**
+   * 一次用户上传操作的短生命周期 ID。仅在网络重试同一次操作时复用；
+   * 重新选择相同目录会生成新操作，因此不会被旧批次永久吞掉。
+   */
+  readonly operationId?: string
+  /** 已创建的服务端项；重试时必须续传原 item，而不是新建批次。 */
+  readonly resumeItems?: ReadonlyMap<string, BulkUploadResumeItem>
+  /** 用于整批预检的幂等 key。调用方覆盖时必须保持 operation-scoped 语义。 */
+  readonly buildBatchIdempotencyKey?: (
+    kbId: string,
+    mode: 'MULTI_FILE' | 'DIRECTORY',
+    items: readonly BulkFileItem[],
+  ) => string | Promise<string>
   readonly onProgress?: (progress: BulkUploadProgress) => void
   /** 可中断信号（AbortController.signal）；触发后未启动任务不再启动 */
   readonly signal?: AbortSignal
+  /** 服务端批次创建后回调，便于上层任务持有 batchId 进行后续处理阶段轮询 */
+  readonly onBatchCreated?: (batchId: string) => void
+  /** 传输前逐文件检查；返回 true 则该文件直接标记为已取消，不发起传输。用于单文件取消。 */
+  readonly shouldSkipDuringUpload?: (id: string) => boolean
 }
 
 export interface BulkUploadSummary {
@@ -218,4 +247,6 @@ export interface BulkUploadSummary {
 
 export interface BulkUploadResult {
   readonly summary: BulkUploadSummary
+  /** 本次上传创建的服务端批次 id（用于轮询处理阶段） */
+  readonly batchId?: string
 }

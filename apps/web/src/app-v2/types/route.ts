@@ -5,6 +5,7 @@ import type { V2Services } from './services'
 export type RouteId =
   | 'dashboard'
   | 'knowledge'
+  | 'knowledge-uploads'
   | 'assistant'
   | 'documents'
   | 'team'

@@ -42,6 +42,7 @@ import type {
   UploadBatchListResponse,
   UploadBatchProjection,
   UploadBatchResponse,
+  UploadSessionResponse,
   TenantCreate,
   TenantResponse,
   UserInvite,
@@ -567,7 +568,18 @@ export class ApiClient {
     })
   }
 
-  async putUploadObject(uploadUrl: string, file: File): Promise<{ object_key: string; sha256: string; byte_size: number }> {
+  async openUploadItemSession(itemId: string): Promise<UploadSessionResponse> {
+    return this.request<UploadSessionResponse>(`/kb/uploads/items/${encodeURIComponent(itemId)}/session`, {
+      method: 'POST',
+      body: JSON.stringify({ method: 'SINGLE' }),
+    })
+  }
+
+  async putUploadObject(
+    uploadUrl: string,
+    file: File,
+    onProgress?: (uploadedBytes: number) => void,
+  ): Promise<void> {
     const target = uploadUrl.startsWith('http')
       ? uploadUrl
       : `${window.location.origin}${uploadUrl}`
@@ -577,12 +589,45 @@ export class ApiClient {
     const headers = uploadUrl.startsWith('/api/') && this.token
       ? { Authorization: `Bearer ${this.token}` }
       : undefined
+
+    // Presigned object URLs do not have a Fetch upload-progress API. XHR keeps
+    // direct-to-object-storage uploads while exposing byte-level progress.
+    if (!uploadUrl.startsWith('/api/') && typeof XMLHttpRequest !== 'undefined') {
+      await new Promise<void>((resolve, reject) => {
+        const request = new XMLHttpRequest()
+        request.open('PUT', target, true)
+        Object.entries(headers ?? {}).forEach(([name, value]) => request.setRequestHeader(name, value))
+        request.upload.onprogress = (event) => {
+          onProgress?.(Math.max(0, Math.min(file.size, event.loaded)))
+        }
+        request.onerror = () => reject(new ApiClientError(
+          0,
+          'UPLOAD_NETWORK_ERROR',
+          '上传对象时发生网络错误，请检查网络或对象存储访问权限。',
+        ))
+        request.onabort = () => reject(new ApiClientError(0, 'UPLOAD_ABORTED', '上传已取消。'))
+        request.onload = () => {
+          const response = new Response(request.responseText || null, {
+            status: request.status,
+            statusText: request.statusText,
+          })
+          void this.assertResponse(response).then(() => {
+            onProgress?.(file.size)
+            resolve()
+          }, reject)
+        }
+        request.send(file)
+      })
+      return
+    }
+
     const response = await fetch(target, {
       method: 'PUT',
       body: file,
       ...(headers ? { headers } : {}),
     })
-    return this.parseResponse(response)
+    await this.assertResponse(response)
+    onProgress?.(file.size)
   }
 
   async createAttachmentSession(payload: {
@@ -878,7 +923,7 @@ export class ApiClient {
     }
     const body: Record<string, unknown> = {
       question,
-      kb_ids: [kbId],
+      kb_ids: kbId ? [kbId] : [],
       options,
     }
     if (conversationId) body.conversation_id = conversationId

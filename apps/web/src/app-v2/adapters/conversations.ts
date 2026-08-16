@@ -6,6 +6,7 @@ import type {
   ConversationBranchesResult,
   ConversationListResult,
   ConversationMessageRole,
+  ConversationMessageView,
   ConversationMessagesResult,
   ConversationMutationResult,
   ConversationView,
@@ -54,12 +55,14 @@ function mapRole(role: string): ConversationMessageRole {
   return 'user'
 }
 
-function mapMessage(input: Awaited<ReturnType<ApiClient['getConversationMessages']>>[number]) {
+function mapMessage(input: Awaited<ReturnType<ApiClient['getConversationMessages']>>[number]): ConversationMessageView {
   return {
     id: input.id,
     role: mapRole(input.role),
     content: input.content,
     createdAt: input.created_at,
+    turnId: input.turn_id ?? undefined,
+    status: input.status,
   }
 }
 

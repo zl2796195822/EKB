@@ -9,6 +9,7 @@ import {
   ProfilePage,
   RecyclePage,
   TeamPage,
+  UploadTaskPage,
 } from './pages'
 import type { ResolvedRoute, RouteEntry, RouteId, UnknownRouteDefinition } from './types'
 
@@ -28,6 +29,14 @@ export const ROUTES = [
     layout: 'knowledge',
     milestone: 'M3',
     page: KnowledgePage,
+  },
+  {
+    id: 'knowledge-uploads',
+    hash: '#/knowledge/uploads',
+    pageName: '上传任务中心 / Upload Task Center',
+    layout: 'global',
+    milestone: 'M3',
+    page: UploadTaskPage,
   },
   {
     id: 'assistant',

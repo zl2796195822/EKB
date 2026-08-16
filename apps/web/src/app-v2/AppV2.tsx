@@ -23,6 +23,7 @@ import {
 } from './adapters'
 import { LoginPage } from './pages/LoginPage'
 import { AppV2Layout } from './layouts'
+import { GlobalUploadIndicator } from './components/upload/GlobalUploadIndicator'
 import { findRoute, resolveRoute } from './routes'
 import type { AuthNotice, AuthPhase, AuthSession, RouteEntry, V2Services } from './types'
 import './styles/globals.css'
@@ -217,6 +218,7 @@ export function AppV2({ initialHash }: AppV2Props = {}) {
       >
         <Page route={route} session={session} services={services} />
       </AppV2Layout>
+      <GlobalUploadIndicator />
     </div>
   )
 }

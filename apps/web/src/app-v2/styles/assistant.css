@@ -332,7 +332,8 @@
 
 .v2-m4-chat-actions button,
 .v2-m4-preview-actions button,
-.v2-m4-feedback button {
+.v2-m4-feedback button,
+.v2-m4-message-actions button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -351,7 +352,8 @@
 
 .v2-m4-chat-actions button:hover:not(:disabled),
 .v2-m4-preview-actions button:hover:not(:disabled),
-.v2-m4-feedback button:hover:not(:disabled) {
+.v2-m4-feedback button:hover:not(:disabled),
+.v2-m4-message-actions button:hover:not(:disabled) {
   border-color: var(--v2-color-border);
   background: var(--v2-color-surface);
   color: var(--v2-color-ink);
@@ -360,7 +362,8 @@
 .v2-m4-chat-actions button:disabled,
 .v2-m4-preview-actions button:disabled,
 .v2-m4-feedback button:disabled,
-.v2-m4-composer-tools button:disabled {
+.v2-m4-composer-tools button:disabled,
+.v2-m4-message-actions button:disabled {
   opacity: 0.56;
 }
 
@@ -471,6 +474,25 @@
   background: #fff8f8;
 }
 
+.v2-m4-message-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.v2-m4-message-actions button {
+  min-height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--v2-color-border);
+  background: var(--v2-color-surface);
+}
+
+.v2-m4-message-action--stop:hover:not(:disabled) {
+  border-color: #e8aeb4;
+  color: #a94850;
+}
+
 .v2-m4-protocol-notice {
   border-color: #d5c9f1;
   background: var(--v2-color-violet-soft);
@@ -563,11 +585,12 @@
   color: var(--v2-color-ink-soft);
   font-size: 12px;
   line-height: 1.75;
-  white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
+/* User messages keep pre-wrap for plain text */
 .v2-m4-message--user .v2-m4-message-body {
+  white-space: pre-wrap;
   border-color: #d4e0ff;
   background: var(--v2-color-primary-soft);
 }
@@ -1142,6 +1165,24 @@
   color: var(--v2-color-primary);
 }
 
+/* PH4-6 Context 诊断折叠标题：复用 section-heading 布局，去除按钮默认外观 */
+.v2-m4-context-diag-toggle {
+  width: 100%;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  text-align: left;
+}
+
+.v2-m4-context-diag-toggle:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.v2-m4-context-diag-toggle > h3 {
+  flex: 1 1 auto;
+}
+
 .v2-m4-context-section .v2-state-panel {
   padding: 9px;
 }
@@ -1354,4 +1395,192 @@
 
 @media (prefers-reduced-motion: reduce) {
   .v2-m4-spin { animation: none; }
+}
+
+/* ============================================================
+   PH4-5: Markdown 渲染样式 (spec 02 §11.3)
+   ============================================================ */
+
+.v2-md-container {
+  font-size: 12px;
+  line-height: 1.75;
+  word-break: break-word;
+}
+
+.v2-md-container > *:first-child { margin-top: 0; }
+.v2-md-container > *:last-child { margin-bottom: 0; }
+
+.v2-md-container p { margin: 8px 0; }
+
+.v2-md-container h1,
+.v2-md-container h2,
+.v2-md-container h3,
+.v2-md-container h4,
+.v2-md-container h5,
+.v2-md-container h6 {
+  margin: 14px 0 8px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.v2-md-container h1 { font-size: 16px; }
+.v2-md-container h2 { font-size: 15px; }
+.v2-md-container h3 { font-size: 14px; }
+.v2-md-container h4,
+.v2-md-container h5,
+.v2-md-container h6 { font-size: 13px; }
+
+.v2-md-container ul,
+.v2-md-container ol {
+  margin: 8px 0;
+  padding-left: 20px;
+}
+
+.v2-md-container li { margin: 4px 0; }
+
+.v2-md-container ul { list-style: disc; }
+.v2-md-container ol { list-style: decimal; }
+
+/* GFM 任务列表 */
+.v2-md-container input[type="checkbox"] {
+  margin-right: 6px;
+  vertical-align: middle;
+}
+
+/* 内联代码 */
+.v2-md-code-inline {
+  padding: 2px 5px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.06);
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 11px;
+  color: var(--v2-color-ink);
+}
+
+/* 代码块容器 */
+.v2-md-code-block {
+  margin: 10px 0;
+  border: 1px solid var(--v2-color-border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.03);
+}
+
+.v2-md-code-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--v2-color-border);
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.v2-md-code-lang {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--v2-color-secondary);
+}
+
+.v2-md-code-copy {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 9px;
+  color: var(--v2-color-secondary);
+  padding: 2px 8px;
+  border-radius: 4px;
+  transition: background 0.15s, color 0.15s;
+}
+
+.v2-md-code-copy:hover {
+  background: rgba(0, 0, 0, 0.08);
+  color: var(--v2-color-ink);
+}
+
+.v2-md-code-block pre {
+  margin: 0;
+  padding: 10px 12px;
+  overflow-x: auto;
+}
+
+.v2-md-code-block code {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 11px;
+  line-height: 1.6;
+  white-space: pre;
+  background: transparent;
+  padding: 0;
+}
+
+/* 表格 */
+.v2-md-container table {
+  width: 100%;
+  margin: 10px 0;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+.v2-md-container th,
+.v2-md-container td {
+  padding: 6px 10px;
+  border: 1px solid var(--v2-color-border);
+  text-align: left;
+}
+
+.v2-md-container th {
+  background: rgba(0, 0, 0, 0.04);
+  font-weight: 600;
+}
+
+.v2-md-container tr:nth-child(even) td {
+  background: rgba(0, 0, 0, 0.02);
+}
+
+/* 引用块 */
+.v2-md-container blockquote {
+  margin: 10px 0;
+  padding: 8px 12px;
+  border-left: 3px solid var(--v2-color-border);
+  background: rgba(0, 0, 0, 0.02);
+  color: var(--v2-color-ink-soft);
+}
+
+.v2-md-container blockquote p { margin: 4px 0; }
+
+/* 链接 */
+.v2-md-container a {
+  color: var(--v2-color-primary);
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  transition: border-color 0.15s;
+}
+
+.v2-md-container a:hover {
+  border-bottom-color: var(--v2-color-primary);
+}
+
+/* 水平线 */
+.v2-md-container hr {
+  margin: 14px 0;
+  border: none;
+  border-top: 1px solid var(--v2-color-border);
+}
+
+/* 流式光标 */
+.v2-md-cursor {
+  display: inline-block;
+  margin-left: 2px;
+  color: var(--v2-color-secondary);
+  animation: v2-md-blink 1s steps(2) infinite;
+}
+
+@keyframes v2-md-blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .v2-md-cursor { animation: none; opacity: 0.5; }
 }

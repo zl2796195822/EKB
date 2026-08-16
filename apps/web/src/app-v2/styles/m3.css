@@ -1026,6 +1026,108 @@
   font-size: 16px;
 }
 
+.v2-m3-modal--batch-upload {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+}
+
+.v2-m3-modal--batch-upload > header {
+  flex: 0 0 auto;
+  margin-bottom: 0;
+  padding: 18px 18px 15px;
+}
+
+.v2-m3-modal--batch-upload .v2-m3-modal-body {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 18px;
+}
+
+.v2-m3-modal--batch-upload .v2-m3-modal-footer {
+  flex: 0 0 auto;
+  padding: 14px 18px 18px;
+  border-top: 1px solid var(--v2-color-border);
+}
+
+.v2-m3-batch-upload-status {
+  display: grid;
+  gap: 7px;
+  padding: 11px 16px 12px;
+  border-bottom: 1px solid var(--v2-color-border);
+  background: #f8fbff;
+}
+
+.v2-m3-batch-upload-status__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 5px 12px;
+  color: var(--v2-color-muted);
+  font-size: 12px;
+}
+
+.v2-m3-batch-upload-status__meta strong {
+  color: var(--v2-color-ink);
+}
+
+.v2-m3-batch-upload-status__rail,
+.v2-m3-batch-upload-status__breakdown,
+.v2-m3-file-row__transfer-rail {
+  display: flex;
+  overflow: hidden;
+  height: 7px;
+  border-radius: 3px;
+  background: #dfe8f7;
+}
+
+.v2-m3-batch-upload-status__transferred {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--v2-color-primary);
+  transition: width 160ms linear;
+}
+
+.v2-m3-batch-upload-status__breakdown {
+  height: 4px;
+}
+
+.v2-m3-batch-upload-status__success { background: var(--v2-color-secondary); }
+.v2-m3-batch-upload-status__failed { background: var(--v2-color-danger); }
+
+.v2-m3-batch-upload-status__summary {
+  margin: 0;
+  color: var(--v2-color-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.v2-m3-file-row__transfer {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 78px;
+}
+
+.v2-m3-file-row__transfer-rail {
+  width: 48px;
+  height: 4px;
+}
+
+.v2-m3-file-row__transfer-rail > span {
+  display: block;
+  height: 100%;
+  background: var(--v2-color-primary);
+  transition: width 160ms linear;
+}
+
+.v2-m3-file-row__transfer small {
+  color: var(--v2-color-muted);
+  font-size: 10px;
+}
+
 .v2-m3-form {
   display: grid;
   gap: 14px;

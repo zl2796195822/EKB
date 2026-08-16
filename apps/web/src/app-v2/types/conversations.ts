@@ -26,6 +26,10 @@ export interface ConversationMessageView {
   readonly role: ConversationMessageRole
   readonly content: string
   readonly createdAt: string
+  /** PH4-3 刷新恢复：assistant 消息关联的 turn_id（user/system 通常为空）。 */
+  readonly turnId?: string
+  /** 消息状态：pending/streaming/completed/failed 等，用于判断非终态。 */
+  readonly status?: string
 }
 
 export interface ConversationListResult {

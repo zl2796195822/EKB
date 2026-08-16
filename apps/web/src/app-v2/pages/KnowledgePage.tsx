@@ -3,7 +3,6 @@ import {
   ArrowsHorizontal,
   Check,
   FileText,
-  FolderOpen,
   FunnelSimple,
   MagnifyingGlass,
   PencilSimple,
@@ -15,7 +14,6 @@ import {
 } from '@phosphor-icons/react'
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { FolderTree, KnowledgeDocumentTable, KnowledgeSpaceRail } from '../components/knowledge'
-import { BatchUploadModal } from '../components/documents/BatchUploadModal'
 import { StatePanel } from '../components/StatePanel'
 import { StatusPill } from '../components/ui'
 import type {
@@ -81,8 +79,6 @@ export function KnowledgePage({ services, session }: V2PageProps) {
   const [favoritesTotal, setFavoritesTotal] = useState(0)
   const [favoritesCounts, setFavoritesCounts] = useState<Readonly<Record<string, number>>>({})
   const [favoritesOpen, setFavoritesOpen] = useState(false)
-  const [batchUploadOpen, setBatchUploadOpen] = useState(false)
-  const uploadInputRef = useRef<HTMLInputElement | null>(null)
 
   const selectedKb = useMemo(
     () => knowledgeBases.find((knowledgeBase) => knowledgeBase.id === selectedKbId) ?? null,
@@ -179,6 +175,13 @@ export function KnowledgePage({ services, session }: V2PageProps) {
     }
   }
 
+  const goToUploads = () => {
+    if (typeof window === 'undefined') return
+    window.location.hash = selectedKbId
+      ? `#/knowledge/uploads?kb=${encodeURIComponent(selectedKbId)}`
+      : '#/knowledge/uploads'
+  }
+
   const handleOpenFavorite = useCallback((resourceType: FavoritesResourceKind, resourceId: string, parentId: string | null) => {
     if (resourceType === 'KB') {
       handleSelectKb(resourceId)
@@ -268,20 +271,6 @@ export function KnowledgePage({ services, session }: V2PageProps) {
     setSearchState('empty')
     setSearchHits([])
     await loadKnowledgeBases()
-  }
-
-  const handleUpload = async (file: File) => {
-    if (!selectedKbId) return
-    setIsBusy(true)
-    clearNotice()
-    const result = await services.documents.upload(selectedKbId, file)
-    setIsBusy(false)
-    if (!result.data || result.state !== 'ready') {
-      showError(result.error, '文档上传失败')
-      return
-    }
-    setNotice(`上传已接受：${result.data.status}，文档 ${result.data.docId}，任务 ${result.data.jobId}，trace ${result.data.traceId}。`)
-    await Promise.all([loadSelectedData(selectedKbId), loadKnowledgeBases(selectedKbId)])
   }
 
   const handleDocumentDelete = async (document: DocumentView) => {
@@ -432,13 +421,9 @@ export function KnowledgePage({ services, session }: V2PageProps) {
             <button type="button" className="v2-m3-secondary-button" onClick={() => setIsCreateOpen(true)} disabled={!session.capabilities.includes('kb:write')}>
               <Plus size={15} aria-hidden="true" />新建知识库
             </button>
-            <button type="button" className="v2-m3-secondary-button" onClick={() => setBatchUploadOpen(true)} disabled={isBusy} title={!selectedKbId ? '打开弹窗后选择目标知识库' : '批量/目录上传到已选知识库'}>
-              <FolderOpen size={15} aria-hidden="true" />批量/目录上传
+            <button type="button" className="v2-m3-primary-button" onClick={goToUploads} disabled={!selectedKbId || isBusy} title={!selectedKbId ? '选择目标知识库后发起上传' : '跳转到上传任务中心'}>
+              <UploadSimple size={15} aria-hidden="true" />上传
             </button>
-            <button type="button" className="v2-m3-primary-button" onClick={() => uploadInputRef.current?.click()} disabled={!selectedKbId || !canWrite || isBusy}>
-              <UploadSimple size={15} aria-hidden="true" />上传知识
-            </button>
-            <input ref={uploadInputRef} className="v2-m3-hidden-input" type="file" accept=".txt,.md,.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void handleUpload(file) }} />
           </div>
         </div>
 
@@ -466,7 +451,7 @@ export function KnowledgePage({ services, session }: V2PageProps) {
             </form>
 
             {searchState !== 'empty' ? <SearchPanel state={searchState} query={searchQuery} hits={searchHits} /> : null}
-            <div className="v2-m3-section-heading"><div><h2>文件</h2><span>{filteredDocuments.length} 条真实结果 · 仅作用于当前授权知识库</span></div><button type="button" className="v2-m3-secondary-button" onClick={() => setBatchUploadOpen(true)} disabled={isBusy}><FolderOpen size={14} aria-hidden="true" />批量/目录上传</button><button type="button" className="v2-m3-secondary-button" onClick={() => uploadInputRef.current?.click()} disabled={!canWrite || isBusy}><UploadSimple size={14} aria-hidden="true" />上传</button></div>
+            <div className="v2-m3-section-heading"><div><h2>文件</h2><span>{filteredDocuments.length} 条真实结果 · 仅作用于当前授权知识库</span></div><button type="button" className="v2-m3-secondary-button" onClick={goToUploads} disabled={isBusy}><UploadSimple size={14} aria-hidden="true" />上传</button></div>
             <KnowledgeDocumentTable documents={visibleDocuments} loading={documentsState === 'loading'} onDetail={(document) => void handleDocumentDetail(document)} onDelete={(document) => void handleDocumentDelete(document)} onRetry={(document) => void handleDocumentRetry(document)} onVersions={(document) => void handleVersions(document)} />
             {documentsState === 'error' || documentsState === 'permission-denied' ? <StatePanel state={documentsState} message="文档列表未能加载，未使用本地数据替代。" /> : null}
             <Pagination currentPage={currentPage} totalPages={totalPages} total={filteredDocuments.length} onChange={setCurrentPage} />
@@ -478,7 +463,6 @@ export function KnowledgePage({ services, session }: V2PageProps) {
       {isEditOpen && selectedKb ? <Modal title="编辑知识库" onClose={() => setIsEditOpen(false)}><form className="v2-m3-form" onSubmit={handleUpdate}><label>名称<input value={editName} onChange={(event) => setEditName(event.target.value)} required autoFocus /></label><label>描述<textarea value={editDescription} onChange={(event) => setEditDescription(event.target.value)} rows={3} /></label><label>可见性<select value={editVisibility} onChange={(event) => setEditVisibility(event.target.value as KnowledgeBaseView['visibility'])}><option value="PRIVATE">PRIVATE · 仅授权成员</option><option value="TEAM">TEAM · 团队可见</option><option value="PUBLIC">PUBLIC · 公开</option></select></label><div className="v2-m3-modal-actions"><button type="button" className="v2-m3-secondary-button" onClick={() => setIsEditOpen(false)}>取消</button><button type="submit" className="v2-m3-primary-button" disabled={isBusy || !editName.trim()}>保存</button></div></form></Modal> : null}
       {detailDocument ? <Modal title="文档详情" onClose={() => setDetailDocument(null)}><DocumentDetail state={detailState} document={detailDocument} /></Modal> : detailState === 'loading' ? <Modal title="文档详情" onClose={() => setDetailState('empty')}><StatePanel state="loading" message="正在获取文档详情。" /></Modal> : null}
       {versionDocument ? <Modal title={`版本与 diff · ${versionDocument.title}`} onClose={() => setVersionDocument(null)}><VersionPanel state={versionState} versions={versions} diffState={diffState} diff={diff} fromVersion={fromVersion} toVersion={toVersion} onFromChange={setFromVersion} onToChange={setToVersion} onDiff={() => void handleDiff()} /></Modal> : null}
-      <BatchUploadModal open={batchUploadOpen} kbId={selectedKbId || null} services={services} onClose={() => setBatchUploadOpen(false)} onSuccess={() => selectedKbId && void loadSelectedData(selectedKbId)} />
     </div>
   )
 }

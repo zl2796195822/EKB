@@ -320,7 +320,7 @@ export function AssistantComposer({
         aria-label="向 AI 助手提问"
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        placeholder={disabled ? '请先选择一个当前授权知识库' : '向当前知识库提问…'}
+        placeholder={disabled ? (streaming ? '回答生成中…' : '正在准备问答环境…') : (selectedKnowledgeBaseId ? '向当前知识库提问…' : '向 AI 助手提问（通用模型知识模式）…')}
         disabled={disabled || streaming}
         rows={3}
       />

@@ -33,6 +33,8 @@ export type {
   BulkFileItem,
   BulkFileProgress,
   BulkFileStatus,
+  BulkUploadPhase,
+  BulkUploadResumeItem,
   BulkUploadOptions,
   BulkUploadProgress,
   BulkUploadResult,

@@ -8,6 +8,7 @@ import {
   ShieldCheck,
   SquaresFour,
   Trash,
+  UploadSimple,
   UserCircle,
   UsersThree,
 } from '@phosphor-icons/react'
@@ -19,6 +20,8 @@ export function RouteIcon({ routeId, size = 17 }: { readonly routeId: RouteId; r
       return <House size={size} weight="regular" />
     case 'knowledge':
       return <FolderOpen size={size} weight="regular" />
+    case 'knowledge-uploads':
+      return <UploadSimple size={size} weight="regular" />
     case 'assistant':
       return <Robot size={size} weight="regular" />
     case 'documents':

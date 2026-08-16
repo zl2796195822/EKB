@@ -55,6 +55,8 @@ export interface UploadBatchItemResponse {
   upload_item_id: string | null
   error_code?: string | null
   error_detail?: Record<string, unknown> | null
+  /** Present only when a repeated idempotency request refers to a completed upload item. */
+  replay_status?: 'ALREADY_COMPLETED' | null
   upload_session?: {
     session_id: string
     method: string
@@ -71,6 +73,20 @@ export interface UploadBatchResponse {
   status: string
   created: boolean
   items: UploadBatchItemResponse[]
+}
+
+/** A just-in-time upload session. Completed items have no upload URL. */
+export interface UploadSessionResponse {
+  session_id?: string
+  method?: string
+  provider_upload_id?: string | null
+  upload_urls?: string[]
+  part_size?: number | null
+  expires_at?: string
+  already_completed?: boolean
+  document_id?: string
+  ingest_job_id?: string
+  status?: string
 }
 
 export interface UploadBatchProjectionItem {
@@ -372,6 +388,10 @@ export interface ConversationMessage {
   role: string
   content: string
   created_at: string
+  /** PH4-3 刷新恢复：assistant 消息关联的 turn_id（user/system 通常为空）。 */
+  turn_id?: string | null
+  /** 消息状态：pending/streaming/completed/failed 等，用于判断非终态。 */
+  status?: string
 }
 
 export type FeedbackRating = 'UP' | 'DOWN'
