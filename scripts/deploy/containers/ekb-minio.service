@@ -1,0 +1,21 @@
+[Unit]
+Description=EKB MinIO Object Storage
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ekb-minio
+Group=ekb-minio
+EnvironmentFile=/opt/ekb/minio/minio.env
+ExecStart=/opt/ekb/minio/bin/minio server /opt/ekb/minio/data --address 127.0.0.1:9000 --console-address 127.0.0.1:9001
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/ekb/minio
+
+[Install]
+WantedBy=multi-user.target

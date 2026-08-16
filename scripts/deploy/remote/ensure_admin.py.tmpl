@@ -1,135 +1,54 @@
 #!/usr/bin/env python3
-"""Ensure the configured admin account exists with the configured password hash.
+"""Create the configured administrator once and reconcile its v3 projection.
 
-Run as `su ekb -c "/opt/ekb/api/venv/bin/python /opt/ekb/api/current/ensure_admin.py"`
-after deploying code to a release + env + venv.
-
-Idempotent:
-  * The password is read from EKB_DEV_PASSWORD at runtime.
-  * Missing EKB_DEV_PASSWORD is a fail-closed configuration error.
+This remains a self-contained deployment wrapper because legacy deployment
+scripts copy it to the release root as ``ensure_admin.py``.
 """
 from __future__ import annotations
 
 import os
 import sys
-from datetime import datetime, timezone
 
-# Make sure current release is on the Python path (in case script placed elsewhere)
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
-from sqlalchemy import create_engine, text  # noqa: E402
 from ekb_api.core.config import get_settings  # noqa: E402
-from ekb_api.core.security import hash_password  # noqa: E402
-
-
-def _uuid() -> str:
-    import uuid
-    return str(uuid.uuid4())
-
-
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+from ekb_api.core.db import build_engine  # noqa: E402
+from ekb_api.ops.admin_access import (  # noqa: E402
+    ensure_configured_admin,
+    validate_runtime_admin,
+)
 
 
 def main() -> int:
-    admin_pass = os.environ.get("EKB_DEV_PASSWORD", "")
-    admin_email = os.environ.get("EKB_DEV_USER_EMAIL", "")
-    admin_name = os.environ.get("EKB_DEV_USER_NAME", "")
-    if not admin_pass or not admin_email or not admin_name:
-        print("[ensure_admin] runtime admin email, name, and password are required; no credential was changed.", file=sys.stderr)
-        return 78
-    if admin_email.lower() in {"admin", "admin@example.com"} or admin_name.lower() in {"admin", "ekb admin"}:
-        print("[ensure_admin] default admin identity is prohibited; no credential was changed.", file=sys.stderr)
-        return 78
-
     settings = get_settings()
-    engine = create_engine(settings.database_url, future=True)
-    new_hash = hash_password(admin_pass)
-    now = _now_iso()
-
-    with engine.begin() as conn:
-        # Check existing admin user
-        row = conn.execute(
-            text("SELECT id, tenant_id FROM users WHERE email = :e LIMIT 1"),
-            {"e": admin_email},
-        ).fetchone()
-
-        if row is None:
-            # --- Fresh seed: tenant + user + role + membership ---
-            t_id = _uuid()
-            u_id = _uuid()
-            r_id = _uuid()
-            m_id = _uuid()
-
-            print("[ensure_admin] seed new tenant/user role=OWNER")
-
-            conn.execute(
-                text(
-                    """
-                    INSERT INTO tenants (id,name,role,policy_version,model_routing_key,
-                                         egress_policy,quota_daily_qa,quota_storage_docs,
-                                         quota_storage_bytes_per_file,created_at,updated_at)
-                    VALUES (:i,:n,'ADMIN',1,'default','ALLOW',1000,100000,52428800,:t,:t)
-                    """
-                ),
-                {"i": t_id, "n": f"{admin_name} 工作区", "t": now},
-            )
-            conn.execute(
-                text(
-                    """
-                    INSERT INTO users (id,name,email,password_hash,tenant_id,role,created_at,updated_at)
-                    VALUES (:i,:n,:e,:h,:t_id,'OWNER',:t,:t)
-                    """
-                ),
-                {"i": u_id, "n": admin_name, "e": admin_email, "h": new_hash, "t_id": t_id, "t": now},
-            )
-            # Built-in owner role (if not already present — otherwise IGNORE)
-            dialect = engine.dialect.name
-            if dialect == "postgresql":
-                ins_role = """
-                    INSERT INTO tenant_roles (id,tenant_id,slug,display_name,is_builtin,
-                                              is_system_protected,created_at,updated_at)
-                    VALUES (:r,:t,'owner','Owner',1,0,:t2,:t2)
-                    ON CONFLICT DO NOTHING
-                """
-            else:
-                ins_role = """
-                    INSERT OR IGNORE INTO tenant_roles
-                        (id,tenant_id,slug,display_name,is_builtin,
-                         is_system_protected,created_at,updated_at)
-                    VALUES (:r,:t,'owner','Owner',1,0,:t2,:t2)
-                """
-            conn.execute(text(ins_role), {"r": r_id, "t": t_id, "t2": now})
-
-            if dialect == "postgresql":
-                ins_mbr = """
-                    INSERT INTO tenant_memberships
-                        (id,tenant_id,user_id,role_id,status,joined_at,created_at,updated_at)
-                    VALUES (:m,:t,:u,:r,'ACTIVE',:t2,:t2,:t2)
-                    ON CONFLICT DO NOTHING
-                """
-            else:
-                ins_mbr = """
-                    INSERT OR IGNORE INTO tenant_memberships
-                        (id,tenant_id,user_id,role_id,status,joined_at,created_at,updated_at)
-                    VALUES (:m,:t,:u,:r,'ACTIVE',:t2,:t2,:t2)
-                """
-            conn.execute(text(ins_mbr), {
-                "m": m_id, "t": t_id, "u": u_id, "r": r_id, "t2": now,
-            })
-            print("[ensure_admin] configured administrator created")
-            return 0
-        else:
-            u_id, t_id = row.id, row.tenant_id
-            print("[ensure_admin] configured administrator exists; updating credential hash")
-            conn.execute(
-                text("UPDATE users SET password_hash = :h, updated_at = :t WHERE id = :u"),
-                {"h": new_hash, "t": now, "u": u_id},
-            )
-            print("[ensure_admin] credential hash updated")
-            return 0
+    email = os.environ.get("EKB_DEV_USER_EMAIL", settings.dev_user_email)
+    name = os.environ.get("EKB_DEV_USER_NAME", settings.dev_user_name)
+    password = os.environ.get("EKB_DEV_PASSWORD", settings.dev_password)
+    try:
+        validate_runtime_admin(
+            email=email,
+            name=name,
+            password=password,
+            production=settings.is_production,
+        )
+        result = ensure_configured_admin(
+            build_engine(settings.database_url),
+            email=email,
+            name=name,
+            password=password,
+        )
+    except (RuntimeError, ValueError):
+        print("runtime administrator initialization refused", file=sys.stderr)
+        return 78
+    print(
+        "runtime administrator initialization passed "
+        f"created_user={result.created_user} "
+        f"created_membership={result.created_membership} "
+        f"reconciled_membership={result.reconciled_membership}"
+    )
+    return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(main())
