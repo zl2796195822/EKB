@@ -152,7 +152,15 @@ def test_migration_failure_does_not_start_command(tmp_path: Path) -> None:
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     fake_python = fake_bin / "python3"
-    fake_python.write_text("#!/bin/sh\nexit 17\n", encoding="utf-8")
+    fake_python.write_text(
+        "#!/bin/sh\n"
+        "case \"$*\" in\n"
+        "  *bootstrap_legacy_schema*) exit 0;;\n"
+        "  *'-m ekb_api.migrations.v4_fullstack'*) exit 17;;\n"
+        "  *) exit 0;;\n"
+        "esac\n",
+        encoding="utf-8",
+    )
     fake_python.chmod(fake_python.stat().st_mode | stat.S_IXUSR)
     marker = tmp_path / "started"
 
@@ -176,6 +184,7 @@ def test_ensure_admin_failure_does_not_start_command(tmp_path: Path) -> None:
     fake_python.write_text(
         "#!/bin/sh\n"
         "case \"$*\" in\n"
+        "  *bootstrap_legacy_schema*) exit 0;;\n"
         "  *'-m ekb_api.migrations.v4_fullstack'*) exit 0;;\n"
         "  *) exit 19;;\n"
         "esac\n",
@@ -195,3 +204,45 @@ def test_ensure_admin_failure_does_not_start_command(tmp_path: Path) -> None:
     assert result.returncode != 0
     assert not marker.exists()
     assert "ensure_admin" in result.stdout
+
+
+def test_fresh_database_bootstraps_chain_and_starts_command(tmp_path: Path) -> None:
+    """Happy path: a brand-new database must pass bootstrap + v4 verify.
+
+    Regression for the 2026-08-16 deployment gap: the v4 runner refuses
+    implicit ORM bootstrap on empty databases and production ``init_db``
+    returns early, so without the explicit legacy import the entrypoint
+    failed with ``migration_or_verify`` on every fresh deployment.
+    """
+    marker = tmp_path / "started"
+    ensure_admin = tmp_path / "ensure_admin.py"
+    ensure_admin.write_text("raise SystemExit(0)\n", encoding="utf-8")
+    runtime_db = tmp_path / "runtime.db"
+
+    result = _run_entrypoint(tmp_path, {}, "sh", "-c", f"touch {marker}")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert marker.exists()
+    assert "legacy_schema_bootstrap" not in result.stdout.replace(
+        "legacy_schema_bootstrap_pass", ""
+    )
+    assert runtime_db.exists()
+    # The v4 chain actually applied on the fresh database.
+    from sqlalchemy import inspect, text
+
+    from ekb_api.core.db import build_engine
+
+    engine = build_engine(f"sqlite:///{runtime_db}")
+    try:
+        tables = set(inspect(engine).get_table_names())
+        with engine.connect() as connection:
+            ledger = {
+                str(row[0])
+                for row in connection.execute(
+                    text("SELECT version FROM schema_migrations")
+                ).fetchall()
+            }
+    finally:
+        engine.dispose()
+    assert {"users", "tenants", "knowledge_bases", "embedding_profiles"} <= tables
+    assert ledger, "schema_migrations ledger must be populated on a fresh database"

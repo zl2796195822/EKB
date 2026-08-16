@@ -172,6 +172,21 @@ def prepare_legacy_schema(engine, *, seed: bool) -> None:
         _seed_if_empty(engine)
 
 
+def bootstrap_legacy_schema(database_url: str) -> None:
+    """Idempotent base-schema import for the container entrypoint.
+
+    The v4 runner is fail-closed on fresh databases (no implicit ORM
+    bootstrap), and ``init_db`` returns early in production; a brand-new
+    deployment therefore needs this explicit, seed-free legacy import before
+    ``ekb_api.migrations.v4_fullstack --verify`` can pass.
+    """
+    engine = build_engine(database_url)
+    try:
+        prepare_legacy_schema(engine, seed=False)
+    finally:
+        engine.dispose()
+
+
 def init_db() -> None:
     """创建表结构（幂等）并在空库时种子化 dev 租户/用户/示例知识库。"""
     # 延迟导入，避免 models -> db 的顶层循环依赖。

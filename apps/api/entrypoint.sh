@@ -57,6 +57,14 @@ if [[ "${database_url}" == sqlite://* ]]; then
 fi
 
 log "migration_apply_verify_start"
+# v4 runner refuses implicit ORM bootstrap on fresh databases, and init_db
+# returns early in production; import the base legacy schema (idempotent,
+# seed-free) so a brand-new deployment can pass the v3/v4 chain verify.
+if ! EKB_BOOTSTRAP_DATABASE_URL="${database_url}" python3 -c \
+  "import os; from ekb_api.core.db import bootstrap_legacy_schema; bootstrap_legacy_schema(os.environ['EKB_BOOTSTRAP_DATABASE_URL'])" \
+  >/dev/null 2>&1; then
+  fail "legacy_schema_bootstrap"
+fi
 if ! python3 -m ekb_api.migrations.v4_fullstack \
   --database-url "${database_url}" \
   --verify >/dev/null 2>&1; then
