@@ -4,6 +4,10 @@
 
 | Document | Authority scope | Version | Status | Owner | Review stage | Supersedes / superseded-by | Downstream links |
 |---|---|---|---|---|---|---|---|
+| [`EKB生产Embedding配置与验收方案_v1.0_2026-08-16.md`](./EKB生产Embedding配置与验收方案_v1.0_2026-08-16.md) | 生产 embedding 链路打通：Provider 选型、KB Profile 绑定、重试、E2E 验收序列与回滚；含 2026-08-16 `tenant_role` 枚举比较 bug 修复记录 | 1.0 | Draft — 待用户确认后执行 | ZCode | 本地回归 498 passed；生产部署与验收未执行 | 执行 2026-08-14 审计 P0 的 embedding 分支；不改变 fail-closed 边界 | 生产对标审计、批量目录上传修复、上线检查单 |
+| [`EKB知识库与AI助手生产对标审计_v1.0_2026-08-14.md`](./EKB知识库与AI助手生产对标审计_v1.0_2026-08-14.md) | 生产环境只读事实、知识库/AI 助手与 12 个开源项目的差距、修复优先级 | 1.0 | 已完成只读审计 | Codex | Evidence-backed audit | does not replace core-rebuild contracts; records 2026-08-14 production gaps | core-rebuild specs, 2026-08-11 comparison |
+| [`EKB知识库批量目录上传修复与开源对标_2026-08-14.md`](./EKB知识库批量目录上传修复与开源对标_2026-08-14.md) | 空知识库目标创建、目录/多文件分区 batch、惰性 session、原项重传与最新开源上传模式 | 1.0 | 本地实现与回归验证完成 | Codex | Sol final review approved | additive upload orchestration fix; production data-plane preconditions remain unmet | upload center, production audit, 2026-08-11 comparison |
+| [`specs/ekb-ai-assistant-conversation/README.md`](./specs/ekb-ai-assistant-conversation/README.md) | AI Assistant 专项：连续/长对话、上下文压缩、Turn、SSE 恢复、Stop/Retry/Regenerate、分支、Markdown、附件/Vision 与 Grok 行为对标 | 0.1 | Draft — Awaiting User Confirmation | Codex | Source audit + self review complete; user confirmation pending | confirmed 后仅在 AI Assistant Conversation Engine 冲突范围内 supersede `ekb-core-rebuild/05-ai-chat` 及相关 API/DB/testing 条款 | `00-current-state-and-gap` → `01-grok-benchmark` → `02-conversation-engine-spec` → `03-api-db-sse-contract` → `04-implementation-and-verification` |
 | [`specs/ekb-core-rebuild/00-current-state.md`](./specs/ekb-core-rebuild/00-current-state.md) | EKB Core Rebuild 00–14 文档链入口：知识库、AI Chat、Provider、附件、主题、回收站、数据库/API/测试/实施 | 0.1 | Ready for Plan | Sol | User confirmed; Sol final review passed | authoritative successor for conflicting core-rebuild scope; v3 remains historical/compatible authority outside that scope | `01-requirements` → `02-gap-analysis` → `03-architecture` → `04`–`14` |
 | [`EKB后续全栈开发路线图_v4.0_2026-08-11.md`](./EKB后续全栈开发路线图_v4.0_2026-08-11.md) | v4 后续全栈阶段、门禁、复用流程和规模情景提案 | 4.0 | Sol审核通过 | Sol | Sol审核通过 | proposal; does not replace approved v3 contract or imply user approval | 开源对标评估、v3 plan/matrix |
 | [`EKB开源项目对标与复用移植评估_v1.0_2026-08-11.md`](./EKB开源项目对标与复用移植评估_v1.0_2026-08-11.md) | GitHub 候选快照、许可证/白标门禁、差距和复用结论 | 1.0 | Sol审核通过 | Sol | Sol审核通过 | research proposal; no third-party code copied or user approval | v4 roadmap、v3 spec/plan |
@@ -29,6 +33,7 @@
 4. 已应用 migration/version/checksum 是不可变事实；Core Rebuild 只允许新的 additive migration、provenance manifest 和 expand/backfill/switch/contract。
 5. v3 文档仍按 `01_requirements.md` → `02_spec.md` → `03_plan.md` → `04_verification-matrix.md` 阅读；`V3-T*` 与 `AC-V3-*` 只描述 v3 历史范围，不能证明 Core Rebuild 已实现。
 6. 2026-08-11 开源对标和路线图是研究背景；第三方复用必须经过固定 commit、license/NOTICE/SBOM、安全和回归门禁。
+7. AI Assistant Conversation Engine 专项文档在用户确认前是 Draft；确认后，其长对话、Turn/SSE、Context、Retry/Regenerate、分支、Markdown 与 Grok 行为对标合同优先于 Core Rebuild 中同范围的较早条款。该专项不改变知识库、Provider、Theme、Trash 或其他 Phase 的 authority。
 
 ## Team directory actions local closure (2026-08-14)
 

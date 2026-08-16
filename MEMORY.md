@@ -1,6 +1,6 @@
 # EKB 项目记忆
 
-> 更新时间：2026-08-13（EKB Core Rebuild Tier 3 Spec 00–14 已获用户确认并进入 Ready for Plan；历史验收账号已脱敏）
+> 更新时间：2026-08-14（EKB Core Rebuild Tier 3 Spec 00–14 已获用户确认并进入 Ready for Plan；历史验收账号已脱敏）
 > 用途：为后续会话保留项目定位、权威文档、实施进度、验证证据与未决事项。不得记录密码、令牌或其他秘密。
 
 ## 项目定位与技术基线
@@ -77,6 +77,9 @@
 
 ## 当前任务与未决问题
 
+- 2026-08-14 生产只读审计：部署 host 的 Web/API 可达且 API 容器 healthy，但管理员 UI 显示 0 个可授权知识空间；数据库实际有 1 个 PRIVATE KB、5 篇 READY 文档和 13 个 chunks，现有 KB membership 不属于当前管理员，且当前管理员缺 tenant membership 投影。`llm_providers`/`llm_models`/`provider_credentials`/`embedding_profiles` 为 0，运行时无 LLM/embedding/object-storage/OCR/Vision/Redis 配置；AI 助手会 fail closed 为 `LLM_PROVIDER_NOT_CONFIGURED`，未产生生产 conversation/message/turn。PostgreSQL 未启用 pgvector、chunk embedding 是 JSON、检索为全量应用层计算；source object/upload/ingest stage/index generation/job/worker 均无生产事实。生产 ledger 仅到 v3_008，未见 v4 对话/引用迁移，`messages.citations`/`message_citations` 缺失；entrypoint 反复记录旧 v3 runner 的 `main()` 参数 TypeError。详见 `docs/EKB知识库与AI助手生产对标审计_v1.0_2026-08-14.md`。本次未写生产数据、未记录凭据。
+- 2026-08-14 核心直接修复（本地完成，未部署）：新增 `ekb_api.ops.admin_access` 与 `repair_admin_access.py`。修复命令必须显式指定管理员、租户、知识库和角色，默认 dry-run，`--apply` 才能补目标 tenant membership、目标 KB ACL、旧角色投影与审计；跨租户、停用成员、重复 KB ACL 一律拒绝。`ensure_admin.py` 改为保留既有密码哈希、只补成员投影；生产入口拒绝默认管理员口令。AI 助手修复了 actor-scoped `ModelProvider` 丢失数据库模型主键，及 legacy conversations API 未将 graph 的小写角色适配回既有大写合同，从而恢复显式模型选择和引用消息读回。验证：v4 `243 passed, 2 skipped`；多轮/租户/Provider 定向 `33 passed`；Ruff、py_compile、Bash 语法与本次路径 diff 检查通过。
+- 2026-08-14 生产复核（只读）：当前唯一管理员、唯一活动租户成员、唯一 PRIVATE KB 和唯一 KB membership 已一致，因此没有执行 ACL 数据写入。生产镜像仍是 fail-open v3 entrypoint（迁移及管理员初始化错误被忽略）；PostgreSQL 镜像未提供 `vector` 扩展，且模型、凭据、Embedding、对象存储运行时记录仍为空。禁止在此状态部署新的 fail-closed v4 入口：它会正确拒绝启动，但不会让知识库或助手可用。下一步必须先备份并在生产 schema clone 上演练，再提供 pgvector、真实远程 Chat+Embedding 凭据和 S3/MinIO，再部署、迁移与验收。
 - 已完成（本次）：v3.1 P0 迁移漂移审计（ADR-002）+ Phase 3 Analytics 全栈实装 + Phase 4 Apps 垂直全栈实装 + Phase 5 Dashboard & 能力缺口修复 + **Phase 5.1 Rail「最近访问/收藏夹/回收站」三点立即可用修复**（A 类：最近访问跳工作台真实区、回收站跳独立 RecyclePage（真实接线 trash adapter 全 6 功能）；C 类透明化：收藏夹/项目/分享/导出统一 phase 胶囊 + 规划中 tooltip，AssistantSidebar 收藏/项目 unavailable-card 替换为具体路线图阶段说明）。全部通过实跑验证（49/49 Vitest、tsc+build=0）。
 - 进行中（下一批）：v4 P2 内容治理全栈闭环 —— favorites 垂直全栈（补偿迁移 v3_007 + service + router + adapter + 页面 star 切换 + Rail 收藏列表）、folders、tags、shares（signed share link 复用 Fernet key derivation）。这些工作包可在当前 SQLite 上实现，不阻塞于 P1 的 PG/S3/Redis 基础设施切换。
 - 后续（按用户确认资源后）：P1 基础设施（PostgreSQL+pgvector、MinIO/S3 对象存储、Redis 缓存+后台任务）→ P2 Assistant+十页双视口回归 → P3 企业身份（OIDC/SAML/LDAP/SCIM + 角色 CRUD + 连接器框架）→ P4 平台化。
@@ -593,6 +596,15 @@ Nginx 配置：
 - 已认证本地浏览器可见真实 Assistant 会话、知识库和 root 分支，但旧会话仍可能是历史数据，不宣称旧数据已批量修复。本地切片不宣称 PH0–PH8 完成。
 - 生产服务器（`[production host]`）、备份、部署、回滚均 `NOT RUN/BLOCKED`；证据见 [`docs/evidence/ekb-core-rebuild/local/2026-08-14-chat-parent-chain.md`](docs/evidence/ekb-core-rebuild/local/2026-08-14-chat-parent-chain.md)。不记录密码、token、API key 或私密地址。
 
+## 2026-08-14 知识库批量/目录上传修复
+
+- 本地完成且 Sol 最终复审 `APPROVE`：前端将 `knowledge.list()` 的 `empty + []` 作为正常空状态，显示私有知识库创建入口并立即选择新目标；真实列表异常仍显示重试按钮。
+- 目录/多文件上传改为持久 batch/item 协议：每个合法分区（最多 `1000` 文件/`5 GB`）共享 `DIRECTORY` / `MULTI_FILE` batch；超限自动分区，并在每个分区创建后立即持久化 batch 引用。create 仅预检；worker 在对象 PUT 前打开/续租单项 session，避免长队列 URL 过期。
+- 失败重传保留原 `batchId/uploadItemId`，服务端完成态返回 `already_completed`，避免响应丢失导致重复版本/摄取。预检 `REJECTED` 项不保留可续传 ID，后端 open/abort 仅允许 `WAITING/UPLOADING/FAILED/ABORTED`，完成态缺版本投影 fail-closed。幂等 key 绑定一次 upload operation：网络重试复用，重新选择相同目录会新建 operation。
+- 验证：前端定向 `13 passed`、全量 `16 files / 101 tests passed`、typecheck/build 通过；后端上传中心 `11 passed`、关联附件合计 `45 passed`、Ruff `F,I`、compileall、相关 diff check 通过。全量后端测试仍有本切片外的 `_FakeSettings.ce_turn_engine_enabled` 测试替身兼容失败，未以此宣称后端全绿。
+- 最新开源对标（GitHub API 2026-08-14）结论：可复用成熟模式是“持久 batch/item + 相对路径 + 可恢复状态 + 后台 ingest”；RAGFlow 适合隔离 data-plane PoC，Onyx 只研究 MIT community connector/permission-sync，AnythingLLM 可借鉴 UX，Dify 仅借鉴模式。不得整体移植或绕过 EKB tenant/ACL/audit；许可证、NOTICE、SBOM、固定 commit 和回归是前置条件。详见 `docs/EKB知识库批量目录上传修复与开源对标_2026-08-14.md`。
+- 生产仍缺 durable S3/MinIO 对象存储、远程 embedding provider/profile 与可靠 ingest worker/scheduler；无这些配置时 `OBJECT_STORAGE_UNAVAILABLE` 是预期 fail-closed，不得改为本地文件系统或伪成功。
+
 ## 2026-08-14 重启后真实浏览器 parent-chain 验证
 
 - 重启本地 API 使最新 `store.save_message` bridge 生效；`/healthz` 返回 `200`。
@@ -607,3 +619,79 @@ Nginx 配置：
 - 创建/更新 Provider、创建模型和模型列表同步统一拒绝 `localhost`、`127.0.0.1`、`::1`、`0.0.0.0`、IPv4-mapped loopback、非 HTTP(S) 端点及本地 Provider key，稳定错误码为 `REMOTE_PROVIDER_REQUIRED`；创建无残留，更新原值保留。
 - 验证：Provider 边界 API/service `13 passed`；既有显式 model selection `4 passed`；Web typecheck、compileall、Ruff import 检查、`git diff --check` 通过。完整 Ruff 仍有 31 个既有风格问题，未扩大范围。
 - LLM-only 边界保持：QA capabilities 与显式 model selection 继续使用现有远程 DB registry；`.invalid` 仅为无出网测试边界，不代表真实 Provider 成功。生产出网、生产配置、部署/备份/回滚和 PH0–PH8 仍未完成，统一写作 `[production host]` / `[REDACTED]`，不保存秘密。
+
+## 2026-08-14 AI Assistant Conversation Engine 专项 Spec
+
+- 新增 `docs/specs/ekb-ai-assistant-conversation/` 00–04 + README，状态为 `Draft — Awaiting User Confirmation`；结论是当前基础线性多轮可用，但两套 Turn 主链、request-local compaction、无 SSE replay、前端 Retry/Regenerate 未闭环及纯文本渲染使其尚未达到 Grok 同等级长对话。
+- Grok 基线固定为本地 commit `8adf9013a0929e5c7f1d4e849492d2387837a28d`；仅复用单一会话 owner、不可变事实/上下文投影分离、持久 compaction、真实取消、分类 retry、fork 和能力快照等思想，不迁移 Web Search、TUI、coding-agent tool loop 或未审查第三方代码。
+- 目标合同：单一 Conversation/Turn Engine、实际模型窗口预算、持久 summary/manifest、durable SSE cursor replay、真实 Stop/Retry/Regenerate、KB 0..N、历史附件/Vision 连续性、安全 Markdown，以及 100+ turns/2+ compactions 的真实 Provider + 浏览器 Grok 行为对标。
+- 文档复审通过 `git diff --check`；只读审计基线为 backend 定向 `68 passed`、frontend branch/attachment `6 passed`、M4 standalone contract `PASS`。这些不代表统一引擎已实现、生产已部署或 Grok parity 已通过。
+
+## 2026-08-14 生产候选环境：目录上传与对象存储部署
+
+- Sol 已对批量/目录上传改动给出 `APPROVE`；本次本地增量修复通过 `32 passed`（PH3 边界与 Upload Center）、Ruff（忽略既有 E501）、compileall、相关 `git diff --check`；前端生产构建通过。
+- 服务器已部署隔离候选 API/Worker 与 PostgreSQL/pgvector，旧版公网 API 和其数据保持运行作为回滚。候选镜像包含：公开浏览器预签名 PUT + 受限内网对象读取/校验/删除端点分离，内网对象存储请求绕过继承代理；PostgreSQL `TIMESTAMPTZ` 上传会话使用真实时区比较；Worker 使用离线预热的 `cl100k_base` tokenizer 缓存，生产 Dockerfile 也在构建期预热该资产。
+- 候选真实目录上传验证已通过对象 PUT、内网 GET/head、SHA-256 complete、文本解析和 CHUNKING。失败仅发生在 Embedding 阶段，并以 `EMBEDDING_UNAVAILABLE` 显式投影；不伪造 `READY`。此前的运行时 tokenizer 下载/失效本地代理和 PostgreSQL 会话误过期均已修复。
+- 候选 SSE 已到 generation 阶段，但无 token 后触发 `GENERATION_IDLE_TIMEOUT`；直接探测显示当前配置模型域名在容器中解析失败（`gaierror`）。候选容器的失效 HTTP(S)/ALL proxy 已清空，显式公共 DNS 解析也未恢复。因此远程 Chat 与 Embedding 仍是生产发布硬阻塞，不能安全切换公网 Nginx 到候选 API。
+- 候选前端构建已上传到服务器独立 release 目录，未修改 `current` 软链；公网 Nginx 仍指向旧 API。候选 API 健康、Worker 运行且无 HTTP healthcheck（其为长驻 worker，不提供 HTTP 服务）；最近日志敏感值扫描为 0。恢复外部 DNS/egress 或修正 Provider endpoint 后，须重新跑真实 SSE 与 Embedding `READY` 验收，再原子切流并保留旧版回滚。
+
+## 2026-08-14 公网批量上传复核与发布门禁
+
+- 用户反馈公网目录上传仍不可用。只读验证确认旧公网 API 的授权 `GET /api/v1/kb` 返回 HTTP 200 但空数组，旧前端将该空态误报为“知识库列表加载失败”；`GET /api/v1/kb/uploads/batches` 返回 `OBJECT_STORAGE_UNAVAILABLE`。旧运行库为 SQLite，逻辑计数为 1 user / 1 tenant / 0 KB / 0 document / 0 conversation，且无 upload batch 相关表，故仅更新前端不能解决真实上传。
+- 隔离候选环境保持未切流：对象存储已配置、PostgreSQL+pgvector health 通过、候选库有 1 个 PRIVATE KB（OWNER 授权）和 5 个 READY 文档，上传批次查询可用；候选前端仍在独立 release，Nginx upstream 与 `web/current` 均未修改。已创建并校验候选库及 Nginx/current 指针的一致性备份，供后续受控发布/恢复。
+- Sol 发布复核结论为 **REQUEST CHANGES**：禁止以默认弱口令或 raw SQL 旁路生产身份门禁；切流前必须对账旧库/冻结写入、失效旧会话，并完成浏览器经生产 Origin 的目录上传、对象 PUT、worker、`READY`、search 与引用问答全链路。仅在候选验收中短暂创建的 `admin` 测试身份及其 auth session/租户与 KB 投影已在同一候选库事务中删除，未对公网暴露，也未留下额外候选管理员。
+- 新发现的硬阻塞：候选数据库没有 Embedding Profile；已有模型均为 Chat 模型；宿主机和候选容器解析远程模型域名均失败，宿主机还有指向未运行本地代理的 proxy 变量。因此新摄取会如实停在 `EMBEDDING_UNAVAILABLE`，不得切公网或宣称上传可检索。下一步须先由受管渠道配置强管理员身份、可用远程 Embedding Provider/Profile，并修复服务器 DNS/直接出网；随后按 Sol 验收序列重跑浏览器 E2E 再原子发布。
+
+## 2026-08-14 候选规范管理员恢复
+
+- 经用户明确授权，未创建默认管理员；候选环境仅对既有的规范 OWNER 身份执行一次性强口令轮换。更新使用参数化数据库绑定与 PBKDF2 哈希，撤销该主体的既有 auth sessions，并写入不含明文或凭据的审计记录。
+- 验证：新身份可在候选 API 登录、具有 7 项 live capabilities 且可读取 1 个授权知识库；`admin/admin` 在候选 API 返回 401，候选库中不存在默认 `admin` 身份。明文口令未写入项目记忆、源代码、服务器日志或审计元数据。
+- 该操作不涉及公网 Nginx、`web/current`、旧 API 或候选 upstream 切换。Embedding Profile 和 DNS/egress 仍为切流硬阻塞；必须完成真实目录上传至 `READY`、search 与引用问答验收后再发布。
+
+## 2026-08-14 用户授权公网切流与 Sol 复核
+
+- 用户在已知运行时限制后明确授权切流。切换前创建并校验候选数据库、Nginx 配置和旧前端指针备份；Nginx upstream 已从旧 API 切至候选 API，`web/current` 已原子指向候选 release。配置语法检查、reload 与公网只读验证通过：候选前端资源生效、health 通过、新 OWNER 可登录并读取 1 个授权知识库、上传批次列表为 HTTP 200；旧 API 与旧 release 均保留为回滚点。
+- Sol 最终发布复核：切流成功、可回滚，但**仅可标记为“上传控制面可用 / 知识入库终态不可用”**。候选无 Embedding Profile；新上传在对象 PUT/source object/job 后会于 worker embedding 阶段以 `EMBEDDING_UNAVAILABLE` 标记 item/job FAILED，不会产生 READY 文档、可检索向量或 AI citations；该错误不自动重试。
+- 宿主机与候选容器的 DNS/HTTPS egress 仍失效，即使后续创建 Embedding Profile 也会继续落 `EMBEDDING_UNAVAILABLE`；网络恢复后须显式 retry。公网入口仍为明文 HTTP，登录和 token 不可作为正式外网服务，必须启用 HTTPS 或强制跳转后才可对外。
+- 下一步严格按顺序：配置 actor-scoped remote Embedding provider/model/credential → 创建并激活 KB embedding profile 与 index generation → 修复容器 DNS/HTTPS egress → 确认 worker heartbeat → 浏览器上传中文目录至 READY/SUCCEEDED → 验证 chunks/vector、search 和带 citation 的 AI 回答。完成前不得把“开始上传按钮可点击”写成知识库全链路完成。
+
+## 2026-08-14 本机 Qwen3 Embedding 兼容性验证
+
+- 用户本机 Ollama 的 `qwen3-embedding:4b` 已真实验证：原生 `POST /api/embed` 可返回 1 条 2560 维向量；OpenAI 兼容 `POST /v1/embeddings` 可正确返回多输入的 `data[index, embedding]` 响应，模型名保持 `qwen3-embedding:4b`。它可作为 EKB Embedding Provider 的模型基础，不可把 DeepSeek Chat 模型替代为向量模型。
+- 复核确认 Ollama 仅监听 `127.0.0.1:11434`；带非空 Bearer header 的 OpenAI-compatible 批量请求可返回按 `index` 排序的两条 2560 维向量。EKB 对接时必须使用 `/v1/embeddings`，不能配置原生 `/api/embed`。
+- 生产不能直接使用本机 `localhost` URL：EKB 生产 Provider 边界拒绝回环地址，且候选容器无法访问用户电脑回环端口。若用于受控验收，需通过受限、持续、加密的本机到生产网络通道暴露非回环 OpenAI-compatible `/v1/embeddings` endpoint，并在 Profile 中固定 2560 dimensions、模型和 chunk/tokenizer 配置；现有失败文档须在配置完成后显式 retry/reindex。用户笔记本休眠或断网会中断该服务，不能等同于长期生产 SLA。
+
+## 2026-08-14 公网目录上传 HTTP 与可视化进度发布
+
+- 已发布前端 release `20260814-r9-upload-http-progress`，以原子软链替换切换；此前 `r8` release 和候选 API/Worker/数据库未修改，可作为前端回滚点。
+- 修复明文 HTTP origin 没有 `crypto.subtle` 时上传在预检前落为 `CLIENT_ERROR`：批次幂等 key 与文件 SHA-256 现采用 1 MiB 增量 SHA-256；有 Worker 时在 Worker 内运行，HTTPS 也不再把整文件读入内存。Worker 空结果、`onerror`、`onmessageerror` 均安全回退，回退读取失败会 reject，避免 UI 无限停在「正在计算校验值」。
+- 批量上传现以 XHR 的对象 PUT 字节事件展示真实可视化进度：顶部文字、进度条与无障碍 `aria-valuenow` 统一表示已传输字节百分比，逐文件展示传输比例并区分本地校验与对象传输；远程预签名 URL 不附加 EKB Bearer。
+- Sol 复审最终 `APPROVE`。本地验证：Web `108 passed`、typecheck、production build、范围 diff check 通过；生产部署后公网主 bundle 与 SHA Worker 均 HTTP 200，候选 `/healthz` 为 healthy 且 pgvector available；官方 npm audit 为 0 vulnerabilities。
+- 未决：使用现有提供的后台登录组合进行浏览器认证未成功，故本次不能声称已完成认证态的真实目录上传；仍须在持有规范 OWNER 凭据的浏览器中上传真实文件至 `READY/SUCCEEDED`。远程 Embedding profile/provider 与外网 DNS/egress 仍是从「对象上传成功」到「文档 READY、检索和引用问答」的独立硬阻塞，不能伪造完成。
+
+## 2026-08-14 规范 OWNER 账号口令重置
+
+- 经用户明确授权，仅重置指定规范 OWNER 账号的口令；单一参数化事务写入新的 PBKDF2 哈希并撤销该账号所有 ACTIVE `auth_sessions`，未修改其他账号、角色、租户、知识库或应用配置。
+- 变更前后均验证目标账号存在且为 OWNER；本次无历史活动会话需要撤销。独立连接使用同一 `verify_password` 实现确认新哈希有效，候选 API `/healthz` 正常。
+- 明文口令、密码哈希、数据库连接信息和任何认证令牌均未写入源代码、项目记忆或日志。
+
+## 2026-08-15 生产后台登录只读诊断
+
+- 生产候选 OWNER 账号存在、角色正常，且用户当次提供的登录口令通过服务端同一 PBKDF2 校验；账号和密码均不是本次无法登录的原因。
+- 公网登录页面可返回 `200`，但 `2443` 下的 `/api/*` 代理返回 `502`：Nginx `ekb_api` upstream 指向未监听的本机端口 `8001`，而候选 API 实际发布在 `8000` 并且容器健康。该诊断为只读检查，未修改 Nginx、容器、数据库或会话。
+- 下一步如获用户授权：先备份并做 Nginx 配置语法校验，再将 upstream 对齐至已验证的候选 API 端口、reload，并以公网 Origin 完成登录与 `/me` 冒烟；保留当前配置的回滚副本。
+
+## 2026-08-15 生产登录入口统一与恢复
+
+- 根因不是账号：历史部署同时保留旧 API、未映射宿主机端口的 v4 API，以及指向 `8001` 的 Nginx upstream；此外旧 API 仍可按旧会话合同写入 v4 数据库，导致 `v4_007_chat_graph` 在重启时发现缺失 `active_branch_id` 并 fail-closed。
+- 已停止旧 API，保留其容器仅作人工回滚；公网仅保留一个健康的 v4 API，并以 Nginx 的 loopback upstream 对外服务。v4 历史会话仅回填到其已经存在的 root branch，未改消息、用户、角色、口令或知识库内容；完整 v3/v4 migration verify 通过。
+- 生产验收：Nginx 配置检查通过；公网 `/healthz`、`/api/v1/auth/login` 与 `/api/v1/me` 均为 `200`；真实浏览器使用规范 OWNER 邮箱完成登录并进入个人中心，显示 OWNER 和真实知识空间。浏览器截图工具在字体等待阶段超时，未产出截图，但 DOM 快照和交互已确认成功。
+- 后续发布硬约束：不得重新启动或暴露旧 API；任何 v4 重建必须先跑 migration verify，固定 loopback port 后再进行 Nginx reload，并以公网 health + 登录 + `/me` 冒烟作为发布完成条件。当前运行容器由 Docker restart policy 保持；下一轮部署前应将这一拓扑收敛为唯一声明式 Compose/系统服务，禁止继续使用旧的临时 rollover 脚本。
+
+## 2026-08-16 上线就绪度分析与 tenant_role 枚举 bug 修复
+
+- 完成一次上线就绪度评估（对照《上线检查单 M5-1》REQUIRED 项与《生产对标审计》验收门槛）：结论为**未达正式上线标准**——上传控制面可用，但 embedding 终态、HTTPS、生产 E2E 验收与部署拓扑收敛仍是硬阻塞。
+- **发现并修复 `9569baa` 引入的真实权限 bug**：`services/v3_llm.py`（8 处）与 `routers/llm.py`（2 处）用 `str(auth.tenant_role) in ("OWNER","ADMIN")` 判断管理员；`str()` 对 `TenantRole`（str-mixin 枚举）返回 `"TenantRole.OWNER"`，导致 OWNER/ADMIN 也被判为非管理员——provider 创建/更新/删除/凭据写入**全员 403**、admin 的 provider 读取被错误脱敏。生产若部署该镜像，模型服务管理直接不可用。修复为 `auth.tenant_role.value` 比较（与 `authorization.py` 既有惯例一致）。
+- 同步对齐 embedding 测试契约：`tests/v4/test_ph3_embedding_boundary.py` 原 `test_profile_client_uses_exact_tenant_and_actor_runtime_provider` 断言旧的严格 actor 隔离；按 `9569baa` 的 TEAM 共享设计改为 `test_profile_client_shares_tenant_runtime_provider_and_isolates_tenant`（同租户其他成员可共享解析 + 跨租户 fail-closed）。`_provider_for_profile` 清理无用 `:user` 绑定、docstring 与错误文案改为 tenant 语义。
+- 验证：后端全量 `498 passed, 2 skipped, 0 failed`（修复前 `13 failed, 485 passed`）；前端本会话 `108 passed`、typecheck/build 通过（未改动前端）；npm 生产依赖 `0 vulnerabilities`；改动文件 Ruff 的 27 个报告均为既有风格问题；`git diff --check` 通过（顺带修复 `assistant.css` 行尾空行既有门禁问题）。
+- 新增 `docs/EKB生产Embedding配置与验收方案_v1.0_2026-08-16.md` 并登记进 `docs/README.md`：含 Provider 选型（SiliconFlow bge-m3 等远程候选；DeepSeek 无 embedding API；本机 Ollama qwen3-embedding 仅限受控验收）、S1–S4 配置步骤（指出 `ensure_kb_profile` 无 API/CLI 入口的缺口，建议按 `repair_admin_access.py` 惯例补 dry-run 默认的 ops CLI）、E2E 验收序列与回滚。**该 bug 修复未部署生产；部署新镜像前生产 provider 管理仍处于坏状态。**
