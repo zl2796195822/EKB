@@ -203,6 +203,17 @@ if [[ -f "${NGINX_TMPL}" ]]; then
     fi
   fi
   log "nginx 配置写入：${NGINX_DEST}"
+  # === 5b. 可选 TLS vhost：证书就位才启用，追加到同一配置文件（随 nginx -t 一起校验）===
+  TLS_TMPL="${SCRIPT_DIR}/nginx_ekb_tls.conf.tmpl"
+  if [[ -f "${TLS_TMPL}" ]]; then
+    if [[ -f /etc/nginx/ekb-certs/fullchain.pem && -f /etc/nginx/ekb-certs/privkey.pem ]]; then
+      cat "${TLS_TMPL}" >> "${NGINX_DEST}"
+      chmod 600 /etc/nginx/ekb-certs/privkey.pem 2>/dev/null || true
+      log "TLS vhost 已追加：${NGINX_DEST}（检测到 /etc/nginx/ekb-certs 证书）"
+    else
+      log "未检测到 /etc/nginx/ekb-certs/{fullchain,privkey}.pem；跳过 TLS vhost（仅明文 80）"
+    fi
+  fi
   if nginx -t >/dev/null 2>&1; then
     systemctl enable --now nginx >/dev/null 2>&1 || systemctl enable nginx >/dev/null 2>&1 || true
     systemctl reload nginx 2>/dev/null || systemctl restart nginx || true

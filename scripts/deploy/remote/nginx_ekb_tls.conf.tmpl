@@ -1,25 +1,42 @@
-# EKB nginx vhost template (CentOS/Debian 通用)
-#  · 静态 / = /opt/ekb/web/current (dist/)
-#  · /api /healthz /docs /openapi.json → 127.0.0.1:8000 (uvicorn / docker)
-#  · DEPLOY_HOST / public DNS must be supplied by the deployment environment.
+# EKB nginx TLS vhost template（可选启用；与 nginx_ekb.conf.tmpl 成对使用）
+#
+# 启用条件（setup_server.sh 自动检测）：
+#   证书链 /etc/nginx/ekb-certs/fullchain.pem
+#   私钥   /etc/nginx/ekb-certs/privkey.pem
+# 未放置证书时本文件不会被安装，nginx 仅按 nginx_ekb.conf.tmpl 服务明文 80。
+#
+# 与 nginx_ekb.conf.tmpl 的关系：
+#   · 本文件的 proxy / SPA / 安全 location 必须与 80 模板逐条同步；
+#     修改任一模板时必须同步另一份（历史上 80/443 漂移曾由共享 .inc 解决，
+#     仓库模板化为单文件后以本注释约束）。
+#   · 80 端口保留明文服务：兼容部分国内运营商链路封 443 的客户，以及
+#     ACME HTTP-01 续签路径。若部署环境确认可强制 HTTPS，将下方
+#     FORCE_HTTPS 示例 server 打开（取消注释）即可全站 301。
+#
+# SSE 说明：API 经 X-Accel-Buffering: no 按响应关闭缓冲，
+# proxy_buffering on 的默认值不影响 /api/v1/qa/* 流式输出。
 
-upstream ekb_api {
+upstream ekb_api_tls {
   server 127.0.0.1:8000 max_fails=3 fail_timeout=10s;
   keepalive 32;
 }
 
 server {
-  listen 80 default_server;
-  listen [::]:80 default_server;
-
-  # The deployment environment may replace the placeholder before installation.
-  # The wildcard fallback keeps this template free of a production hostname.
+  listen 443 ssl default_server;
+  listen [::]:443 ssl default_server;
   server_name _;
+
+  ssl_certificate     /etc/nginx/ekb-certs/fullchain.pem;
+  ssl_certificate_key /etc/nginx/ekb-certs/privkey.pem;
+  ssl_protocols TLSv1.2 TLSv1.3;
+  ssl_ciphers HIGH:!aNULL:!MD5;
+  ssl_session_cache shared:SSL:10m;
+  ssl_session_timeout 10m;
+  ssl_prefer_server_ciphers on;
 
   charset utf-8;
   server_tokens off;
 
-  # 上传文件：后端允许 100MB，nginx 对齐
   client_max_body_size 100m;
   client_body_timeout 60s;
   sendfile on;
@@ -34,33 +51,30 @@ server {
     text/css text/javascript text/plain text/xml
     image/svg+xml font/woff2 font/woff application/vnd.ms-fontobject;
 
-  # 访问日志（轻量，关闭注释可启用）
   access_log /var/log/nginx/ekb.access.log;
   error_log  /var/log/nginx/ekb.error.log warn;
 
-  # ===== 安全响应头（上线检查单 §2.2 REQUIRED；明文端口不发 HSTS）=====
+  # ===== 安全响应头（上线检查单 §2.2 REQUIRED；HSTS 保守 6 个月）=====
   add_header X-Content-Type-Options "nosniff" always;
   add_header X-Frame-Options        "SAMEORIGIN" always;
   add_header Referrer-Policy        "strict-origin-when-cross-origin" always;
+  add_header Strict-Transport-Security "max-age=15768000" always;
 
-  # ===== 静态前端：/opt/ekb/web/current（Vite dist）=====
   set $web_root /opt/ekb/web/current;
   root $web_root;
 
-  # /healthz → 先给 nginx 自身静态响应；然后也把路径透传后端方便容器监控
   location = /healthz-nginx {
     access_log off;
     default_type application/json;
-    return 200 '{"ok":true,"service":"nginx","ts":""}';
+    return 200 '{"ok":true,"service":"nginx-tls","ts":""}';
   }
 
-  # ===== API / 监控 / 文档 → FastAPI =====
   location ~ ^/(api|healthz|health|docs|openapi\.json|redoc|metrics|sso|auth|oauth2)(/|$) {
     proxy_http_version 1.1;
     proxy_set_header Host               $host;
     proxy_set_header X-Real-IP          $remote_addr;
     proxy_set_header X-Forwarded-For    $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto  $scheme;
+    proxy_set_header X-Forwarded-Proto  https;
     proxy_set_header X-Forwarded-Host   $host;
     proxy_set_header Connection         "";
     proxy_read_timeout 300s;
@@ -68,19 +82,19 @@ server {
     proxy_connect_timeout 5s;
     proxy_buffering on;
     proxy_request_buffering off;
-    proxy_pass http://ekb_api;
+    proxy_pass http://ekb_api_tls;
   }
 
-  # ===== SPA 前端：静态 + 404 回退到 index.html =====
   location / {
     try_files $uri $uri/ /index.html;
-    # 缓存策略：Vite 用 chunkhash 做文件名，assets/ 缓存 1 年
+    # 注意：location 内出现任意 add_header 会取消 server 级继承，安全头需在此重复
     location ~* ^/assets/ {
       expires 1y;
       add_header Cache-Control "public, immutable";
       add_header X-Content-Type-Options "nosniff" always;
       add_header X-Frame-Options        "SAMEORIGIN" always;
       add_header Referrer-Policy        "strict-origin-when-cross-origin" always;
+      add_header Strict-Transport-Security "max-age=15768000" always;
       access_log off;
       try_files $uri =404;
     }
@@ -91,10 +105,10 @@ server {
       add_header X-Content-Type-Options "nosniff" always;
       add_header X-Frame-Options        "SAMEORIGIN" always;
       add_header Referrer-Policy        "strict-origin-when-cross-origin" always;
+      add_header Strict-Transport-Security "max-age=15768000" always;
     }
   }
 
-  # ===== 安全相关：屏蔽 .env / .git / .sql 等敏感文件 =====
   location ~ /\.(?!well-known) {
     deny all;
   }
@@ -102,3 +116,11 @@ server {
     deny all;
   }
 }
+
+# 可选：全站强制 HTTPS。确认客户链路无 443 封锁后，取消注释并 reload。
+# server {
+#   listen 80 default_server;
+#   listen [::]:80 default_server;
+#   server_name _;
+#   return 301 https://$host$request_uri;
+# }
