@@ -108,12 +108,43 @@ interface AssistantMarkdownProps {
 }
 
 /**
+ * 流式渲染拆分：把已闭合的 markdown 主体与最后一个未闭合代码围栏尾部
+ * 分开处理。主体按内容 memo 冻结（不随每个 delta 重解析），尾部作为
+ * 纯文本逐步追加，避免长回答流式时整块重渲染造成的闪烁与跳动。
+ */
+function splitStreamingTail(content: string): { stable: string; tail: string } {
+  const fences = content.split('```')
+  if (fences.length % 2 === 1) {
+    // 所有围栏已配对闭合：全部作为稳定主体。
+    return { stable: content, tail: '' }
+  }
+  const lastFence = content.lastIndexOf('```')
+  return {
+    stable: content.slice(0, lastFence),
+    tail: content.slice(lastFence + 3),
+  }
+}
+
+/** 已闭合主体：content 不变则跳过重解析（流式性能关键路径） */
+const StableMarkdown = memo(function StableMarkdown({ content }: { content: string }) {
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
+      rehypePlugins={[[rehypeSanitize, sanitizeSchema]]}
+      components={markdownComponents}
+    >
+      {content}
+    </ReactMarkdown>
+  )
+}, (prev, next) => prev.content === next.content)
+
+/**
  * 流式优化的 Markdown 渲染器。
  *
- * streaming=true 时,只重解析最后一段未完成内容;
- * streaming=false 时,memo 冻结整个渲染结果。
+ * streaming=true 时，已闭合主体被冻结，只有未闭合尾部与光标在更新；
+ * streaming=false 时，整个渲染结果由外层调用方按内容稳定。
  */
-export const AssistantMarkdown = memo(function AssistantMarkdown({
+export function AssistantMarkdown({
   content,
   streaming,
 }: AssistantMarkdownProps) {
@@ -122,23 +153,17 @@ export const AssistantMarkdown = memo(function AssistantMarkdown({
     return null
   }
 
+  const { stable, tail } = streaming ? splitStreamingTail(content) : { stable: content, tail: '' }
+
   return (
     <div className="v2-md-container">
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        rehypePlugins={[[rehypeSanitize, sanitizeSchema]]}
-        components={markdownComponents}
-      >
-        {content}
-      </ReactMarkdown>
+      {stable.trim() ? <StableMarkdown content={stable} /> : null}
+      {tail ? (
+        <pre className="v2-md-stream-tail">
+          <code>{tail}</code>
+        </pre>
+      ) : null}
       {streaming ? <span className="v2-md-cursor" aria-hidden="true">▋</span> : null}
     </div>
   )
-}, (prev, next) => {
-  // 冻结策略:非流式状态下,如果 content 没变就不重渲染
-  if (!prev.streaming && !next.streaming) {
-    return prev.content === next.content
-  }
-  // 流式状态下总是更新(尾部在变化)
-  return false
-})
+}

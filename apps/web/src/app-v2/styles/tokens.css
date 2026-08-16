@@ -145,6 +145,9 @@ html[data-theme='dark'] {
   --v2-color-border-soft: var(--color-divider);
   --v2-color-surface: var(--color-surface);
   --v2-color-canvas: var(--color-bg-canvas);
+  --v2-color-text-inverse: var(--color-text-inverse);
+  --v2-color-surface-overlay: var(--color-surface-overlay);
+  --v2-color-surface-soft: var(--color-bg-subtle);
   --v2-color-primary: var(--color-info);
   --v2-color-primary-hover: #a9c6ff;
   --v2-color-primary-soft: var(--color-info-surface);

@@ -31,12 +31,23 @@ function formatTime(value: string): string {
 }
 
 function AssistantStatus({ message }: { readonly message: AssistantDisplayMessage }) {
-  if (message.streaming) return <span className="v2-m4-message-status is-streaming"><CircleNotch size={13} className="v2-m4-spin" />正在生成回答</span>
-  if (message.finishReason === 'cancelled') return <span className="v2-m4-message-status is-cancelled"><WarningCircle size={13} />回答已取消</span>
-  if (message.finishReason === 'timeout') return <span className="v2-m4-message-status is-error"><Clock size={13} />回答超时</span>
-  if (message.finishReason === 'refusal') return <span className="v2-m4-message-status is-warning"><WarningCircle size={13} />基于当前证据无法确认</span>
-  if (message.finishReason === 'error') return <span className="v2-m4-message-status is-error"><XCircle size={13} />回答失败</span>
+  if (message.streaming) return <span className="v2-m4-message-status is-streaming"><CircleNotch size={12} className="v2-m4-spin" />正在生成回答</span>
+  if (message.finishReason === 'cancelled') return <span className="v2-m4-message-status is-cancelled"><WarningCircle size={12} />回答已取消</span>
+  if (message.finishReason === 'timeout') return <span className="v2-m4-message-status is-error"><Clock size={12} />回答超时</span>
+  if (message.finishReason === 'refusal') return <span className="v2-m4-message-status is-warning"><WarningCircle size={12} />基于当前证据无法确认</span>
+  if (message.finishReason === 'error') return <span className="v2-m4-message-status is-error"><XCircle size={12} />回答失败</span>
   return null
+}
+
+/** 流式等待占位：与气泡同构的骨架，避免首 token 到达时布局跳动 */
+function StreamPlaceholder() {
+  return (
+    <span className="v2-m4-stream-placeholder" aria-hidden="true">
+      <span className="v2-m4-stream-placeholder-line" />
+      <span className="v2-m4-stream-placeholder-line is-short" />
+      <span className="v2-m4-stream-placeholder-line is-tiny" />
+    </span>
+  )
 }
 
 export function AssistantMessageList({ messages, streaming, feedbackByMessage, onFeedback, onStopTurn, onRetryTurn, onRegenerate, conversationId, lastQuestion }: AssistantMessageListProps) {
@@ -81,12 +92,12 @@ export function AssistantMessageList({ messages, streaming, feedbackByMessage, o
               <time dateTime={message.createdAt}>{formatTime(message.createdAt)}</time>
               {message.role === 'assistant' ? <AssistantStatus message={message} /> : null}
             </div>
-            <div className="v2-m4-message-body">
+            <div className={`v2-m4-message-body${message.streaming ? ' is-streaming' : ''}`}>
               {message.content
                 ? (message.role === 'assistant'
                     ? <AssistantMarkdown content={message.content} streaming={message.streaming} />
                     : message.content)
-                : (message.streaming ? '正在等待首个回答片段…' : '回答没有可显示内容。')}
+                : (message.streaming ? <StreamPlaceholder /> : '回答没有可显示内容。')}
             </div>
             {message.citations && message.citations.length > 0 ? (
               <div className="v2-m4-inline-citations"><span>引用</span>{message.citations.map((citation) => <span key={citation.citationId}><FileText size={12} />{citation.title}</span>)}</div>
