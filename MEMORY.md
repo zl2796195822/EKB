@@ -712,3 +712,15 @@ Nginx 配置：
 - **生产审计发现**：部署镜像（2026-08-16 02:08 UTC 构建）含 `9569baa` 的 tenant_role 枚举 bug（容器内 `str(auth.tenant_role)` 8 处）；embedding 数据已由此前工作配好：siliconflow provider + BAAI/bge-m3(1024) profile、2 KB、303 READY 文档、10827 chunks（10814 含非空向量）、2 个 ACTIVE generation、v4_001~v4_010 全部 applied（ledger 在 migration_provenance）。
 - **部署完成**（commit `edb398f` + Dockerfile 补 configure_embedding_profile.py）：本机 docker buildx amd64（daocloud 基础镜像已缓存）→ docker save/gzip 168MB → scp → docker load；回滚点 tag `ekb/ekb-api:pre-launch-20260816-rollback`（旧镜像 cc65c228a88c）；旧容器 `ekb-api-v4` 停止并改名 `ekb-api-v4-old-20260816` 保留；新容器 `ekb-api-v4-launch`（--network host、--volumes-from 旧容器、--env-file /opt/ekb/ekb_api_v4.env.rebuilt）绑 8000 运行中 healthy。验证：entrypoint bootstrap+verify+admin PASS、healthz 200（直连+nginx）、`str(auth.tenant_role)`=0 处/`auth.tenant_role.value`=8 处、CLI 在镜像内。
 - **待完成**：生产登录验收需要用户提供管理员口令（admin@ekb.local 或 2796195822@qq.com 的现行口令——受管渠道重置过，容器 env 的 EKB_DEV_PASSWORD 已失效；用户已选择"提供现有口令"）；口令到手后验证 tenant_role 修复（admin GET /llm/providers 应含 endpoint_configs）+ QA 引用问答 E2E；TLS：443 被 xray 占用，需用户决策证书方案。服务器 root 凭据仅运行时使用，不写入本文件或任何文件。
+
+## 2026-08-16 生产 QA 全链路验收通过（slash 模型名修复 + 用户口令验收）
+
+- **新生产缺陷修复**：用户口令登录验收时 QA 检索报 `EmbeddingError('未配置远程 embedding provider')`。根因：`config._load_runtime_model_providers_from_db` 对任何含 `/` 的模型 id 一律过滤（防 provider_key/model_id 歧义），而 OpenAI 兼容 embedding 模型名 `BAAI/bge-m3` 天然含命名空间斜杠 → siliconflow embedding 永远解析不到（摄取时 worker 走静态 env 配置所以向量能生成，掩盖了缺陷）。修复（commit `1725dc7`）：`'/'` 过滤仅对 chat kind 生效，embedding 放行；回归测试 `test_runtime_loader_accepts_namespaced_embedding_model_ids`（真实 DB 集成：TEAM credential 解密 + 斜杠模型名；调试中还发现测试表缺 `created_at` 列导致 `ORDER BY` 查询抛错被外层 `except: return []` 吞、以及 `SecretEnvelope` 的 `str()` 是 repr 而非 ciphertext 两个陷阱）。后端全量 `510 passed, 2 skipped`。
+- **镜像重建部署**（同一 tag `ekb/ekb-api:launch-candidate-20260816`，本机 buildx amd64 + scp + docker load + 容器替换，旧容器保留回滚）；entrypoint 迁移 verify PASS、healthz 200、pgvector available。
+- **生产 QA 验收结果**（用户账号 2796195822@qq.com 登录）：
+  - SSE v2 全链路：request → retrieval_started → retrieval_completed（5 chunks，7.3s）→ generation_started → content_delta 流式 → done；
+  - **STRICT 拒答**：问 KB 外问题返回「证据不足，无法确认」+ 说明证据范围 + 引导补充信息，finish_reason=refusal、confidence=low——无证据 fail-closed 正确；
+  - **有证据回答**：问「上线前数据库检查清单」返回 K9 规范 14.1 节 9 项清单，finish_reason=stop、confidence=medium、citations_count=5；
+  - **引用可回放**：`messages.citations` JSON 列已持久化（citation_id/index/type/title/section_path/version/updated_at 含生成时文档版本）；`message_citations` 关系表（v4_007 预留）代码未写、0 行——技术债，功能走 JSON 列不受影响；
+  - 对话/turn 落库：conversations=37、messages=80、qa_turns=40。
+- **上线就绪度更新**：embedding 终态（READY/检索/引用问答）已生产验证通过；剩余：① TLS（443 被 xray 占用，需用户决策证书方案，80 明文现状）；② 新摄取 E2E 抽查（worker 为旧镜像，建议后续统一升级）；③ 检查单签字。对外口径可从「上传控制面可用 / 知识入库终态不可用」升级为「核心问答闭环生产可用，TLS 未启用」。
