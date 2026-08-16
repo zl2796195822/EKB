@@ -24,6 +24,8 @@ interface AssistantSidebarProps {
   readonly favoritesState: PageState
   readonly favoriteConversations: readonly FavoriteItemView[]
   readonly favoritesTotal: number
+  /** 回答流式生成中：锁定会话切换（点击禁用 + 提示） */
+  readonly streaming?: boolean
 }
 
 function formatConversationTime(value: string): string {
@@ -54,6 +56,7 @@ export function AssistantSidebar({
   favoritesState,
   favoriteConversations,
   favoritesTotal,
+  streaming = false,
 }: AssistantSidebarProps) {
   const className = open ? 'v2-m4-history v2-m4-history--mobile-open' : 'v2-m4-history'
 
@@ -167,6 +170,8 @@ export function AssistantSidebar({
                   key={conversation.id}
                   className={conversation.id === selectedConversationId ? 'v2-m4-session-item is-selected' : 'v2-m4-session-item'}
                   onClick={() => onSelectConversation(conversation.id)}
+                  disabled={streaming}
+                  title={streaming ? '回答生成中，完成后才能切换会话。' : undefined}
                 >
                   <span className="v2-m4-session-item-title">{conversation.title || '未命名会话'}</span>
                   <time dateTime={conversation.updatedAt}>{formatConversationTime(conversation.updatedAt)}</time>

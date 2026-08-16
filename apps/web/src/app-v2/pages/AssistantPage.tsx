@@ -1102,6 +1102,7 @@ export function AssistantPage({ services }: V2PageProps) {
         favoritesState={favoritesState}
         favoriteConversations={favoriteConversations}
         favoritesTotal={favoritesTotal}
+        streaming={isStreaming}
       />
       <main className="v2-m4-chat" aria-label="AI 助手聊天区">
         <header className="v2-m4-chat-header">
