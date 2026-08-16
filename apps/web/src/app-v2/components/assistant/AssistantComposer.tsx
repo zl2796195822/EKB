@@ -220,7 +220,7 @@ export function AssistantComposer({
     onSelectionChange({ ...selection, selectedModelId: modelId })
   }
 
-  const panelDisabled = disabled || streaming
+  const panelDisabled = disabled
 
   return (
     <form className="v2-m4-composer" onSubmit={onSubmit}>
@@ -321,7 +321,7 @@ export function AssistantComposer({
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder={disabled ? (streaming ? '回答生成中…' : '正在准备问答环境…') : (selectedKnowledgeBaseId ? '向当前知识库提问…' : '向 AI 助手提问（通用模型知识模式）…')}
-        disabled={disabled || streaming}
+        disabled={disabled}
         rows={3}
       />
       <div className="v2-m4-composer-toolbar">

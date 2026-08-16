@@ -1,8 +1,7 @@
-import { Archive, Export, Funnel, Pencil, SidebarSimple, ShareNetwork, Star, Trash } from '@phosphor-icons/react'
+import { Export, Funnel, Pencil, SidebarSimple, ShareNetwork, Star, Trash } from '@phosphor-icons/react'
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import {
   AssistantComposer,
-  AssistantContextPanel,
   AssistantMessageList,
   AssistantSidebar,
   type AssistantDisplayMessage,
@@ -27,7 +26,6 @@ import type {
   QaFinishReason,
   QaStreamEvent,
   QaStreamHandle,
-  SearchHitView,
   V2PageProps,
 } from '../types'
 import type { ConversationBranchView } from '../types/conversations'
@@ -109,12 +107,6 @@ function formatOperationError(error: AdapterError | undefined, fallbackCode: str
   return `${error?.code ?? fallbackCode}：${error?.message ?? fallbackMessage}${error?.requestId ? `（request_id：${error.requestId}）` : ''}`
 }
 
-function branchOptionLabel(branch: ConversationBranchView, index: number): string {
-  const label = branch.label?.trim()
-  if (label) return label
-  return branch.parentBranchId ? `分支 ${index + 1}` : 'root'
-}
-
 export function AssistantPage({ services }: V2PageProps) {
   const [knowledgeState, setKnowledgeState] = useState<PageState>('loading')
   const [knowledgeBases, setKnowledgeBases] = useState<readonly KnowledgeBaseView[]>([])
@@ -149,13 +141,7 @@ export function AssistantPage({ services }: V2PageProps) {
   const [renameValue, setRenameValue] = useState('')
   const [renameBusy, setRenameBusy] = useState(false)
   const [feedbackByMessage, setFeedbackByMessage] = useState<Readonly<Record<string, FeedbackView>>>({})
-  const [searchQuery, setSearchQuery] = useState('')
-  const [searchState, setSearchState] = useState<PageState>('empty')
-  const [searchHits, setSearchHits] = useState<readonly SearchHitView[]>([])
-  const [previewState, setPreviewState] = useState<PageState>('empty')
-  const [previewDocument, setPreviewDocument] = useState<import('../types').DocumentView | null>(null)
   const [leftRailOpen, setLeftRailOpen] = useState(false)
-  const [contextRailOpen, setContextRailOpen] = useState(false)
   const [favoritesState, setFavoritesState] = useState<PageState>('loading')
   const [favoriteConversations, setFavoriteConversations] = useState<readonly FavoriteItemView[]>([])
   const [favoritesTotal, setFavoritesTotal] = useState(0)
@@ -175,6 +161,15 @@ export function AssistantPage({ services }: V2PageProps) {
   const cancelRequestedRef = useRef(false)
   const messageLoadGenerationRef = useRef(0)
   const branchLoadGenerationRef = useRef(0)
+  // 记录最后一次收到有效内容增量（phase / content_delta / citations）的时间戳。
+  // 刷新恢复看门狗据此判断「静默期」：即使流已进入 generation，只要长期无增量
+  // （worker 挂起 / 事件丢失），也强制复位，避免 UI 永久卡在「正在生成回答」。
+  const lastStreamActivityRef = useRef(0)
+  // 记录用户手动停止过的 turnId：刷新恢复逻辑必须跳过这些 turn，
+  // 否则用户点「停止」后消息 content 为空 + turnId 存在，会再次触发重连 →
+  // 「停止后 1 秒又变回正在生成回答」。此集合仅会话内有效（刷新页面后清空，
+  // 但刷新后若 turn 真的还在跑，仍会正常恢复）。
+  const manuallyStoppedTurnIdsRef = useRef(new Set<string>())
 
   const selectedKnowledgeBase = useMemo(
     () => knowledgeBases.find((knowledgeBase) => knowledgeBase.id === selectedKbId) ?? null,
@@ -384,13 +379,6 @@ export function AssistantPage({ services }: V2PageProps) {
   }, [checkCurrentFavorite, isStreaming, selectedConversationId])
 
   useEffect(() => {
-    setSearchState('empty')
-    setSearchHits([])
-    setPreviewState('empty')
-    setPreviewDocument(null)
-  }, [selectedKbId])
-
-  useEffect(() => {
     if (isStreaming) return
     if (selectedConversationId && branchesState === 'loading') return
     void loadMessages(selectedConversationId, activeBranchId ?? undefined)
@@ -427,6 +415,7 @@ export function AssistantPage({ services }: V2PageProps) {
         updateTransientAssistant(generation, (message) => ({ ...message, id: event.messageId, streaming: true }))
         break
       case 'phase':
+        lastStreamActivityRef.current = Date.now()
         if (event.phase === 'retrieval_started' || event.phase === 'retrieval_completed') {
           setStreamState('retrieval')
           setStreamPhase('retrieval')
@@ -436,12 +425,14 @@ export function AssistantPage({ services }: V2PageProps) {
         }
         break
       case 'content_delta':
+        lastStreamActivityRef.current = Date.now()
         setStreamState('generation')
         setStreamPhase('generation')
         setStreamContent((current) => current + event.delta)
         updateTransientAssistant(generation, (message) => ({ ...message, streaming: true, content: message.content + event.delta }))
         break
       case 'citations':
+        lastStreamActivityRef.current = Date.now()
         setStreamCitations(event.items)
         updateTransientAssistant(generation, (message) => ({ ...message, citations: event.items }))
         break
@@ -517,6 +508,8 @@ export function AssistantPage({ services }: V2PageProps) {
     handle.abort()
     streamHandleRef.current = null
     cancelRequestedRef.current = false
+    // 记录手动停止的 turn，刷新恢复逻辑会跳过它（防止停止后 content 为空触发重连）
+    if (turnId) manuallyStoppedTurnIdsRef.current.add(turnId)
     if (result.state !== 'ready' || !result.data) {
       setStreamState('error')
       setStreamFinishReason('error')
@@ -568,6 +561,7 @@ export function AssistantPage({ services }: V2PageProps) {
     setOperationNotice(null)
     setComposerValue('')
     setLastQuestion(question)
+    lastStreamActivityRef.current = Date.now()
     const userMessage: AssistantDisplayMessage = {
       id: makeLocalMessageId('user', generation),
       role: 'user',
@@ -659,14 +653,26 @@ export function AssistantPage({ services }: V2PageProps) {
         return
       }
       const controller = new AbortController()
+      // PH4-3 刷新恢复总体超时：SSE 连接建立后若长时间（默认 90s）既未收到终态、
+      // 也无任何有效增量，强制中断并复位为 error，避免与后端「无限心跳」叠加造成
+      // UI 永久卡在「正在生成回答」。
+      let streamTimedOut = false
+      const streamTimeoutId = window.setTimeout(() => {
+        streamTimedOut = true
+        controller.abort()
+      }, 90_000)
       streamHandleRef.current = {
         turnId,
         messageId: assistantMessageId,
         conversationId,
-        abort: () => controller.abort(),
+        abort: () => {
+          window.clearTimeout(streamTimeoutId)
+          controller.abort()
+        },
       }
       let buffer = ''
       const finish = (state: StreamState, finishReason: QaFinishReason) => {
+        window.clearTimeout(streamTimeoutId)
         if (generation !== streamGenerationRef.current) return
         streamHandleRef.current = null
         setStreamState(state)
@@ -705,6 +711,7 @@ export function AssistantPage({ services }: V2PageProps) {
           if (typeof envelope.seq === 'number') setLatestRealSequence(envelope.seq)
           switch (eventName) {
             case 'turn.stage': {
+              lastStreamActivityRef.current = Date.now()
               const phaseState = String(envelope.state ?? '')
               if (phaseState === 'RETRIEVING') { setStreamState('retrieval'); setStreamPhase('retrieval') }
               else if (phaseState === 'STREAMING') { setStreamState('generation'); setStreamPhase('generation') }
@@ -714,6 +721,7 @@ export function AssistantPage({ services }: V2PageProps) {
             case 'message.delta': {
               const delta = typeof envelope.delta === 'string' ? envelope.delta : ''
               if (!delta) break
+              lastStreamActivityRef.current = Date.now()
               setStreamState('generation')
               setStreamPhase('generation')
               setStreamContent((current) => current + delta)
@@ -749,6 +757,7 @@ export function AssistantPage({ services }: V2PageProps) {
         if (buffer.trim()) handleBlock(buffer)
         // 流自然结束但未收到终态事件：以当前真实状态收尾
         if (generation === streamGenerationRef.current && streamHandleRef.current) {
+          window.clearTimeout(streamTimeoutId)
           streamHandleRef.current = null
           setStreamState('done')
           setStreamPhase('done')
@@ -756,7 +765,20 @@ export function AssistantPage({ services }: V2PageProps) {
           void loadMessages(conversationId, branchId)
         }
       } catch (err) {
+        window.clearTimeout(streamTimeoutId)
         if (generation !== streamGenerationRef.current) return
+        if ((err as Error).name === 'AbortError' && streamTimedOut) {
+          // 刷新恢复 SSE 总体超时：长时间无终态/无增量，强制复位避免卡死
+          streamHandleRef.current = null
+          setStreamState('error')
+          setStreamPhase('done')
+          setStreamFinishReason('error')
+          setStreamError({ code: 'REGENERATE_STREAM_TIMEOUT', message: '回答流长时间无响应，已停止监听；可点击「重试」重新发起。' })
+          updateAssistantMessageById(assistantMessageId, (message) => ({ ...message, streaming: false, finishReason: 'error' }))
+          void loadBranches(conversationId)
+          void loadMessages(conversationId, branchId)
+          return
+        }
         if ((err as Error).name === 'AbortError') {
           // 用户主动停止（handleCancel 已调用服务端 cancel 并同步流状态）
           streamHandleRef.current = null
@@ -777,20 +799,18 @@ export function AssistantPage({ services }: V2PageProps) {
     [loadBranches, loadMessages, updateAssistantMessageById],
   )
 
-  // PH4-6：context 诊断面板使用的 turn_id（最后一条带 turn_id 的 assistant 消息，回退到当前流 turn）。
-  const diagnosticTurnId = useMemo(() => {
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const message = messages[i]
-      if (message.role === 'assistant' && message.turnId) return message.turnId
-    }
-    return streamTurnId || ''
-  }, [messages, streamTurnId])
 
   // PH4-3 刷新恢复：会话消息加载后，若最后一条 assistant 消息为非终态（内容为空且
   // 携带 turn_id），查询 turn 状态；非终态则用 Last-Event-ID 重连 SSE，从断点继续增量更新。
   // 切换会话不会取消后台 turn；此处仅在非终态时重连事件流（spec 02 §11.1）。
   // 注意：RUNNING 期间 assistant 消息内容为空（仅在 turn 终态化时持久化），
   // 因此用 last_seq 作为游标重放事件不会造成内容重复。
+  //
+  // 防卡死双层护栏（P0）：
+  //  1. turn 状态查询 8s 超时——失败/超时即复位消息（不再静默 return 导致 UI 停在「正在回答」）。
+  //  2. 看门狗改为「静默期」判断：SSE 重连后若 45s 内没有任何有效内容增量
+  //     （含 generation 阶段——此前仅查 starting/retrieval，漏掉了最易卡死的生成阶段），
+  //     强制复位为 error，避免与后端无限心跳叠加造成永久卡死。
   useEffect(() => {
     if (isStreaming) return
     if (messagesState !== 'ready') return
@@ -798,27 +818,70 @@ export function AssistantPage({ services }: V2PageProps) {
     const lastMsg = messages[messages.length - 1]
     if (!lastMsg || lastMsg.role !== 'assistant' || !lastMsg.turnId || lastMsg.content) return
     const turnId = lastMsg.turnId
+    // 用户手动停止过的 turn：不触发恢复（防止「停止后 1 秒又变回正在生成回答」）
+    if (manuallyStoppedTurnIdsRef.current.has(turnId)) return
+    // 消息 status 已是终态（completed/stopped/failed/cancelled）也不触发恢复
+    const msgStatus = (lastMsg.status ?? '').toLowerCase()
+    if (['completed', 'stopped', 'failed', 'cancelled', 'error'].includes(msgStatus)) return
     const assistantMessageId = lastMsg.id
     const conversationId = selectedConversationId
     const branchId = activeBranchId ?? ''
     let cancelled = false
+    // 看门狗：基于「静默期」判断。重置恢复开始时的时间戳，后续由
+    // subscribeRegenerateStream 的 message.delta / turn.stage 持续刷新。
+    lastStreamActivityRef.current = Date.now()
+    const watchdogTimer = setTimeout(() => {
+      if (cancelled) return
+      const idleMs = Date.now() - lastStreamActivityRef.current
+      // 45s 内无任何有效增量（含 generation 阶段）→ 判定为卡死，强制复位。
+      if (idleMs < 45_000) return
+      // 仅当仍处于非终态流式阶段才干预（done/cancelled/error 已收尾则不动）
+      setStreamState((prev) => {
+        if (['starting', 'retrieval', 'generation'].includes(prev)) {
+          setStreamError({ code: 'REFRESH_RECOVERY_TIMEOUT', message: '刷新恢复超时：长时间未收到新的回答内容，已停止监听。可点击「重试」重新发起。' })
+          setStreamFinishReason('error')
+          updateAssistantMessageById(assistantMessageId, (message) => ({ ...message, streaming: false, finishReason: 'error' }))
+          return 'error'
+        }
+        return prev
+      })
+    }, 45_000)
     void (async () => {
       const token = readAuthToken()
       if (!token || cancelled) return
       let turnState = ''
       let lastSeq = 0
+      let statusQueryFailed = false
       try {
+        const ac = new AbortController()
+        const timer = setTimeout(() => ac.abort(), 8000)
         const resp = await fetch(`${CHAT_API_BASE}/chat/turns/${encodeURIComponent(turnId)}`, {
           headers: { Authorization: `Bearer ${token}` },
+          signal: ac.signal,
         })
+        clearTimeout(timer)
         if (!resp.ok || cancelled) return
         const data = (await resp.json()) as { turn?: { state?: string; last_seq?: number; last_event_seq?: number } }
         turnState = data.turn?.state ?? ''
         lastSeq = (data.turn?.last_event_seq ?? data.turn?.last_seq) ?? 0
       } catch {
-        return
+        // 状态查询失败/超时/取消：无法确认 turn 是否仍在跑。为避免 UI 永久卡在
+        // 「正在生成回答」，复位消息为非终态流式，并保留 turnId 供重试/重新生成使用。
+        statusQueryFailed = true
       }
       if (cancelled) return
+      if (statusQueryFailed) {
+        updateAssistantMessageById(assistantMessageId, (message) => ({
+          ...message,
+          streaming: false,
+          finishReason: 'error',
+        }))
+        setStreamState('error')
+        setStreamPhase('done')
+        setStreamFinishReason('error')
+        setStreamError({ code: 'REFRESH_STATUS_QUERY_FAILED', message: '无法确认该回答的最新状态，已停止恢复；可点击「重试」重新发起。' })
+        return
+      }
       // 终态：canonical 消息已是最终状态，无需重连
       if (['COMPLETED', 'STOPPED', 'FAILED'].includes(turnState)) return
       // 非终态：重连 SSE，携带 Last-Event-ID 续传
@@ -844,7 +907,7 @@ export function AssistantPage({ services }: V2PageProps) {
       updateAssistantMessageById(assistantMessageId, (message) => ({ ...message, streaming: true }))
       void subscribeRegenerateStream(generation, turnId, assistantMessageId, conversationId, branchId, lastSeq)
     })()
-    return () => { cancelled = true }
+    return () => { cancelled = true; clearTimeout(watchdogTimer) }
   }, [activeBranchId, isStreaming, messages, messagesState, selectedConversationId, subscribeRegenerateStream, updateAssistantMessageById])
 
   // Regenerate：fork 新分支重新生成回答（spec 02 §7）。
@@ -921,10 +984,6 @@ export function AssistantPage({ services }: V2PageProps) {
   )
 
   const handleNewConversation = useCallback(() => {
-    if (isStreaming) {
-      setOperationNotice('当前回答仍在流式生成，请先停止后再新建会话。')
-      return
-    }
     setSelectedConversationId('')
     setBranchesState('empty')
     setBranches([])
@@ -935,15 +994,13 @@ export function AssistantPage({ services }: V2PageProps) {
     setStreamState('idle')
     setStreamPhase(null)
     setStreamCitations([])
-    setPreviewState('empty')
-    setPreviewDocument(null)
     setOperationNotice('已清空当前工作区；首次提问将由服务端创建新会话。')
   }, [isStreaming])
 
   const handleSelectConversation = useCallback((conversationId: string) => {
-    if (isStreaming) {
-      setOperationNotice('当前回答仍在流式生成，停止后才能切换会话。')
-      return
+    // 切换会话时若正在流式生成，自动停止当前流（避免状态混乱）
+    if (isStreaming && streamHandleRef.current) {
+      streamHandleRef.current.abort()
     }
     setSelectedConversationId(conversationId)
     setBranchesState('empty')
@@ -953,29 +1010,8 @@ export function AssistantPage({ services }: V2PageProps) {
     setMessagesState('loading')
     setStreamState('idle')
     setStreamCitations([])
-    setPreviewState('empty')
-    setPreviewDocument(null)
     setOperationNotice(null)
   }, [isStreaming])
-
-  const handleSelectBranch = useCallback(async (branchId: string) => {
-    if (isStreaming) {
-      setOperationNotice('当前回答仍在流式生成，停止后才能切换分支。')
-      return
-    }
-    if (!selectedConversationId || !branchId || branchId === activeBranchId) return
-    const result = await services.conversations.setActiveBranch(selectedConversationId, branchId)
-    if (result.state !== 'ready') {
-      setOperationNotice(formatOperationError(result.error, 'CONVERSATION_BRANCH_SWITCH_FAILED', '会话分支切换失败。'))
-      return
-    }
-    setActiveBranchId(branchId)
-    setMessages([])
-    setMessagesState('loading')
-    setMessagesError(null)
-    setOperationNotice('会话分支已切换，正在加载当前分支消息。')
-    await loadMessages(selectedConversationId, branchId)
-  }, [activeBranchId, isStreaming, loadMessages, selectedConversationId, services.conversations])
 
   const handleDeleteConversation = useCallback(async () => {
     if (!selectedConversation || isStreaming || !window.confirm(`确认删除会话「${selectedConversation.title || '未命名会话'}」？`)) return
@@ -1047,24 +1083,6 @@ export function AssistantPage({ services }: V2PageProps) {
     window.setTimeout(() => URL.revokeObjectURL(url), 0)
   }, [isStreaming, messages, messagesState, selectedConversation?.title, selectedConversationId])
 
-  const handleSearch = useCallback(async () => {
-    if (!selectedKbId || !searchQuery.trim()) return
-    setSearchState('loading')
-    setSearchHits([])
-    const result = await services.search.search(searchQuery.trim(), selectedKbId)
-    setSearchState(result.state)
-    setSearchHits(result.data ?? [])
-  }, [searchQuery, selectedKbId, services.search])
-
-  const handleOpenDocument = useCallback(async (documentId: string) => {
-    if (!selectedKbId) return
-    setPreviewState('loading')
-    setPreviewDocument(null)
-    const result = await services.documents.get(selectedKbId, documentId)
-    setPreviewState(result.state)
-    setPreviewDocument(result.data ?? null)
-  }, [selectedKbId, services.documents])
-
   const handleFeedback = useCallback(async (messageId: string, rating: FeedbackRating) => {
     if (!messageId || messageId.startsWith('app-v2-')) return
     const reason = rating === 'UP' ? '回答解决了我的问题' : '回答缺少足够依据'
@@ -1108,40 +1126,17 @@ export function AssistantPage({ services }: V2PageProps) {
         <header className="v2-m4-chat-header">
           <div className="v2-m4-mobile-toggles">
             <button type="button" onClick={() => setLeftRailOpen((open) => !open)} aria-expanded={leftRailOpen}><SidebarSimple size={15} />会话</button>
-            <button type="button" onClick={() => setContextRailOpen((open) => !open)} aria-expanded={contextRailOpen}><SidebarSimple size={15} />上下文</button>
           </div>
           <div className="v2-m4-chat-title">
             <p className="v2-eyebrow">AI ASSISTANT / STREAM V2</p>
             <h1>{selectedConversation?.title || (streamConversationId ? '正在加载新会话' : '新会话')}</h1>
             <div className="v2-m4-chat-subtitle">
               <label>当前知识库
-                <select aria-label="选择当前授权知识库" value={selectedKbId} onChange={(event) => setSelectedKbId(event.target.value)} disabled={knowledgeState === 'loading' || isStreaming}>
+                <select aria-label="选择当前授权知识库" value={selectedKbId} onChange={(event) => setSelectedKbId(event.target.value)} disabled={knowledgeState === 'loading'}>
                   <option value="">不使用知识库（通用模式）</option>
                   {knowledgeBases.map((knowledgeBase) => <option value={knowledgeBase.id} key={knowledgeBase.id}>{knowledgeBase.name}</option>)}
                 </select>
               </label>
-              {branches.length > 0 ? (
-                <label>分支
-                  <select
-                    aria-label="选择会话分支"
-                    value={activeBranchId ?? ''}
-                    onChange={(event) => void handleSelectBranch(event.target.value)}
-                    disabled={branchesState === 'loading' || isStreaming}
-                  >
-                    {branches.map((branch, index) => <option value={branch.id} key={branch.id}>{branchOptionLabel(branch, index)}</option>)}
-                  </select>
-                </label>
-              ) : null}
-              {selectedKnowledgeBase ? (
-                <span className="v2-m4-turn-badge" title={`知识库增强模式：${selectedKnowledgeBase.name}`}>
-                  知识库增强：{selectedKnowledgeBase.name}
-                </span>
-              ) : (
-                <span className="v2-m4-turn-badge" title="未选中知识库，将使用通用模型知识作答">
-                  通用模型知识模式
-                </span>
-              )}
-              {streamTurnId ? <span className="v2-m4-turn-badge">turn_id 已绑定</span> : null}
             </div>
           </div>
           <div className="v2-m4-chat-actions">
@@ -1191,11 +1186,6 @@ export function AssistantPage({ services }: V2PageProps) {
         ) : null}
         <div className="v2-m4-stream-bar" data-state={streamState}>
           <div className="v2-m4-stream-stage"><span className="v2-m4-stage-dot" />{assistantStateMessage ?? '等待你的问题'}</div>
-          <div className="v2-m4-stream-meta">
-            <span>{streamPhase ? `阶段：${streamPhase === 'retrieval' ? '检索' : streamPhase === 'generation' ? '生成' : '完成'}` : '阶段：—'}</span>
-            <span>{latestRealSequence === null ? '最近真实 seq：无可用 seq' : `最近真实 seq：${latestRealSequence}`}</span>
-            {streamRequestId ? <span>request_id：{streamRequestId}</span> : null}
-          </div>
         </div>
         {knowledgeState === 'loading' ? <StatePanel state="loading" message="正在加载当前主体有权使用的知识库。" /> : null}
         {knowledgeState === 'permission-denied' || knowledgeState === 'error' ? <StatePanel state={knowledgeState} message="授权知识库加载失败，无法开始问答。" /> : null}
@@ -1217,11 +1207,10 @@ export function AssistantPage({ services }: V2PageProps) {
             conversationId={selectedConversationId || streamConversationId}
             lastQuestion={lastQuestion}
           />
-          {streamState === 'done' && streamFinishReason !== 'refusal' && streamCitations.length === 0 ? <div className="v2-m4-no-citations"><Archive size={14} />当前回答未返回引用，右侧仅显示你主动检索的真实结果。</div> : null}
         </section>
         <AssistantComposer
           value={composerValue}
-          disabled={knowledgeState !== 'ready' || isStreaming}
+          disabled={knowledgeState !== 'ready'}
           streaming={isStreaming}
           capabilities={composerCapabilities}
           models={composerModels}
@@ -1236,21 +1225,6 @@ export function AssistantPage({ services }: V2PageProps) {
           onPromoteAttachment={handlePromoteAttachment}
         />
       </main>
-      <AssistantContextPanel
-        open={contextRailOpen}
-        selectedKnowledgeBase={selectedKnowledgeBase}
-        citations={streamCitations}
-        searchQuery={searchQuery}
-        searchState={searchState}
-        searchHits={searchHits}
-        previewState={previewState}
-        previewDocument={previewDocument}
-        turnId={diagnosticTurnId}
-        onSearchQueryChange={setSearchQuery}
-        onSearch={() => void handleSearch()}
-        onOpenCitation={(documentId) => void handleOpenDocument(documentId)}
-        onOpenSearchHit={(documentId) => void handleOpenDocument(documentId)}
-      />
     </div>
   )
 }

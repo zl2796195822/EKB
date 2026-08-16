@@ -6,8 +6,11 @@
 .v2-assistant-columns {
   position: relative;
   display: grid;
-  grid-template-columns: 240px minmax(0, 1fr) 272px;
-  min-height: calc(100vh - 65px);
+  grid-template-columns: 240px minmax(0, 1fr);
+  /* 固定高度而非 min-height：整体不随内容撑高 body。
+     两个子列（侧边栏 + 聊天区）各自内部滚动，页面不出现整页滚动。 */
+  height: calc(100vh - 65px);
+  overflow: hidden;
   background: var(--v2-color-canvas);
   color: var(--v2-color-ink);
 }
@@ -271,7 +274,10 @@
 .v2-m4-chat {
   display: flex;
   flex-direction: column;
-  min-height: calc(100vh - 65px);
+  /* 固定高度而非 min-height：避免消息变长时撑高整个文档导致 body 滚动。
+     聊天区占满 header 以下视口高度，由 .v2-m4-chat-scroll 独立承接滚动。 */
+  height: calc(100vh - 65px);
+  overflow: hidden;
   background: var(--v2-color-canvas);
 }
 
@@ -409,7 +415,6 @@
 .v2-m4-stream-stage,
 .v2-m4-stream-meta,
 .v2-m4-protocol-notice,
-.v2-m4-no-citations,
 .v2-m4-stream-note {
   display: flex;
   align-items: center;
@@ -447,8 +452,7 @@
 }
 
 .v2-m4-operation-notice,
-.v2-m4-protocol-notice,
-.v2-m4-no-citations {
+.v2-m4-protocol-notice {
   margin: 10px 26px 0;
   padding: 8px 10px;
   border: 1px solid color-mix(in srgb, var(--v2-color-secondary) 30%, transparent);
@@ -506,9 +510,12 @@
 
 .v2-m4-chat-scroll {
   flex: 1 1 auto;
-  min-height: 180px;
-  overflow: auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
   padding: 14px 26px 8px;
+  /* 触控板 / 触摸设备平滑滚动 */
+  overscroll-behavior: contain;
 }
 
 .v2-m4-chat-empty {
@@ -547,7 +554,10 @@
 .v2-m4-message-list {
   display: grid;
   gap: 24px;
-  width: min(100%, 820px);
+  /* 消息区宽度自适应：右栏移除后中间列更宽，取中间列 86%，上限 1160px，下限 760px。
+     原固定 820px 居中在大屏三栏布局下两侧留白过多；改为随中间列增长的响应式上限，
+     与输入框（.v2-m4-composer）采用同一宽度策略，避免消息窄、输入框宽的视觉割裂。 */
+  width: min(100%, clamp(760px, 86%, 1160px));
   margin: 0 auto;
 }
 
@@ -558,6 +568,7 @@
 .v2-m4-message--user {
   justify-self: end;
   width: min(88%, 640px);
+  text-align: right;
 }
 
 .v2-m4-message--assistant {
@@ -742,7 +753,9 @@
 
 .v2-m4-composer {
   flex: 0 0 auto;
-  margin: 9px 26px 22px;
+  /* 输入框与消息区同宽策略：大屏随中间列增长，避免输入框全宽、消息区窄的割裂感 */
+  width: min(100%, clamp(760px, 86%, 1160px));
+  margin: 9px auto 22px;
   padding: 10px;
   border: 1px solid var(--v2-color-border);
   border-radius: 10px;
@@ -1395,7 +1408,7 @@
   .v2-m4-chat-header, .v2-m4-stream-bar { padding-inline: 18px; }
   .v2-m4-chat-scroll { padding-inline: 18px; }
   .v2-m4-composer { margin-inline: 18px; }
-  .v2-m4-chat > .v2-state-panel, .v2-m4-operation-notice, .v2-m4-protocol-notice, .v2-m4-no-citations, .v2-m4-message-state { margin-inline: 18px; }
+  .v2-m4-chat > .v2-state-panel, .v2-m4-operation-notice, .v2-m4-protocol-notice, .v2-m4-message-state { margin-inline: 18px; }
 }
 
 @media (max-width: 980px) {
@@ -1411,7 +1424,7 @@
   .v2-m4-history { display: none; }
   .v2-m4-history--mobile-open { position: absolute; z-index: 13; top: 0; left: 0; display: flex; width: min(300px, calc(100% - 18px)); height: 100%; box-shadow: var(--v2-shadow-popover); }
   .v2-m4-context--mobile-open { width: min(310px, calc(100% - 18px)); }
-  .v2-m4-chat { min-height: calc(100vh - 58px); }
+  .v2-m4-chat { height: calc(100vh - 58px); min-height: 0; overflow: hidden; }
   .v2-m4-chat-header { display: grid; grid-template-columns: 1fr auto; gap: 9px; padding: 13px 12px 10px; }
   .v2-m4-mobile-toggles { grid-column: 1 / -1; justify-content: space-between; }
   .v2-m4-chat-title h1 { font-size: 17px; }
@@ -1419,7 +1432,7 @@
   .v2-m4-chat-actions .v2-m4-delete-button { display: inline-grid; width: 29px; padding: 0; }
   .v2-m4-stream-bar { display: grid; gap: 4px; min-height: 49px; padding: 7px 12px; }
   .v2-m4-stream-meta { justify-content: flex-start; }
-  .v2-m4-chat > .v2-state-panel, .v2-m4-operation-notice, .v2-m4-protocol-notice, .v2-m4-no-citations, .v2-m4-message-state { margin-inline: 12px; }
+  .v2-m4-chat > .v2-state-panel, .v2-m4-operation-notice, .v2-m4-protocol-notice, .v2-m4-message-state { margin-inline: 12px; }
   .v2-m4-chat-scroll { min-height: 190px; padding: 12px 12px 7px; }
   .v2-m4-message { max-width: 100%; }
   .v2-m4-message--user { width: 94%; }

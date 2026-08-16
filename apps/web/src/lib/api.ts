@@ -314,6 +314,11 @@ export class SseStreamParser {
   messageId = ''
   conversationId = ''
 
+  /** 是否已收到 done 终态事件。askStream 据此判断「流自然结束但未收到终态」。 */
+  get finished(): boolean {
+    return this.closed
+  }
+
   /**
    * @param expectedTurnId 已知 turn_id（来自 X-Turn-Id 响应头）。留空时进入 latch 模式：
    *   从第一个 request 事件自动锁定 turn_id，避免「预解析丢首块」问题。
@@ -947,22 +952,59 @@ export class ApiClient {
     const decoder = new TextDecoder()
 
     // 所有 chunk 直接喂给 parser（含首块），不再预解析丢事件。
+    // 「无数据块超时」兜底：SSE v2 后端每 15s（EKB_SSE_V2_HEARTBEAT）至少推送一个
+    // 心跳注释块。若连续 IDLE_TIMEOUT_MS 内 reader.read() 没有任何数据块到达，说明连接
+    // 已死（后台挂起 / 网络断开 / TCP 半开连接——reader.read() 既不会 resolve 也不会
+    // reject），强制终止并报错，避免 UI 永久卡在「正在生成回答」。有心跳的正常慢流
+    // （深度思考 / 检索阶段）不受影响。
+    const IDLE_TIMEOUT_MS = 45_000
+    let idleTimedOut = false
+    let idleTimer: ReturnType<typeof setTimeout> | undefined
+    const clearIdleTimer = () => {
+      if (idleTimer !== undefined) {
+        clearTimeout(idleTimer)
+        idleTimer = undefined
+      }
+    }
+    const armIdleTimer = () => {
+      clearIdleTimer()
+      idleTimer = setTimeout(() => {
+        idleTimedOut = true
+        // reader.cancel() 使挂起的 read 以 { done: true } 返回，优雅退出循环
+        void reader.cancel()
+      }, IDLE_TIMEOUT_MS)
+    }
     void (async () => {
       try {
+        armIdleTimer()
         while (true) {
           const { done, value } = await reader.read()
+          clearIdleTimer()
           const chunk = decoder.decode(value ?? new Uint8Array(), { stream: !done })
           parser.push(chunk)
-          if (done) break
+          if (done) {
+            // 流自然结束但从未收到 done 终态事件（后端异常断开）：按错误收尾，
+            // 避免 UI 停在流式态。
+            if (!parser.finished && !idleTimedOut) {
+              handlers.onError?.({ code: 'STREAM_ENDED_ABRUPTLY', message: '回答流意外结束，未收到完成事件。' })
+            }
+            break
+          }
+          if (!idleTimedOut) armIdleTimer()
         }
       } catch (err) {
         if ((err as Error).name === 'AbortError') {
-          // 用户主动取消，不做协议层错误
+          // 用户主动取消（handle.abort），不做协议层错误
         } else {
           handlers.onError?.({ code: 'STREAM_READ_ERROR', message: (err as Error).message })
         }
       } finally {
+        clearIdleTimer()
         parser.close()
+      }
+      // 无数据超时：连接疑似死亡，以错误收尾，让上层复位流状态并允许重试
+      if (idleTimedOut) {
+        handlers.onError?.({ code: 'STREAM_IDLE_TIMEOUT', message: '回答流长时间未收到数据，连接可能已断开，已自动终止。' })
       }
     })()
 

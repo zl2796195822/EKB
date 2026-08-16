@@ -170,8 +170,7 @@ export function AssistantSidebar({
                   key={conversation.id}
                   className={conversation.id === selectedConversationId ? 'v2-m4-session-item is-selected' : 'v2-m4-session-item'}
                   onClick={() => onSelectConversation(conversation.id)}
-                  disabled={streaming}
-                  title={streaming ? '回答生成中，完成后才能切换会话。' : undefined}
+                  title={undefined}
                 >
                   <span className="v2-m4-session-item-title">{conversation.title || '未命名会话'}</span>
                   <time dateTime={conversation.updatedAt}>{formatConversationTime(conversation.updatedAt)}</time>
