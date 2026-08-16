@@ -126,7 +126,7 @@ def test_remote_url_and_response_failures_are_sanitized() -> None:
     assert "response-secret" not in str(response_error.value)
 
 
-def test_profile_client_uses_exact_tenant_and_actor_runtime_provider(monkeypatch) -> None:
+def test_profile_client_shares_tenant_runtime_provider_and_isolates_tenant(monkeypatch) -> None:
     engine = build_engine("sqlite:///:memory:")
     with engine.begin() as connection:
         connection.execute(
@@ -175,10 +175,24 @@ def test_profile_client_uses_exact_tenant_and_actor_runtime_provider(monkeypatch
     assert client.embed(texts=["x"], profile=_profile()) == [[0.1, 0.2, 0.3]]
     assert calls == [("tenant-a", "actor-a")]
 
+    # TEAM sharing: another member of the same tenant resolves the admin's
+    # provider/model rows and can build a working client.
+    shared_client = build_embedding_client(
+        engine=engine,
+        tenant_id="tenant-a",
+        user_id="actor-b",
+        profile=_profile(),
+        http_post=lambda *_args: b'{"data":[{"embedding":[0.1,0.2,0.3]}]}',
+    )
+    assert shared_client.embed(texts=["x"], profile=_profile()) == [[0.1, 0.2, 0.3]]
+    assert calls == [("tenant-a", "actor-a"), ("tenant-a", "actor-b")]
+
+    # Tenant isolation is preserved: another tenant must fail closed.
     with pytest.raises(EmbeddingUnavailable):
         build_embedding_client(
             engine=engine,
-            tenant_id="tenant-a",
+            tenant_id="tenant-b",
             user_id="actor-b",
             profile=_profile(),
         )
+    assert calls == [("tenant-a", "actor-a"), ("tenant-a", "actor-b")]

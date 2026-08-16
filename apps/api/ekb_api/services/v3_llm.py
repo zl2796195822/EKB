@@ -233,7 +233,7 @@ def _upsert_provider_secret(session, auth: AuthContext, provider_id: str, plaint
     except Exception as exc:  # normalize crypto/config errors at the API boundary
         raise _secret_error(exc) from exc
 
-    is_admin = str(auth.tenant_role) in ("OWNER", "ADMIN")
+    is_admin = auth.tenant_role.value in ("OWNER", "ADMIN")
     scope = "TEAM" if is_admin else "PERSONAL"
     ownership_key = "TEAM" if is_admin else f"USER:{auth.actor_id}"
     owner_user = None if is_admin else auth.actor_id
@@ -702,7 +702,7 @@ def get_llm_provider(auth: AuthContext, provider_id: str) -> LLMProvider | None:
 
 
 def create_llm_provider(auth: AuthContext, data: dict) -> LLMProvider:
-    if str(auth.tenant_role) not in ("OWNER", "ADMIN"):
+    if auth.tenant_role.value not in ("OWNER", "ADMIN"):
         raise _permission_denied()
     preset_provider_id = data.get("preset_provider_id")
     provider_secret = data.get("api_key")
@@ -801,7 +801,7 @@ def create_llm_provider(auth: AuthContext, data: dict) -> LLMProvider:
 
 
 def update_llm_provider(auth: AuthContext, provider_id: str, data: dict) -> LLMProvider:
-    if str(auth.tenant_role) not in ("OWNER", "ADMIN"):
+    if auth.tenant_role.value not in ("OWNER", "ADMIN"):
         raise _permission_denied()
     SessionLocal = get_session_local()
     with SessionLocal() as session:
@@ -871,7 +871,7 @@ def update_llm_provider(auth: AuthContext, provider_id: str, data: dict) -> LLMP
 
 
 def delete_llm_provider(auth: AuthContext, provider_id: str) -> bool:
-    if str(auth.tenant_role) not in ("OWNER", "ADMIN"):
+    if auth.tenant_role.value not in ("OWNER", "ADMIN"):
         raise _permission_denied()
     if provider_id.startswith("preset:"):
         return False
@@ -1023,7 +1023,7 @@ def get_llm_model(auth: AuthContext, model_id: str) -> LLMModel | None:
 
 
 def create_llm_model(auth: AuthContext, provider_id: str, data: dict) -> LLMModel:
-    if str(auth.tenant_role) not in ("OWNER", "ADMIN"):
+    if auth.tenant_role.value not in ("OWNER", "ADMIN"):
         raise _permission_denied()
     if provider_id.startswith("preset:"):
         raise ApiError(status.HTTP_400_BAD_REQUEST, "INVALID_REQUEST", "预设服务商未保存，无法添加模型。请先创建 Provider 实例。")
@@ -1096,7 +1096,7 @@ def create_llm_model(auth: AuthContext, provider_id: str, data: dict) -> LLMMode
 
 
 def update_llm_model(auth: AuthContext, model_id: str, data: dict) -> LLMModel:
-    if str(auth.tenant_role) not in ("OWNER", "ADMIN"):
+    if auth.tenant_role.value not in ("OWNER", "ADMIN"):
         raise _permission_denied()
     SessionLocal = get_session_local()
     with SessionLocal() as session:
@@ -1153,7 +1153,7 @@ def update_llm_model(auth: AuthContext, model_id: str, data: dict) -> LLMModel:
 
 
 def delete_llm_model(auth: AuthContext, model_id: str) -> bool:
-    if str(auth.tenant_role) not in ("OWNER", "ADMIN"):
+    if auth.tenant_role.value not in ("OWNER", "ADMIN"):
         raise _permission_denied()
     SessionLocal = get_session_local()
     with SessionLocal() as session:
@@ -1257,7 +1257,7 @@ def _fetch_remote_models(provider_row: dict[str, Any], api_key: str) -> list[dic
 
 
 def sync_models_from_provider(auth: AuthContext, provider_id: str) -> dict:
-    if str(auth.tenant_role) not in ("OWNER", "ADMIN"):
+    if auth.tenant_role.value not in ("OWNER", "ADMIN"):
         raise _permission_denied()
     if provider_id.startswith("preset:"):
         raise ApiError(

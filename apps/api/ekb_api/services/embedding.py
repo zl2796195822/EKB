@@ -107,7 +107,12 @@ def _provider_for_profile(
     user_id: str,
     profile: EmbeddingProfile,
 ):
-    """Resolve the exact actor-scoped runtime model referenced by a profile."""
+    """Resolve the tenant-scoped runtime model referenced by a profile.
+
+    Admin (OWNER/ADMIN) credentials are stored TEAM-scoped, so any active
+    member of the same tenant may resolve them; cross-tenant access fails
+    closed.
+    """
 
     from ekb_api.core.config import get_runtime_embedding_providers
 
@@ -124,19 +129,18 @@ def _provider_for_profile(
                 "provider": profile.llm_provider_id,
                 "model": profile.model_id,
                 "tenant": tenant_id,
-                "user": user_id,
                 "enabled": True,
             },
         ).first()
     if row is None:
-        raise EmbeddingUnavailable("embedding provider is not available for this actor")
+        raise EmbeddingUnavailable("embedding provider is not available for this tenant")
 
     expected_name = f"{row.provider_key}/{row.model_id}"
     providers = get_runtime_embedding_providers(tenant_id=tenant_id, user_id=user_id)
     for provider in providers:
         if provider.name == expected_name and provider.kind == "embedding":
             return provider
-    raise EmbeddingUnavailable("embedding provider is not available for this actor")
+    raise EmbeddingUnavailable("embedding provider is not available for this tenant")
 
 
 class OpenAICompatibleEmbeddingClient:
@@ -425,8 +429,21 @@ def ensure_kb_profile(
     return profile_id
 
 
+def _txn(engine):
+    """Return a transaction context for an Engine or an open Connection.
+
+    ensure_kb_profile passes its own connection so profile + generation wiring
+    commits atomically; a Connection must not call begin() again.
+    """
+    from contextlib import nullcontext
+
+    if hasattr(engine, "execute") and not hasattr(engine, "dispose"):
+        return nullcontext(engine)
+    return engine.begin()
+
+
 def build_generation(
-    engine: Engine,
+    engine,
     *,
     tenant_id: str,
     kb_id: str,
@@ -438,7 +455,7 @@ def build_generation(
 
     generation_id = str(uuid4())
     now = utc_now()
-    with engine.begin() as connection:
+    with _txn(engine) as connection:
         connection.execute(
             text(
                 "INSERT INTO index_generations "
@@ -465,7 +482,7 @@ def build_generation(
 
 
 def swap_active_generation(
-    engine: Engine,
+    engine,
     *,
     tenant_id: str,
     kb_id: str,
@@ -478,7 +495,7 @@ def swap_active_generation(
     coexist.  Raises ``RuntimeError`` (surfaced as INDEX_ACTIVATION_FAILED) when
     the target generation is not in ``READY`` state.
     """
-    with engine.begin() as connection:
+    with _txn(engine) as connection:
         target = connection.execute(
             text(
                 "SELECT state FROM index_generations WHERE id=:id AND tenant_id=:tenant"

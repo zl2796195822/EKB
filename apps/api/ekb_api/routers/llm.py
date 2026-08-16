@@ -173,7 +173,7 @@ def _model_dict(m: LLMModel) -> dict[str, Any]:
 def get_me_llm_providers(
     auth: Annotated[AuthContext, Depends(get_live_auth_context)],
 ) -> dict[str, Any]:
-    is_admin = str(auth.tenant_role) in ("OWNER", "ADMIN")
+    is_admin = auth.tenant_role.value in ("OWNER", "ADMIN")
     providers = list_llm_providers(auth)
     return {"items": [_provider_dict(p, is_admin=is_admin) for p in providers]}
 
@@ -191,7 +191,7 @@ def get_me_llm_provider(
     provider_id: str,
     auth: Annotated[AuthContext, Depends(get_live_auth_context)],
 ) -> dict[str, Any]:
-    is_admin = str(auth.tenant_role) in ("OWNER", "ADMIN")
+    is_admin = auth.tenant_role.value in ("OWNER", "ADMIN")
     provider = get_llm_provider(auth, provider_id)
     if provider is None:
         from ekb_api.core.errors import ApiError
