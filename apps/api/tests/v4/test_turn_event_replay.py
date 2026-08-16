@@ -25,6 +25,7 @@ from ekb_api.services.retry_policy import RetryPolicy
 from ekb_api.services.turns import (
     CANCEL_REQUESTED,
     COMPLETED,
+    FAILED,
     QUEUED,
     STOPPED,
     STREAMING,
@@ -588,3 +589,118 @@ def test_delta_batcher_flushes_on_threshold() -> None:
     assert batcher3.has_pending() is True
     batcher3.flush()
     assert batcher3.has_pending() is False
+
+
+# ---------------------------------------------------------------------------
+# 空转熔断（P0）：刷新恢复事件流连续无新事件 → turn 置 FAILED + 发 turn.failed
+# ---------------------------------------------------------------------------
+
+
+def test_fail_idle_turn_transitions_stuck_turn_to_failed(tmp_path: Path) -> None:
+    """_fail_idle_turn 把卡死的 STREAMING turn CAS 到 FAILED 并追加 turn.failed 事件。"""
+    from ekb_api.routers.chat_graph import _fail_idle_turn
+
+    database = tmp_path / "ph4_idle.db"
+    engine = build_engine(f"sqlite:///{database}")
+    prepare_legacy_schema(engine, seed=True)
+    assert _apply_migrations(database) == 0
+
+    with engine.begin() as conn:
+        _seed_tenant_and_user(conn, "tenant-idle", "user-idle")
+        _seed_conversation(conn, "conv-idle", "tenant-idle", "user-idle")
+        conn.execute(
+            text(
+                "INSERT INTO qa_turns (turn_id, request_id, client_turn_id,"
+                " tenant_id, actor_id, conversation_id, stream_version,"
+                " status, last_seq, state_version, created_at, updated_at) "
+                "VALUES ('turn-idle','req','cti','tenant-idle','user-idle',"
+                "'conv-idle','v2','STREAMING',3,0,'2026-08-14T00:00:00Z',"
+                "'2026-08-14T00:00:00Z')"
+            )
+        )
+
+    # 已有 3 个 delta 事件（模拟流到一半 worker 挂起）
+    store = TurnEventStore(engine)
+    for i in range(3):
+        store.append(
+            tenant_id="tenant-idle",
+            turn_id="turn-idle",
+            event_type="message.delta",
+            payload={"delta": f"chunk-{i}"},
+        )
+
+    sse = _fail_idle_turn(
+        tenant_id="tenant-idle",
+        turn_id="turn-idle",
+        conversation_id="conv-idle",
+        assistant_message_id=None,
+        engine=engine,
+    )
+
+    # 1) 返回 turn.failed 的 SSE 片段
+    assert "turn.failed" in sse
+    assert "STREAM_IDLE_TIMEOUT" in sse
+
+    # 2) turn 状态已置 FAILED
+    service = TurnService(engine)
+    turn = service.get(tenant_id="tenant-idle", turn_id="turn-idle")
+    assert turn.state == FAILED
+
+    # 3) 事件存储里新增了 turn.failed 终态事件
+    events = store.replay(
+        tenant_id="tenant-idle", turn_id="turn-idle", after_seq=3
+    )
+    failed_events = [e for e in events if e.event_type == "turn.failed"]
+    assert len(failed_events) == 1
+    assert failed_events[0].payload["code"] == "STREAM_IDLE_TIMEOUT"
+    assert failed_events[0].payload["retryable"] is True
+
+
+def test_fail_idle_turn_is_idempotent_when_already_terminal(tmp_path: Path) -> None:
+    """已终态的 turn 再次熔断不应重复写 turn.failed 事件。"""
+    from ekb_api.routers.chat_graph import _fail_idle_turn
+
+    database = tmp_path / "ph4_idle_term.db"
+    engine = build_engine(f"sqlite:///{database}")
+    prepare_legacy_schema(engine, seed=True)
+    assert _apply_migrations(database) == 0
+
+    with engine.begin() as conn:
+        _seed_tenant_and_user(conn, "tenant-term", "user-term")
+        _seed_conversation(conn, "conv-term", "tenant-term", "user-term")
+        conn.execute(
+            text(
+                "INSERT INTO qa_turns (turn_id, request_id, client_turn_id,"
+                " tenant_id, actor_id, conversation_id, stream_version,"
+                " status, last_seq, state_version, terminal_event, created_at,"
+                " updated_at, completed_at) "
+                "VALUES ('turn-term','req','cti','tenant-term','user-term',"
+                "'conv-term','v2','FAILED',3,0,'turn.failed',"
+                "'2026-08-14T00:00:00Z','2026-08-14T00:00:00Z',"
+                "'2026-08-14T00:00:00Z')"
+            )
+        )
+
+    store = TurnEventStore(engine)
+    store.append(
+        tenant_id="tenant-term",
+        turn_id="turn-term",
+        event_type="turn.failed",
+        payload={"code": "GENERATION_ERROR", "message": "already failed"},
+    )
+
+    sse = _fail_idle_turn(
+        tenant_id="tenant-term",
+        turn_id="turn-term",
+        conversation_id="conv-term",
+        assistant_message_id=None,
+        engine=engine,
+    )
+    # 已终态：不重复写（返回空 SSE）
+    assert sse == ""
+
+    events = store.replay(
+        tenant_id="tenant-term", turn_id="turn-term", after_seq=0
+    )
+    failed_events = [e for e in events if e.event_type == "turn.failed"]
+    assert len(failed_events) == 1  # 仍是原来那一条

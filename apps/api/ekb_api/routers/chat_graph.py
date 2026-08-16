@@ -38,6 +38,10 @@ from ekb_api.services.conversations import (
 )
 from ekb_api.services.titles import ConversationTitleService, fallback_title
 from ekb_api.services.turns import (
+    FAILED,
+    QUEUED,
+    RETRIEVING,
+    STREAMING,
     TurnNotFound,
     TurnService,
     TurnTerminalConflict,
@@ -109,6 +113,65 @@ def _graph() -> ConversationGraphService:
 
 def _turns() -> TurnService:
     return TurnService(get_engine())
+
+
+def _fail_idle_turn(
+    *,
+    tenant_id: str,
+    turn_id: str,
+    conversation_id: Optional[str],
+    assistant_message_id: Optional[str],
+    engine=None,
+) -> str:
+    """空转熔断：把长时间无进展的 turn CAS 到 FAILED，写 turn.failed 事件，返回其 SSE。
+
+    触发条件：刷新恢复事件流（GET /chat/turns/{turn_id}/events）连续 idle_limit 秒
+    只发 heartbeat、无任何新事件 —— 判定 worker 挂起或事件丢失。若不置 FAILED，
+    前端会反复重连且 UI 永久卡在「正在生成回答」。
+
+    竞争处理：与 worker 的 finish() 一样逐个尝试活跃状态做 CAS；若已被其他路径
+    置终态（TurnTerminalConflict / TurnTransitionError），静默放弃（不重复写事件）。
+    engine 供测试注入独立引擎；默认使用全局 get_engine()。
+    """
+    from ekb_api.services.generation_worker import TurnEventStore  # noqa: PLC0415
+
+    engine = engine or get_engine()
+    service = TurnService(engine)
+    event_store = TurnEventStore(engine)
+    # 1) 先取当前状态做 CAS（尝试所有可 FAILED 的活跃态，成功即 break）。
+    #    只有「本路径成功完成 CAS 到 FAILED」才写 turn.failed 事件——
+    #    若 turn 已被其他路径置终态，直接返回空（不重复写事件，幂等）。
+    failed_turn = None
+    for expected in (STREAMING, RETRIEVING, QUEUED):
+        try:
+            failed_turn = service.finish(
+                tenant_id=tenant_id,
+                turn_id=turn_id,
+                expected_state=expected,
+                terminal_state=FAILED,
+                finish_reason="error",
+                last_seq=0,
+            )
+            break
+        except (TurnTerminalConflict, TurnTransitionError):
+            continue
+    if failed_turn is None or failed_turn.state != FAILED:
+        return ""
+    # 2) 追加 turn.failed 终态事件（terminal_seq 由 append 原子分配）
+    event = event_store.append(
+        tenant_id=tenant_id,
+        turn_id=turn_id,
+        event_type="turn.failed",
+        payload={
+            "conversation_id": conversation_id or "",
+            "turn_id": turn_id,
+            "message_id": assistant_message_id or "",
+            "code": "STREAM_IDLE_TIMEOUT",
+            "message": "回答长时间无进展（空闲超时），已自动终止。可点击「重试」重新发起。",
+            "retryable": True,
+        },
+    )
+    return event.to_sse(turn_id)
 
 
 def _titles() -> ConversationTitleService:
@@ -577,8 +640,15 @@ def stream_turn_events(
         # (PH3 will replace this with a more efficient mechanism)
         import time
 
+        from ekb_api.core.config import get_settings
+
         last_seq = events[-1].seq if events else cursor_seq
-        max_polls = 7200  # 2 hours at 1s interval
+        idle_heartbeats = 0
+        # 空转熔断：连续 idle_limit 秒仅心跳、无新事件 → turn 卡死，置 FAILED 收尾。
+        # 默认 120s（EKB_CHAT_EVENTS_IDLE_TIMEOUT），避免 worker 挂起/事件丢失时
+        # 前端无限重连或永久卡在「正在生成回答」。
+        idle_limit = int(get_settings().chat_events_idle_timeout)
+        max_polls = 7200  # 2 hours at 1s interval (hard safety cap)
         for _ in range(max_polls):
             time.sleep(1.0)
             new_events = event_store.replay(
@@ -587,8 +657,18 @@ def stream_turn_events(
                 after_seq=last_seq,
             )
             if not new_events:
+                idle_heartbeats += 1
+                if idle_heartbeats >= idle_limit:
+                    yield _fail_idle_turn(
+                        tenant_id=auth.tenant_id,
+                        turn_id=turn_id,
+                        conversation_id=turn.conversation_id,
+                        assistant_message_id=turn.assistant_message_id,
+                    )
+                    return
                 yield ": heartbeat\n\n"
                 continue
+            idle_heartbeats = 0
             for event in new_events:
                 yield event.to_sse(turn_id)
                 last_seq = event.seq

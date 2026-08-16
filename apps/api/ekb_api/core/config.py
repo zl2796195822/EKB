@@ -136,6 +136,10 @@ class Settings:
     sse_v2_generation_idle_timeout: float
     # 心跳间隔秒数：无事件时每若干秒发 heartbeat，防止代理断连
     sse_v2_heartbeat_interval: float
+    # 刷新恢复事件流（GET /chat/turns/{turn_id}/events）的空转熔断：
+    # 连续 N 秒仅有 heartbeat、无任何新事件时，视为 turn 卡死（worker 挂起/事件丢失），
+    # 将 turn 置 FAILED 并发送 turn.failed 收尾，避免前端无限重连 / 永久卡在「正在生成回答」。
+    chat_events_idle_timeout: float
     # Feature flag：是否启用 Conversation Stream v2（可灰度关闭）
     sse_v2_enabled: bool
     # Delta 合并：单包 token 数阈值（同时满足 3 条件任意一个则 flush）
@@ -363,6 +367,8 @@ def get_settings() -> Settings:
             os.getenv("EKB_SSE_V2_GENERATION_IDLE_TIMEOUT", "10")
         ),
         sse_v2_heartbeat_interval=float(os.getenv("EKB_SSE_V2_HEARTBEAT", "15")),
+        # 刷新恢复事件流空转熔断：默认 120s 无新事件即熔断置 FAILED。
+        chat_events_idle_timeout=float(os.getenv("EKB_CHAT_EVENTS_IDLE_TIMEOUT", "120")),
         sse_v2_enabled=os.getenv("EKB_SSE_V2_ENABLED", "true").lower() == "true",
         sse_v2_delta_max_tokens=int(os.getenv("EKB_SSE_V2_DELTA_TOKENS", "2")),
         sse_v2_delta_max_bytes=int(os.getenv("EKB_SSE_V2_DELTA_BYTES", "128")),
